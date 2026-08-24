@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Settings | IGSP</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+</head>
+<body class="dashboard-body">
+    <div class="dashboard-shell">
+        <aside class="dashboard-sidebar">
+            <div class="sidebar-brand">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
+            </div>
+
+            <div class="sidebar-menu-block">
+                <div class="sidebar-menu-label">Supplier Dashboard</div>
+                <a href="{{ url_for('dashboard') }}" class="sidebar-btn">Dashboard</a>
+                <a href="{{ url_for('supplier_settings') }}" class="sidebar-btn">Settings</a>
+            </div>
+        </aside>
+
+        <main class="dashboard-main">
+            <header class="dashboard-header">
+                <div class="dashboard-profile-summary">
+                    <div class="dashboard-profile-name">{{ user.contact_name or user.company_name }}</div>
+                    <div class="dashboard-profile-role">Supplier</div>
+                    <div class="dashboard-status">
+                        {% if user.active %}
+                            <span class="status-badge active">Active</span>
+                        {% else %}
+                            <span class="status-badge inactive">Inactive</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="dashboard-actions">
+                    <a href="{{ url_for('notifications') }}" class="dashboard-notification" aria-label="Notifications">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+                        </svg>
+                        {% if unread_notifications > 0 %}
+                            <span class="notification-badge">{{ unread_notifications }}</span>
+                        {% endif %}
+                    </a>
+                    <a class="dashboard-logout" href="{{ url_for('logout') }}">Logout</a>
+                </div>
+            </header>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <section class="dashboard-panel">
+                <div class="panel-head">
+                    <h3>Settings</h3>
+                </div>
+
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <div class="settings-card-header">
+                            <div>
+                                <h4>Two-Factor Authentication</h4>
+                                {% if two_fa %}
+                                    <span class="status-badge active" style="margin-top:6px; display:inline-block;">Enabled</span>
+                                    <p style="margin-top:8px; color:var(--text-light);">Your account is protected with 2FA.</p>
+                                {% else %}
+                                    <span class="status-badge inactive" style="margin-top:6px; display:inline-block;">Not Enabled</span>
+                                    <p style="margin-top:8px; color:var(--text-light);">Add an extra layer of security to your account.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <a href="{{ url_for('supplier_setup_2fa') }}" class="dashboard-cta" style="display:inline-flex; margin-top:12px;">
+                            {{ 'Manage 2FA' if two_fa else 'Enable 2FA' }}
+                        </a>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <footer class="footer">
+        <p>NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
+    </footer>
+</body>
+</html>

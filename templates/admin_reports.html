@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Reports | IGSP</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body class="admin-body">
+    <div class="admin-shell">
+        <aside class="admin-sidebar">
+            <div class="admin-brand">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
+            </div>
+
+            <div class="admin-menu-block">
+                <div class="admin-menu-label">Administration</div>
+                <a href="{{ url_for('admin_dashboard') }}" class="admin-btn">Dashboard</a>
+                <a href="{{ url_for('admin_reports') }}" class="admin-btn admin-btn-active">Reports</a>
+                <a href="{{ url_for('admin_suppliers') }}" class="admin-btn">Suppliers</a>
+                <a href="{{ url_for('admin_applications') }}" class="admin-btn">Applications</a>
+                <a href="{{ url_for('admin_logout') }}" class="admin-btn" style="background:#dc3545;">Logout</a>
+            </div>
+        </aside>
+
+        <main class="admin-main">
+            <header class="admin-header">
+                <div>
+                    <div class="admin-profile-name">Reports & Analytics</div>
+                    <div class="admin-profile-role">Power BI View</div>
+                </div>
+
+                <div class="admin-actions">
+                    <a href="{{ url_for('admin_notifications') }}" class="dashboard-notification" aria-label="Notifications">
+                        
+                        {% if unread_notifications > 0 %}
+                            <span class="notification-badge">{{ unread_notifications }}</span>
+                        {% endif %}
+                    </a>
+                    <a class="admin-logout" href="{{ url_for('admin_logout') }}">Logout</a>
+                </div>
+            </header>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <section class="admin-panel">
+                <div class="admin-panel-head">
+                    <h3>Filter Applications</h3>
+                </div>
+                <form method="get" class="reports-filter-form" id="reportsFilterForm">
+                    <div class="reports-filter-grid">
+                        <div class="reports-filter-field">
+                            <label for="search">Search</label>
+                            <input type="text" id="search" name="search" placeholder="Company or contact name..." value="{{ search or '' }}">
+                        </div>
+                        <div class="reports-filter-field">
+                            <label for="status">Status</label>
+                            <select id="status" name="status">
+                                <option value="">All Statuses</option>
+                                {% for status in all_statuses %}
+                                    <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status|replace('_', ' ')|title }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="reports-filter-field">
+                            <label for="category">Category</label>
+                            <select id="category" name="category">
+                                <option value="">All Categories</option>
+                                {% for category in all_categories %}
+                                    <option value="{{ category }}" {% if category_filter == category %}selected{% endif %}>{{ category }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="reports-filter-field">
+                            <label for="date_from">From Date</label>
+                            <input type="date" id="date_from" name="date_from" value="{{ date_from or '' }}">
+                        </div>
+                        <div class="reports-filter-field">
+                            <label for="date_to">To Date</label>
+                            <input type="date" id="date_to" name="date_to" value="{{ date_to or '' }}">
+                        </div>
+                    </div>
+                    <div class="reports-filter-actions">
+                        <button type="submit" class="filter-btn">Apply Filters</button>
+                        <a href="{{ url_for('admin_reports') }}" class="filter-btn filter-btn-secondary">Reset</a>
+                    </div>
+                </form>
+            </section>
+
+            <section class="reports-slicer-bar">
+                <div class="slicer-label">Slicer</div>
+                <div class="slicer-tabs">
+                    <button class="slicer-tab slicer-tab-active" data-filter="all" onclick="applySlicer('all', this)">All</button>
+                    <button class="slicer-tab" data-filter="submitted" onclick="applySlicer('submitted', this)">Submitted</button>
+                    <button class="slicer-tab" data-filter="pending_review" onclick="applySlicer('pending_review', this)">Pending Review</button>
+                    <button class="slicer-tab" data-filter="approved" onclick="applySlicer('approved', this)">Approved</button>
+                    <button class="slicer-tab" data-filter="rejected" onclick="applySlicer('rejected', this)">Rejected</button>
+                </div>
+            </section>
+
+            <section class="reports-kpi-grid">
+                <div class="report-kpi-card">
+                    <div class="kpi-icon kpi-active">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                    </div>
+                    <div class="kpi-content">
+                        <span class="kpi-label">Active Suppliers</span>
+                        <span class="kpi-value" id="kpi-active">{{ active_suppliers }}</span>
+                    </div>
+                </div>
+                <div class="report-kpi-card">
+                    <div class="kpi-icon kpi-inactive">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </div>
+                    <div class="kpi-content">
+                        <span class="kpi-label">Inactive Suppliers</span>
+                        <span class="kpi-value" id="kpi-inactive">{{ inactive_suppliers }}</span>
+                    </div>
+                </div>
+                <div class="report-kpi-card">
+                    <div class="kpi-icon kpi-applications">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                            <polyline points="10 9 9 9 8 9"/>
+                        </svg>
+                    </div>
+                    <div class="kpi-content">
+                        <span class="kpi-label">Total Applications</span>
+                        <span class="kpi-value" id="kpi-applications">{{ total_applications }}</span>
+                    </div>
+                </div>
+                <div class="report-kpi-card">
+                    <div class="kpi-icon kpi-pending">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                    </div>
+                    <div class="kpi-content">
+                        <span class="kpi-label">Pending Review</span>
+                        <span class="kpi-value" id="kpi-pending">{{ pending_count }}</span>
+                    </div>
+                </div>
+                <div class="report-kpi-card">
+                    <div class="kpi-icon kpi-approved">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                    </div>
+                    <div class="kpi-content">
+                        <span class="kpi-label">Approved</span>
+                        <span class="kpi-value" id="kpi-approved">{{ approved_count }}</span>
+                    </div>
+                </div>
+                <div class="report-kpi-card">
+                    <div class="kpi-icon kpi-rejected">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="15" y1="9" x2="9" y2="15"/>
+                            <line x1="9" y1="9" x2="15" y2="15"/>
+                        </svg>
+                    </div>
+                    <div class="kpi-content">
+                        <span class="kpi-label">Rejected</span>
+                        <span class="kpi-value" id="kpi-rejected">{{ rejected_count }}</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="reports-charts-grid reports-charts-top">
+                <div class="report-chart-card">
+                    <div class="chart-header">
+                        <h4>Applications Trend</h4>
+                        <span class="chart-badge">Monthly</span>
+                    </div>
+                    <div class="chart-body">
+                        <canvas id="lineChart"></canvas>
+                    </div>
+                </div>
+                <div class="report-chart-card">
+                    <div class="chart-header">
+                        <h4>Status Distribution</h4>
+                        <span class="chart-badge">Pie</span>
+                    </div>
+                    <div class="chart-body">
+                        <canvas id="pieChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <section class="reports-charts-grid reports-charts-bottom">
+                <div class="report-chart-card">
+                    <div class="chart-header">
+                        <h4>Applications by Category</h4>
+                        <span class="chart-badge">Bar</span>
+                    </div>
+                    <div class="chart-body">
+                        <canvas id="barChart"></canvas>
+                    </div>
+                </div>
+                <div class="report-chart-card">
+                    <div class="chart-header">
+                        <h4>Document Status</h4>
+                        <span class="chart-badge">Doughnut</span>
+                    </div>
+                    <div class="chart-body">
+                        <canvas id="doughnutChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <section class="reports-table-section">
+                <div class="admin-panel-head">
+                    <h3>Detailed Applications</h3>
+                    <span class="results-count" id="results-count">{{ recent_applications|length }} records</span>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="admin-table" id="reportsTable">
+                        <thead>
+                            <tr>
+                                <th>Company</th>
+                                <th>Contact</th>
+                                <th>Category</th>
+                                <th>Status</th>
+                                <th>Documents</th>
+                                <th>Submitted</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for app in recent_applications %}
+                                <tr class="data-row" data-status="{{ app.status }}">
+                                    <td>{{ app.company_name }}</td>
+                                    <td>{{ app.contact_name }}</td>
+                                        <td>
+                                            {% for ac in app.application_categories %}
+                                                {% if not loop.first %}, {% endif %}
+                                                {{ ac.category }}
+                                            {% endfor %}
+                                        </td>
+                                    <td>
+                                        <span class="admin-badge admin-badge-{{ app.status }}">
+                                            {{ app.status|replace('_', ' ')|title }}
+                                        </span>
+                                    </td>
+                                    <td>{{ app.documents_status|title }}</td>
+                                    <td>{{ app.created_at.strftime('%Y-%m-%d') if app.created_at else 'N/A' }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        const allApplications = {{ all_applications_json | tojson }};
+        const chartMonths = {{ chart_labels | tojson }};
+        const baseAppTrend = {{ chart_app_trend | tojson }};
+        const baseSupplierTrend = {{ chart_supplier_trend | tojson }};
+
+        let lineChart, pieChart, barChart, doughnutChart;
+
+        function formatMonthLabel(key) {
+            if (!key || key === 'Unknown') return key || 'Unknown';
+            const [y, m] = key.split('-');
+            const date = new Date(parseInt(y), parseInt(m) - 1);
+            return date.toLocaleString('default', { month: 'short', year: 'numeric' });
+        }
+
+        function buildMonthIndexMap(months) {
+            const map = {};
+            months.forEach((m, idx) => { map[m] = idx; });
+            return map;
+        }
+
+        const monthIndexMap = buildMonthIndexMap(chartMonths);
+
+        function aggregateByMonth(apps) {
+            const counts = {};
+            apps.forEach(a => {
+                if (a.created_at && a.created_at !== 'N/A') {
+                    const d = new Date(a.created_at);
+                    const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+                    counts[key] = (counts[key] || 0) + 1;
+                }
+            });
+            return counts;
+        }
+
+        function aggregateByStatus(apps) {
+            const counts = { submitted: 0, pending_review: 0, approved: 0, rejected: 0 };
+            apps.forEach(a => { counts[a.status] = (counts[a.status] || 0) + 1; });
+            return counts;
+        }
+
+        function aggregateByCategory(apps) {
+            const counts = {};
+            apps.forEach(a => {
+                const cats = a.categories || [];
+                cats.forEach(c => {
+                    counts[c] = (counts[c] || 0) + 1;
+                });
+                if (cats.length === 0) {
+                    counts['Uncategorized'] = (counts['Uncategorized'] || 0) + 1;
+                }
+            });
+            return counts;
+        }
+
+        function aggregateDocStatus(apps) {
+            const counts = { complete: 0, pending: 0 };
+            apps.forEach(a => {
+                if (a.documents_status === 'complete') counts.complete++; else counts.pending++;
+            });
+            return counts;
+        }
+
+        function buildChartData(aggregated, baseData, labels) {
+            return labels.map(m => aggregated[m] || 0);
+        }
+
+        const chartFont = { family: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif", size: 13 };
+        const commonOptions = (extra = {}) => ({
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    labels: {
+                        font: chartFont,
+                        padding: 16,
+                        usePointStyle: true,
+                    }
+                }
+            },
+            scales: extra.scales || {
+                x: { grid: { display: false }, ticks: { font: { size: 12 } } },
+                y: { grid: { color: '#e5e7eb' }, ticks: { font: { size: 12 }, precision: 0 } }
+            }
+        });
+
+        function initCharts() {
+            const lineCtx = document.getElementById('lineChart').getContext('2d');
+            lineChart = new Chart(lineCtx, {
+                type: 'line',
+                data: {
+                    labels: chartMonths.map(formatMonthLabel),
+                    datasets: [
+                        {
+                            label: 'Applications',
+                            data: baseAppTrend,
+                            borderColor: '#ec6e00',
+                            backgroundColor: 'rgba(236, 110, 0, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 5,
+                            pointHoverRadius: 7,
+                        },
+                        {
+                            label: 'Suppliers',
+                            data: baseSupplierTrend,
+                            borderColor: '#28a745',
+                            backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 5,
+                            pointHoverRadius: 7,
+                        }
+                    ]
+                },
+                options: commonOptions()
+            });
+
+            const pieCtx = document.getElementById('pieChart').getContext('2d');
+            pieChart = new Chart(pieCtx, {
+                type: 'pie',
+                data: {
+                    labels: ['Submitted', 'Pending Review', 'Approved', 'Rejected'],
+                    datasets: [{
+                        data: [
+                            {{ status_breakdown.submitted }},
+                            {{ status_breakdown.pending_review }},
+                            {{ status_breakdown.approved }},
+                            {{ status_breakdown.rejected }}
+                        ],
+                        backgroundColor: ['#cce5ff', '#fff3cd', '#d4edda', '#f8d7da'],
+                        borderWidth: 2,
+                        borderColor: '#fff',
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { font: chartFont, padding: 20, usePointStyle: true }
+                        }
+                    }
+                }
+            });
+
+            const barCtx = document.getElementById('barChart').getContext('2d');
+            barChart = new Chart(barCtx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys({{ category_breakdown | tojson }}),
+                    datasets: [{
+                        label: 'Applications',
+                        data: Object.values({{ category_breakdown | tojson }}),
+                        backgroundColor: '#ec6e00',
+                        borderRadius: 8,
+                        borderSkipped: false,
+                    }]
+                },
+                options: commonOptions()
+            });
+
+            const doughnutCtx = document.getElementById('doughnutChart').getContext('2d');
+            doughnutChart = new Chart(doughnutCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Complete', 'Pending'],
+                    datasets: [{
+                        data: [
+                            {{ doc_status_breakdown.complete }},
+                            {{ doc_status_breakdown.pending }}
+                        ],
+                        backgroundColor: ['#28a745', '#ffc107'],
+                        borderWidth: 2,
+                        borderColor: '#fff',
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '60%',
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { font: chartFont, padding: 20, usePointStyle: true }
+                        }
+                    }
+                }
+            });
+        }
+
+        function applySlicer(status, btn) {
+            document.querySelectorAll('.slicer-tab').forEach(t => t.classList.remove('slicer-tab-active'));
+            btn.classList.add('slicer-tab-active');
+
+            const filtered = status === 'all' ? allApplications : allApplications.filter(a => a.status === status);
+
+            const totalSuppliers = {{ total_suppliers }};
+            document.getElementById('kpi-active').textContent = {{ active_suppliers }};
+            document.getElementById('kpi-inactive').textContent = {{ inactive_suppliers }};
+            document.getElementById('kpi-applications').textContent = filtered.length;
+
+            const statusCounts = aggregateByStatus(filtered);
+            document.getElementById('kpi-pending').textContent = statusCounts.pending_review || 0;
+            document.getElementById('kpi-approved').textContent = statusCounts.approved || 0;
+            document.getElementById('kpi-rejected').textContent = statusCounts.rejected || 0;
+
+            const monthAgg = aggregateByMonth(filtered);
+            const newAppTrend = buildChartData(monthAgg, baseAppTrend, chartMonths);
+            lineChart.data.datasets[0].data = newAppTrend;
+            lineChart.data.datasets[1].data = baseSupplierTrend;
+            lineChart.update('none');
+
+            const statusAgg = aggregateByStatus(filtered);
+            pieChart.data.datasets[0].data = [
+                statusAgg.submitted || 0,
+                statusAgg.pending_review || 0,
+                statusAgg.approved || 0,
+                statusAgg.rejected || 0
+            ];
+            pieChart.update('none');
+
+            const catAgg = aggregateByCategory(filtered);
+            barChart.data.labels = Object.keys(catAgg);
+            barChart.data.datasets[0].data = Object.values(catAgg);
+            barChart.update('none');
+
+            const docAgg = aggregateDocStatus(filtered);
+            doughnutChart.data.datasets[0].data = [docAgg.complete || 0, docAgg.pending || 0];
+            doughnutChart.update('none');
+
+            const rows = document.querySelectorAll('#reportsTable .data-row');
+            let visibleCount = 0;
+            rows.forEach(row => {
+                const rowStatus = row.getAttribute('data-status');
+                if (status === 'all' || rowStatus === status) {
+                    row.style.display = '';
+                    visibleCount++;
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+            document.getElementById('results-count').textContent = visibleCount + ' records';
+        }
+
+        document.addEventListener('DOMContentLoaded', initCharts);
+    </script>
+</body>
+</html>

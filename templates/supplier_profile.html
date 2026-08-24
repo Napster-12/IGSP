@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Supplier Profile | IGSP</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+    <style>
+        .directors-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+        .directors-table th,
+        .directors-table td {
+            border: 1px solid var(--border);
+            padding: 10px 12px;
+            text-align: left;
+            font-size: 14px;
+        }
+        .directors-table th {
+            background: #f5f5f5;
+            font-weight: 700;
+        }
+        .directors-table input {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 14px;
+            background: #fafafa;
+            box-sizing: border-box;
+        }
+        .btn-remove-row {
+            background: #dc3545;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .btn-remove-row:hover {
+            background: #c82333;
+        }
+        .btn-add-row {
+            margin-top: 10px;
+            background: #fff;
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 16px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 700;
+        }
+        .btn-add-row:hover {
+            background: #f5f5f5;
+        }
+        .section-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--primary);
+            margin: 24px 0 12px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--primary-light);
+        }
+    </style>
+</head>
+<body class="dashboard-body">
+    <div class="dashboard-shell">
+        <aside class="dashboard-sidebar">
+            <div class="sidebar-brand">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
+            </div>
+
+            <div class="sidebar-menu-block">
+                <div class="sidebar-menu-label">Supplier Dashboard</div>
+                <a href="{{ url_for('onboarding_profile') }}" class="sidebar-btn">Apply</a>
+                <a href="{{ url_for('dashboard') }}" class="sidebar-btn">View Applications</a>
+            </div>
+        </aside>
+
+        <main class="dashboard-main">
+            <header class="dashboard-header">
+                <div class="dashboard-profile-summary">
+                    <div class="dashboard-profile-name">{{ user.contact_name or user.company_name }}</div>
+                    <div class="dashboard-profile-role">Supplier</div>
+                </div>
+
+                <div class="dashboard-actions">
+                    <a href="{{ url_for('notifications') }}" class="dashboard-notification" aria-label="Notifications">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+                        </svg>
+                        {% if unread_notifications > 0 %}
+                            <span class="notification-badge">{{ unread_notifications }}</span>
+                        {% endif %}
+                    </a>
+                    <a class="dashboard-logout" href="{{ url_for('logout') }}">Logout</a>
+                </div>
+            </header>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <section class="dashboard-form-panel">
+                <div class="panel-head">
+                    <h3>Step 2: Complete Company Profile</h3>
+                    <span>Fill in your company information</span>
+                </div>
+
+                <div class="wizard-progress">
+                    <div class="wizard-progress-track"></div>
+                    <div class="wizard-pill active">1. Profile</div>
+                    <div class="wizard-pill">2. Category</div>
+                    <div class="wizard-pill">3. Documents</div>
+                    <div class="wizard-pill">4. Review</div>
+                </div>
+
+                <form class="igsp-form dashboard-form" method="post" enctype="multipart/form-data">
+                    <div class="section-title">Company Registration Details</div>
+                    <div class="form-grid">
+                        <div class="form-row">
+                            <label for="registered_vendor_name">Registered Vendor Name <span style="color:#dc3545;">*</span></label>
+                            <input id="registered_vendor_name" name="registered_vendor_name" type="text" value="{{ draft.registered_vendor_name }}" required>
+                        </div>
+
+                        <div class="form-row">
+                            <label for="trading_name">Trading Name (if applicable)</label>
+                            <input id="trading_name" name="trading_name" type="text" value="{{ draft.trading_name }}">
+                        </div>
+
+                        <div class="form-row">
+                            <label for="business_registration_number">Business Registration Number <span style="color:#dc3545;">*</span></label>
+                            <input id="business_registration_number" name="business_registration_number" type="text" value="{{ draft.business_registration_number }}" required>
+                        </div>
+
+                        <div class="form-row">
+                            <label for="vat_number">VAT Number</label>
+                            <input id="vat_number" name="vat_number" type="text" value="{{ draft.vat_number }}">
+                        </div>
+
+                        <div class="form-row">
+                            <label for="tax_number">Tax Number <span style="color:#dc3545;">*</span></label>
+                            <input id="tax_number" name="tax_number" type="text" value="{{ draft.tax_number }}" required>
+                        </div>
+                    </div>
+
+                    <div class="section-title">Company Address</div>
+                    <div class="form-grid">
+                        <div class="form-row" style="grid-column: 1 / -1;">
+                            <label for="physical_address">Company's Physical Address <span style="color:#dc3545;">*</span></label>
+                            <input id="physical_address" name="physical_address" type="text" value="{{ draft.physical_address }}" required>
+                        </div>
+
+                        <div class="form-row">
+                            <label for="city">City <span style="color:#dc3545;">*</span></label>
+                            <input id="city" name="city" type="text" value="{{ draft.city }}" required>
+                        </div>
+
+                        <div class="form-row">
+                            <label for="province">Province <span style="color:#dc3545;">*</span></label>
+                            <select id="province" name="province" required>
+                                <option value="">Select Province</option>
+                                <option value="Eastern Cape" {% if draft.province == 'Eastern Cape' %}selected{% endif %}>Eastern Cape</option>
+                                <option value="Free State" {% if draft.province == 'Free State' %}selected{% endif %}>Free State</option>
+                                <option value="Gauteng" {% if draft.province == 'Gauteng' %}selected{% endif %}>Gauteng</option>
+                                <option value="KwaZulu-Natal" {% if draft.province == 'KwaZulu-Natal' %}selected{% endif %}>KwaZulu-Natal</option>
+                                <option value="Limpopo" {% if draft.province == 'Limpopo' %}selected{% endif %}>Limpopo</option>
+                                <option value="Mpumalanga" {% if draft.province == 'Mpumalanga' %}selected{% endif %}>Mpumalanga</option>
+                                <option value="Northern Cape" {% if draft.province == 'Northern Cape' %}selected{% endif %}>Northern Cape</option>
+                                <option value="North West" {% if draft.province == 'North West' %}selected{% endif %}>North West</option>
+                                <option value="Western Cape" {% if draft.province == 'Western Cape' %}selected{% endif %}>Western Cape</option>
+                            </select>
+                        </div>
+
+                        <div class="form-row">
+                            <label for="postal_code">Postal Code <span style="color:#dc3545;">*</span></label>
+                            <input id="postal_code" name="postal_code" type="text" value="{{ draft.postal_code }}" required>
+                        </div>
+
+                        <div class="form-row">
+                            <label for="website">Website</label>
+                            <input id="website" name="website" type="text" value="{{ draft.website }}">
+                        </div>
+                    </div>
+
+                    <div class="section-title">Contact Details</div>
+                    <div class="form-grid">
+                        <div class="form-row">
+                            <label for="primary_contact_person">Primary Contact Person <span style="color:#dc3545;">*</span></label>
+                            <input id="primary_contact_person" name="primary_contact_person" type="text" value="{{ draft.primary_contact_person }}" required>
+                        </div>
+
+                        <div class="form-row">
+                            <label for="contact_person_role">Contact Person's Role <span style="color:#dc3545;">*</span></label>
+                            <input id="contact_person_role" name="contact_person_role" type="text" value="{{ draft.contact_person_role }}" required>
+                        </div>
+
+                        <div class="form-row">
+                            <label for="contact_number">Contact Number(s) <span style="color:#dc3545;">*</span></label>
+                            <input id="contact_number" name="contact_number" type="text" value="{{ draft.contact_number }}" required>
+                        </div>
+
+                        <div class="form-row">
+                            <label for="email_address">E-Mail Address <span style="color:#dc3545;">*</span></label>
+                            <input id="email_address" name="email_address" type="email" value="{{ draft.email_address }}" required>
+                        </div>
+                    </div>
+
+                    <div class="section-title">Ownership Details (Directors and Shareholders)</div>
+                    <p style="color:var(--text-light); font-size:14px; margin-bottom:12px;">Provide details for all directors and shareholders.</p>
+                    <button type="button" class="btn-add-row" onclick="addDirectorRow()">+ Add Director / Shareholder</button>
+                    <div style="overflow-x:auto; margin-top:12px;">
+                        <table class="directors-table" id="directors-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:25%;">Initials and Surname <span style="color:#dc3545;">*</span></th>
+                                    <th style="width:20%;">ID Number</th>
+                                    <th style="width:20%;">Role <span style="color:#dc3545;">*</span></th>
+                                    <th style="width:20%;">Nationality <span style="color:#dc3545;">*</span></th>
+                                    <th style="width:15%;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for director in draft.directors %}
+                                <tr>
+                                    <td><input type="text" name="director_initials_{{ loop.index0 }}" value="{{ director.initials_surname }}" placeholder="e.g. J. Doe" required></td>
+                                    <td><input type="text" name="director_id_{{ loop.index0 }}" value="{{ director.id_number }}" placeholder="ID Number"></td>
+                                    <td><input type="text" name="director_role_{{ loop.index0 }}" value="{{ director.role }}" placeholder="Director / Shareholder" required></td>
+                                    <td><input type="text" name="director_nationality_{{ loop.index0 }}" value="{{ director.nationality }}" placeholder="Nationality" required></td>
+                                    <td><button type="button" class="btn-remove-row" onclick="removeRow(this)">Remove</button></td>
+                                </tr>
+                                {% endfor %}
+                                <tr id="director-row-template" style="display:none;">
+                                    <td><input type="text" name="director_initials_{INDEX}" placeholder="e.g.T Test"></td>
+                                    <td><input type="text" name="director_id_{INDEX}" placeholder="ID Number"></td>
+                                    <td><input type="text" name="director_role_{INDEX}" placeholder="Director / Shareholder"></td>
+                                    <td><input type="text" name="director_nationality_{INDEX}" placeholder="Nationality"></td>
+                                    <td><button type="button" class="btn-remove-row" onclick="removeRow(this)">Remove</button></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="form-row" style="margin-top:24px;">
+                        <label>Company Profile</label>
+                        <div class="document-card" style="border-left:4px solid var(--primary);">
+                            <div class="document-card-header">
+                                <span class="document-number">1</span>
+                                <h4>Company Profile</h4>
+                            </div>
+                            {% if company_profile_doc %}
+                                <div class="document-uploaded">
+                                    <span class="document-status-badge">Uploaded</span>
+                                    <a href="javascript:void(0);" class="document-view-link" onclick="togglePdf(this); return false;">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                </a>
+                                <iframe src="/uploads/{{ company_profile_doc.file_path|replace('\\', '/') }}#toolbar=0&navpanes=0" class="pdf-viewer"></iframe>
+                                </div>
+                            {% else %}
+                                <div class="document-uploaded">
+                                    <span class="document-status-badge" style="background:#f8d7da; color:#721c24;">Not Uploaded</span>
+                                </div>
+                            {% endif %}
+                            <div class="document-file-input">
+                                <input type="file" name="document_file_company_profile" id="doc-company-profile">
+                                <label for="doc-company-profile" class="document-file-label">{{ 'Replace File' if company_profile_doc else 'Choose File' }}</label>
+                                <span class="document-selected-name">{{ company_profile_doc.original_filename if company_profile_doc else 'No file chosen' }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="wizard-actions">
+                        <a href="{{ url_for('dashboard') }}" class="filter-btn filter-btn-secondary">Back</a>
+                        <button type="submit" class="filter-btn">Continue</button>
+                    </div>
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <footer class="footer">
+        <p>NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
+    </footer>
+
+    <script>
+        function togglePdf(link) {
+            var iframe = link.parentNode.querySelector('.pdf-viewer');
+            if (!iframe) return;
+            var eye = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+            var eyeOff = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+            if (iframe.style.display === 'none') {
+                iframe.style.display = 'block';
+                link.innerHTML = eyeOff;
+            } else {
+                iframe.style.display = 'none';
+                link.innerHTML = eye;
+            }
+        }
+        let directorCount = {{ draft.directors|length }};
+        function addDirectorRow() {
+            const tbody = document.querySelector('#directors-table tbody');
+            const template = document.getElementById('director-row-template');
+            const clone = template.cloneNode(true);
+            clone.style.display = '';
+            clone.id = '';
+            clone.innerHTML = clone.innerHTML.replace(/{INDEX}/g, directorCount);
+            tbody.appendChild(clone);
+            directorCount++;
+        }
+        function removeRow(btn) {
+            const row = btn.closest('tr');
+            row.parentNode.removeChild(row);
+        }
+        document.querySelectorAll('.document-file-input input[type="file"]').forEach(function (input) {
+            const selectedName = input.closest('.document-file-input').querySelector('.document-selected-name');
+            input.addEventListener('change', function () {
+                if (this.files && this.files[0]) {
+                    selectedName.textContent = this.files[0].name;
+                } else {
+                    selectedName.textContent = 'No file chosen';
+                }
+            });
+        });
+    </script>
+</body>
+</html>
