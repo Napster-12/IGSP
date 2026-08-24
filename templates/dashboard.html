@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Supplier Dashboard | IGSP</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+</head>
+<body class="dashboard-body">
+    <div class="dashboard-shell">
+        <aside class="dashboard-sidebar">
+            <div class="sidebar-brand">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
+            </div>
+
+            <div class="sidebar-menu-block">
+                <div class="sidebar-menu-label">Supplier Dashboard</div>
+                <a href="{{ url_for('onboarding_profile') }}" class="sidebar-btn">Apply</a>
+                <a href="{{ url_for('supplier_settings') }}" class="sidebar-btn">Settings</a>
+            </div>
+        </aside>
+
+        <main class="dashboard-main">
+            <header class="dashboard-header">
+                <div class="dashboard-profile-summary">
+                    <div class="dashboard-profile-name">{{ user.contact_name or user.company_name }}</div>
+                    <div class="dashboard-profile-role">Supplier</div>
+                    <div class="dashboard-status">
+                        {% if user.active %}
+                            <span class="status-badge active">Active</span>
+                        {% else %}
+                            <span class="status-badge inactive">Inactive</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="dashboard-actions">
+                    <a href="{{ url_for('notifications') }}" class="dashboard-notification" aria-label="Notifications">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+                        </svg>
+                        {% if unread_notifications > 0 %}
+                            <span class="notification-badge">{{ unread_notifications }}</span>
+                        {% endif %}
+                    </a>
+                    <a class="dashboard-logout" href="{{ url_for('logout') }}">Logout</a>
+                </div>
+            </header>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <section class="dashboard-cards-grid">
+                <div class="dashboard-card detail-card">
+                    <span class="dashboard-label">Supplier ID</span>
+                    <h2>{{ user.supplier_id or 'N/A' }}</h2>
+                    <p>{{ user.email }}</p>
+                </div>
+
+                <div class="dashboard-card detail-card">
+                    <span class="dashboard-label">Contact Person</span>
+                    <h2>{{ user.contact_name }}</h2>
+                    <p>{{ contact_phone or user.phone }}</p>
+                </div>
+            </section>
+
+            <section class="dashboard-form-panel">
+                <div class="panel-head">
+                    <h3>APPLY NOW</h3>
+                </div>
+
+                <div class="dashboard-hero-actions">
+                    {% if applications %}
+                        <a class="dashboard-cta" href="{{ url_for('edit_application', application_id=applications[0].id) }}">Edit Your Application</a>
+                    {% else %}
+                        <a class="dashboard-cta" href="{{ url_for('onboarding_profile') }}">Start Your Application</a>
+                    {% endif %}
+                </div>
+            </section>
+
+            <section class="dashboard-panel">
+                <div class="panel-head">
+                    <h3>Application Status</h3>
+                </div>
+
+                {% if applications %}
+                    {% for application in applications %}
+                        <div class="app-row">
+                            <div>
+                                <strong>{{ application.company_name }}</strong>
+                                <small>Submitted on {{ application.created_at.strftime('%Y-%m-%d') if application.created_at else 'N/A' }}</small>
+                            </div>
+                            <div>
+                                <span class="status {{ application.status }}">
+                                    {{ application.status|replace('_', ' ')|title }}
+                                </span>
+                                {% if application.review_comments %}
+                                    <div class="review-comment">{{ application.review_comments }}</div>
+                                {% endif %}
+                                <a href="{{ url_for('edit_application', application_id=application.id) }}" class="filter-btn" style="padding:6px 14px; font-size:12px; margin-top:10px; display:inline-block;">Edit Application</a>
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="dashboard-empty">
+                        No applications have been submitted yet.
+                    </div>
+                {% endif %}
+            </section>
+        </main>
+    </div>
+
+    <footer class="footer">
+        <p>NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
+    </footer>
+</body>
+</html>

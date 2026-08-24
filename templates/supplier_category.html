@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Supplier Category | IGSP</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+    <style>
+        .category-section {
+            margin-bottom: 22px;
+        }
+        .section-header {
+            font-weight: 700;
+            font-size: 14px;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--primary-light);
+        }
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 10px 16px;
+        }
+        .checkbox-item label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text);
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: #fff;
+            transition: var(--transition);
+        }
+        .checkbox-item label:hover {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+        .checkbox-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--primary);
+            flex-shrink: 0;
+        }
+        .detail-input {
+            margin-top: 8px;
+            margin-left: 28px;
+        }
+        .detail-input input {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 14px;
+            background: #fafafa;
+            transition: var(--transition);
+        }
+        .detail-input input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(236,110,0,.15);
+            background: #fff;
+        }
+    </style>
+</head>
+<body class="dashboard-body">
+    <div class="dashboard-shell">
+        <aside class="dashboard-sidebar">
+            <div class="sidebar-brand">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
+            </div>
+
+            <div class="sidebar-menu-block">
+                <div class="sidebar-menu-label">Supplier Dashboard</div>
+                <a href="{{ url_for('onboarding_profile') }}" class="sidebar-btn">Apply</a>
+                <a href="{{ url_for('dashboard') }}" class="sidebar-btn">View Applications</a>
+            </div>
+        </aside>
+
+        <main class="dashboard-main">
+            <header class="dashboard-header">
+                <div class="dashboard-profile-summary">
+                    <div class="dashboard-profile-name">{{ user.contact_name or user.company_name }}</div>
+                    <div class="dashboard-profile-role">Supplier</div>
+                </div>
+
+                <div class="dashboard-actions">
+                    <a href="{{ url_for('notifications') }}" class="dashboard-notification" aria-label="Notifications">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+                        </svg>
+                        {% if unread_notifications > 0 %}
+                            <span class="notification-badge">{{ unread_notifications }}</span>
+                        {% endif %}
+                    </a>
+                    <a class="dashboard-logout" href="{{ url_for('logout') }}">Logout</a>
+                </div>
+            </header>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <section class="dashboard-form-panel">
+                <div class="panel-head">
+                    <h3>Step 2: Select Supplier Category</h3>
+                    <span>Choose all categories that apply to your business</span>
+                </div>
+
+                <div class="wizard-progress">
+                    <div class="wizard-progress-track"></div>
+                    <div class="wizard-pill done">1. Profile</div>
+                    <div class="wizard-pill active">2. Category</div>
+                    <div class="wizard-pill">3. Documents</div>
+                    <div class="wizard-pill">4. Review</div>
+                </div>
+
+                <form class="igsp-form dashboard-form" method="post">
+                    <div class="form-row">
+                        <label>Supplier Category</label>
+                        <p style="color:var(--text-light); font-size:14px; margin-bottom:16px;">Select all categories that apply to your business.</p>
+                    </div>
+
+                    {% set selected_set = draft.supplier_categories or [] %}
+                    {% set details = draft.supplier_category_details or {} %}
+
+                    {% for section in CATEGORY_SECTIONS %}
+                        {% if section.name %}
+                        <div class="category-section">
+                            <div class="section-header">{{ section.name }}</div>
+                            <div class="checkbox-grid">
+                        {% else %}
+                        <div class="category-section">
+                            <div class="checkbox-grid">
+                        {% endif %}
+
+                        {% for item in section['items'] %}
+                            <div class="checkbox-item">
+                                <label>
+                                    <input type="checkbox" name="categories" value="{{ item.value }}" {% if item.value in selected_set %}checked{% endif %} data-index="{{ item.index }}">
+                                    {{ item.label }}
+                                </label>
+                                {% if item.specify %}
+                                    <div class="detail-input" data-for="{{ item.index }}">
+                                        <input type="text" name="category_detail_{{ item.index }}" value="{{ details.get(item.value, '') }}" placeholder="Please specify...">
+                                    </div>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+
+                            </div>
+                        </div>
+                    {% endfor %}
+
+                    <div class="wizard-actions">
+                        <a href="{{ url_for('onboarding_profile') }}" class="filter-btn filter-btn-secondary">Back</a>
+                        <button type="submit" class="filter-btn">Continue</button>
+                    </div>
+                </form>
+
+                <script>
+                    function toggleDetailInputs() {
+                        document.querySelectorAll('input[type="checkbox"][name="categories"]').forEach(function(cb) {
+                            const idx = cb.getAttribute('data-index');
+                            const detailDiv = document.querySelector('.detail-input[data-for="' + idx + '"]');
+                            if (detailDiv) {
+                                detailDiv.style.display = cb.checked ? 'block' : 'none';
+                            }
+                        });
+                    }
+
+                    document.addEventListener('DOMContentLoaded', function() {
+                        document.querySelectorAll('input[type="checkbox"][name="categories"]').forEach(function(cb) {
+                            cb.addEventListener('change', toggleDetailInputs);
+                        });
+                        toggleDetailInputs();
+                    });
+                </script>
+            </section>
+        </main>
+    </div>
+
+    <footer class="footer">
+        <p>NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
+    </footer>
+</body>
+</html>

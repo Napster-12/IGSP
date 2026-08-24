@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin Dashboard | IGSP</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+</head>
+<body class="admin-body">
+    <div class="admin-shell">
+        <aside class="admin-sidebar">
+            <div class="admin-brand">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
+            </div>
+
+            <div class="admin-menu-block">
+                <div class="admin-menu-label">Administration</div>
+                <a href="{{ url_for('admin_dashboard') }}" class="admin-btn">Dashboard</a>
+                <a href="{{ url_for('admin_reports') }}" class="admin-btn">Reports</a>
+                <a href="{{ url_for('admin_suppliers') }}" class="admin-btn">Suppliers</a>
+                <a href="{{ url_for('admin_applications') }}" class="admin-btn">Applications</a>
+                <a href="{{ url_for('admin_logout') }}" class="admin-btn" style="background:#dc3545;">Logout</a>
+            </div>
+        </aside>
+
+        <main class="admin-main">
+            <header class="admin-header">
+                <div>
+                    <div class="admin-profile-name">{{ admin.name }}</div>
+                    <div class="admin-profile-role">Administrator</div>
+                </div>
+
+                <div class="admin-actions">
+                    <a href="{{ url_for('admin_notifications') }}" class="dashboard-notification" aria-label="Notifications">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+                        </svg>
+                        {% if unread_notifications > 0 %}
+                            <span class="notification-badge">{{ unread_notifications }}</span>
+                        {% endif %}
+                    </a>
+                    <a class="admin-logout" href="{{ url_for('admin_logout') }}">Logout</a>
+                </div>
+            </header>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <section class="admin-cards-grid">
+                <div class="admin-card">
+                    <span class="admin-card-label">Total Suppliers</span>
+                    <span class="admin-card-value">{{ total_suppliers }}</span>
+                </div>
+                <div class="admin-card">
+                    <span class="admin-card-label">Total Applications</span>
+                    <span class="admin-card-value">{{ total_applications }}</span>
+                </div>
+                <div class="admin-card">
+                    <span class="admin-card-label">Pending Review</span>
+                    <span class="admin-card-value">{{ pending_count }}</span>
+                </div>
+                <div class="admin-card">
+                    <span class="admin-card-label">Approved</span>
+                    <span class="admin-card-value">{{ approved_count }}</span>
+                </div>
+            </section>
+
+            <section class="admin-panel">
+                <div class="admin-panel-head">
+                    <h3>Recent Applications</h3>
+                    <a href="{{ url_for('admin_applications') }}" class="admin-btn-sm admin-btn-primary">View All</a>
+                </div>
+
+                {% if recent_applications %}
+                    <div style="overflow-x:auto;">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>Company</th>
+                                    <th>Contact</th>
+                                    <th>Category</th>
+                                    <th>Status</th>
+                                    <th>Submitted</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for app in recent_applications %}
+                                    <tr class="clickable-row" data-href="{{ url_for('admin_application_detail', application_id=app.id) }}">
+                                        <td>{{ app.company_name }}</td>
+                                        <td>{{ app.contact_name }}</td>
+                                        <td>
+                                            {% for ac in app.application_categories %}
+                                                {% if not loop.first %}, {% endif %}
+                                                {{ ac.category }}
+                                            {% endfor %}
+                                        </td>
+                                        <td>
+                                            <span class="admin-badge admin-badge-{{ app.status }}">
+                                                {{ app.status|replace('_', ' ')|title }}
+                                            </span>
+                                        </td>
+                                        <td>{{ app.created_at.strftime('%Y-%m-%d') if app.created_at else 'N/A' }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="dashboard-empty">No applications found.</div>
+                {% endif %}
+            </section>
+        </main>
+    </div>
+
+    <script>
+        document.querySelectorAll('.clickable-row').forEach(function(row) {
+            row.addEventListener('click', function() {
+                const href = this.dataset.href;
+                if (href) {
+                    window.location.href = href;
+                }
+            });
+        });
+    </script>
+</body>
+</html>

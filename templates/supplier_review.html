@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Review Supplier Application | IGSP</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+</head>
+<body class="dashboard-body">
+    <div class="dashboard-shell">
+        <aside class="dashboard-sidebar">
+            <div class="sidebar-brand">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
+            </div>
+
+            <div class="sidebar-menu-block">
+                <div class="sidebar-menu-label">Supplier Dashboard</div>
+                <a href="{{ url_for('onboarding_profile') }}" class="sidebar-btn">Apply</a>
+                <a href="{{ url_for('dashboard') }}" class="sidebar-btn">View Applications</a>
+            </div>
+        </aside>
+
+        <main class="dashboard-main">
+            <header class="dashboard-header">
+                <div class="dashboard-profile-summary">
+                    <div class="dashboard-profile-name">{{ user.contact_name or user.company_name }}</div>
+                    <div class="dashboard-profile-role">Supplier</div>
+                </div>
+
+                <div class="dashboard-actions">
+                    <a href="{{ url_for('notifications') }}" class="dashboard-notification" aria-label="Notifications">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+                        </svg>
+                        {% if unread_notifications > 0 %}
+                            <span class="notification-badge">{{ unread_notifications }}</span>
+                        {% endif %}
+                    </a>
+                    <a class="dashboard-logout" href="{{ url_for('logout') }}">Logout</a>
+                </div>
+            </header>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <section class="dashboard-form-panel">
+                <div class="panel-head">
+                    <h3>Review Supplier Application</h3>
+                    <span>Confirm your details before submission</span>
+                </div>
+
+                <div class="wizard-progress">
+                    <div class="wizard-progress-track"></div>
+                    <div class="wizard-pill done">1. Profile</div>
+                    <div class="wizard-pill done">2. Category</div>
+                    <div class="wizard-pill done">3. Documents</div>
+                    <div class="wizard-pill active">4. Review</div>
+                </div>
+
+                <div class="review-grid">
+                    <div class="review-card">
+                        <strong>Registered Vendor Name</strong>
+                        <span>{{ draft.registered_vendor_name }}</span>
+                    </div>
+                    <div class="review-card">
+                        <strong>Business Registration Number</strong>
+                        <span>{{ draft.business_registration_number }}</span>
+                    </div>
+                    <div class="review-card">
+                        <strong>Tax Number</strong>
+                        <span>{{ draft.tax_number }}</span>
+                    </div>
+                    <div class="review-card">
+                        <strong>Primary Contact Person</strong>
+                        <span>{{ draft.primary_contact_person }}</span>
+                    </div>
+                    <div class="review-card">
+                        <strong>Contact Number(s)</strong>
+                        <span>{{ draft.contact_number }}</span>
+                    </div>
+                    <div class="review-card">
+                        <strong>E-Mail Address</strong>
+                        <span>{{ draft.email_address }}</span>
+                    </div>
+                    <div class="review-card">
+                        <strong>Supplier Category</strong>
+                        {% if draft.supplier_categories %}
+                            {% for cat in draft.supplier_categories %}
+                                <span>{{ cat }}</span>
+                                {% set detail = draft.supplier_category_details and draft.supplier_category_details.get(cat, '') %}
+                                {% if detail %}
+                                    <span style="display:block; margin-left:10px; color:var(--text-light);">{{ detail }}</span>
+                                {% endif %}
+                            {% endfor %}
+                        {% else %}
+                            <span>{{ draft.supplier_category }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="review-card">
+                        <strong>Contact Name</strong>
+                        <span>{{ draft.contact_name }}</span>
+                    </div>
+                    <div class="review-card">
+                        <strong>Email</strong>
+                        <span>{{ draft.email }}</span>
+                    </div>
+                    <div class="review-card">
+                        <strong>Phone</strong>
+                        <span>{{ draft.phone }}</span>
+                    </div>
+                    <div class="review-card">
+                        <strong>Compliance Documents Status</strong>
+                        <span>{{ draft.documents_status }}</span>
+                    </div>
+                    {% if draft.directors %}
+                    <div class="review-card" style="grid-column: 1 / -1;">
+                        <strong>Directors and Shareholders</strong>
+                        <div style="margin-top:8px; overflow-x:auto;">
+                            <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                                <thead>
+                                    <tr style="background:#f5f5f5;">
+                                        <th style="text-align:left; padding:8px; border:1px solid var(--border);">Initials and Surname</th>
+                                        <th style="text-align:left; padding:8px; border:1px solid var(--border);">ID Number</th>
+                                        <th style="text-align:left; padding:8px; border:1px solid var(--border);">Role</th>
+                                        <th style="text-align:left; padding:8px; border:1px solid var(--border);">Nationality</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for director in draft.directors %}
+                                    <tr>
+                                        <td style="padding:8px; border:1px solid var(--border);">{{ director.initials_surname }}</td>
+                                        <td style="padding:8px; border:1px solid var(--border);">{{ director.id_number }}</td>
+                                        <td style="padding:8px; border:1px solid var(--border);">{{ director.role }}</td>
+                                        <td style="padding:8px; border:1px solid var(--border);">{{ director.nationality }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                {% if documents %}
+                <section class="filter-section">
+                    <div class="panel-head">
+                        <h3>Supporting Documents</h3>
+                    </div>
+                    <div class="documents-grid">
+                        {% for doc in documents %}
+                            <div class="document-card">
+                                <div class="document-card-header">
+                                    <span class="document-number">{{ loop.index }}</span>
+                                    <h4>{{ doc.document_type }}</h4>
+                                </div>
+                                <div class="document-uploaded">
+                                    <span class="document-status-badge">Uploaded</span>
+                                    <a href="javascript:void(0);" class="document-view-link" onclick="togglePdf(this); return false;">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                </a>
+                                <iframe src="/uploads/{{ doc.file_path|replace('\\', '/') }}#toolbar=0&navpanes=0" class="pdf-viewer"></iframe>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
+
+                <form class="igsp-form dashboard-form" method="post">
+                    <div class="wizard-actions">
+                        <a href="{{ url_for('onboarding_documents') }}" class="filter-btn filter-btn-secondary">Back</a>
+                        <button type="submit" class="filter-btn">Submit</button>
+                    </div>
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <footer class="footer">
+        <p>NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
+    </footer>
+
+    <script>
+        function togglePdf(link) {
+            var iframe = link.parentNode.querySelector('.pdf-viewer');
+            if (!iframe) return;
+            var eye = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+            var eyeOff = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+            if (iframe.style.display === 'none') {
+                iframe.style.display = 'block';
+                link.innerHTML = eyeOff;
+            } else {
+                iframe.style.display = 'none';
+                link.innerHTML = eye;
+            }
+        }
+    </script>
+</body>
+</html>

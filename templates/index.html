@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>IGSP Supplier Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+</head>
+<body class="landing-page">
+    <main class="landing-split">
+        <section class="landing-left" aria-hidden="true">
+            <img class="landing-bg" src="{{ url_for('static', filename='images/background.png') }}" alt="">
+        </section>
+
+        <section class="landing-right">
+            <img class="landing-logo" src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
+            <div class="landing-content">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="flash-message flash-{{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                <div class="landing-badge">Secure onboarding</div>
+                <h1>Icebolethu Supplier Portal</h1>
+                <p>Complete your supplier profile in a few simple steps and submit your details for procurement review. This portal is designed to keep your onboarding process fast, structured, and easy to follow.</p>
+
+                <div class="landing-buttons">
+                    <a class="landing-btn1" href="{{ url_for('login') }}">Login</a>
+                    <a class="landing-btn2" href="{{ url_for('signup') }}">Create Account</a>
+                </div>
+
+                <div class="landing-info">
+                    <div class="landing-box">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px;">
+                            <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                        Secure Registration
+                    </div>
+                    <div class="landing-box">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px;">
+                            <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                        Track Application Status
+                    </div>
+                    <div class="landing-box">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px;">
+                            <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                        Upload Company Documents
+                    </div>
+                    <div class="landing-box">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px;">
+                            <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                        Procurement Updates
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="landing-footer">
+        <p>Call Centre: 031 208 9102</p>
+        <p>Email: supplier_onboarding@icebolethu.co.za</p>
+    </footer>
+</body>
+</html>
