@@ -1,92 +1,38 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Notifications | IGSP</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
-</head>
-<body class="dashboard-body">
-    <div class="dashboard-shell">
-        <aside class="dashboard-sidebar">
-            <div class="sidebar-brand">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
-            </div>
+{% extends "supplier_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+{% import "_macros.html" as ui with context %}
 
-            <div class="sidebar-menu-block">
-                <div class="sidebar-menu-label">Supplier Dashboard</div>
-                <a href="{{ url_for('dashboard') }}" class="sidebar-btn">Dashboard</a>
-            </div>
-        </aside>
+{% block title %}Notifications{% endblock %}
+{% block page_title %}Notifications{% endblock %}
+{% block page_subtitle %}{% if new_ids %}{{ new_ids|length }} new since your last visit{% else %}You're all caught up{% endif %}{% endblock %}
 
-        <main class="dashboard-main">
-            <header class="dashboard-header">
-                <div class="dashboard-profile-summary">
-                    <div class="dashboard-profile-name">{{ user.contact_name or user.company_name }}</div>
-                    <div class="dashboard-profile-role">Supplier</div>
-                    <div class="dashboard-status">
-                        {% if user.active %}
-                            <span class="status-badge active">Active</span>
-                        {% else %}
-                            <span class="status-badge inactive">Inactive</span>
-                        {% endif %}
-                    </div>
-                </div>
-
-                <div class="dashboard-actions">
-                    <a href="{{ url_for('notifications') }}" class="dashboard-notification" aria-label="Notifications">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
-                        </svg>
-                        {% if unread_notifications > 0 %}
-                            <span class="notification-badge">{{ unread_notifications }}</span>
-                        {% endif %}
-                    </a>
-                    <a class="dashboard-logout" href="{{ url_for('logout') }}">Logout</a>
-                </div>
-            </header>
-
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-
-            <section class="dashboard-panel">
-                <div class="panel-head">
-                    <h3>Notifications</h3>
-                    {% if notifications %}
-                        <span class="results-count">{{ notifications|length }} notification{{ 's' if notifications|length != 1 else '' }}</span>
-                    {% endif %}
-                </div>
-
-                {% if notifications %}
-                    <div class="notifications-list">
-                        {% for notification in notifications %}
-                            <div class="notification-item {% if not notification.is_read %}notification-unread{% endif %}">
-                                <div class="notification-header">
-                                    <strong>{{ notification.title }}</strong>
-                                    <small>{{ notification.created_at.strftime('%Y-%m-%d %H:%M') if notification.created_at else 'N/A' }}</small>
-                                </div>
-                                <p>{{ notification.message }}</p>
-                                {% if notification.related_application_id %}
-                                    <a href="{{ url_for('application_detail', application_id=notification.related_application_id) }}" class="notification-link">View Application</a>
-                                {% endif %}
+{% block content %}
+    <section class="ad-card">
+        {% if notifications %}
+            <ul class="ad-feed">
+                {% for notification in notifications %}
+                    <li class="ad-feed-item{% if notification.id in new_ids %} is-unread{% endif %}">
+                        <span class="ad-feed-icon" aria-hidden="true">{{ ad.icon('file' if notification.related_application_id else 'bell') }}</span>
+                        <div class="ad-feed-body">
+                            <div class="ad-feed-top">
+                                <strong>{{ notification.title }}</strong>
+                                {% if notification.id in new_ids %}<span class="ad-new">New</span>{% endif %}
+                                <time class="ad-muted">{{ notification.created_at.strftime('%d %b %Y, %H:%M') if notification.created_at else '' }}</time>
                             </div>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <div class="dashboard-empty">No notifications yet.</div>
-                {% endif %}
-            </section>
-        </main>
-    </div>
-
-    <footer class="footer">
-        <p>NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
-    </footer>
-</body>
-</html>
+                            <p>{{ notification.message }}</p>
+                            {% if notification.related_application_id %}
+                                <a href="{{ url_for('application_detail', application_id=notification.related_application_id) }}" class="ad-link">View application →</a>
+                            {% endif %}
+                        </div>
+                    </li>
+                {% endfor %}
+            </ul>
+            {{ ui.render_pagination(pagination, 'notifications') }}
+        {% else %}
+            <div class="ad-empty">
+                <strong>No notifications yet</strong>
+                <span>We'll let you know here (and by email) when your application status changes.</span>
+            </div>
+        {% endif %}
+    </section>
+{% endblock %}

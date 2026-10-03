@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.env
+.DS_Store
+*.pyo
+venv/
+.venv/
+env/
+mysql_data/
+static/uploads/*
+!static/uploads/.gitkeep
+.kilo/
+instance/
+.pytest_cache/

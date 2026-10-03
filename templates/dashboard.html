@@ -1,123 +1,111 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Supplier Dashboard | IGSP</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
-</head>
-<body class="dashboard-body">
-    <div class="dashboard-shell">
-        <aside class="dashboard-sidebar">
-            <div class="sidebar-brand">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
-            </div>
+{% extends "supplier_base.html" %}
+{% import "admin_macros.html" as ad with context %}
 
-            <div class="sidebar-menu-block">
-                <div class="sidebar-menu-label">Supplier Dashboard</div>
-                <a href="{{ url_for('onboarding_profile') }}" class="sidebar-btn">Apply</a>
-                <a href="{{ url_for('supplier_settings') }}" class="sidebar-btn">Settings</a>
-            </div>
-        </aside>
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Welcome, {{ (user.contact_name or user.company_name).split()[0] }}{% endblock %}
+{% block page_subtitle %}{{ user.company_name }} · Supplier ID <span class="ad-mono">{{ user.supplier_id or '—' }}</span>{% endblock %}
+{% block page_actions %}
+    {% if supplier_application %}
+        <a href="{{ url_for('application_detail', application_id=supplier_application.id) }}" class="ad-btn ad-btn--ghost">View application</a>
+        {% if supplier_application.status in EDITABLE_STATUSES %}
+            <a href="{{ url_for('edit_application', application_id=supplier_application.id) }}" class="ad-btn ad-btn--primary">{{ ad.icon('edit') }}
+                {{ 'Update & resubmit' if supplier_application.status in ['returned_for_update', 'declined'] else 'Edit application' }}</a>
+        {% endif %}
+    {% else %}
+        <a href="{{ url_for('onboarding_profile') }}" class="ad-btn ad-btn--primary">{{ ad.icon('plus') }} Start application</a>
+    {% endif %}
+{% endblock %}
 
-        <main class="dashboard-main">
-            <header class="dashboard-header">
-                <div class="dashboard-profile-summary">
-                    <div class="dashboard-profile-name">{{ user.contact_name or user.company_name }}</div>
-                    <div class="dashboard-profile-role">Supplier</div>
-                    <div class="dashboard-status">
-                        {% if user.active %}
-                            <span class="status-badge active">Active</span>
-                        {% else %}
-                            <span class="status-badge inactive">Inactive</span>
-                        {% endif %}
+{% block content %}
+    {% set application = supplier_application %}
+    <section class="ad-stats" aria-label="Your account">
+        <div class="ad-stat">
+            <span class="ad-stat-label">Application</span>
+            <span class="ad-stat-value ad-stat-value--sm">{% if application %}{{ ad.status_badge(application.status) }}{% else %}<span class="ad-muted">Not started</span>{% endif %}</span>
+            <span class="ad-stat-sub">{% if application and application.created_at %}Submitted {{ application.created_at.strftime('%d %b %Y') }}{% else %}Apply to become a supplier{% endif %}</span>
+        </div>
+        <div class="ad-stat">
+            <span class="ad-stat-label">Documents uploaded</span>
+            <span class="ad-stat-value">{{ documents|length }}</span>
+            <span class="ad-stat-sub">7 required + company profile</span>
+        </div>
+        <div class="ad-stat">
+            <span class="ad-stat-label">Account</span>
+            <span class="ad-stat-value ad-stat-value--sm">{% if user.active %}<span class="ad-badge ad-badge--active">Active</span>{% else %}<span class="ad-badge ad-badge--inactive">Inactive</span>{% endif %}</span>
+            <span class="ad-stat-sub">{{ 'You can trade with Icebolethu Group' if user.active else 'Activated once your application is approved' }}</span>
+        </div>
+        <a class="ad-stat" href="{{ url_for('notifications') }}">
+            <span class="ad-stat-label">Notifications</span>
+            <span class="ad-stat-value">{{ unread_notifications }}</span>
+            <span class="ad-stat-sub">unread</span>
+        </a>
+    </section>
+
+    {% if not application %}
+        <section class="ad-card ad-hero">
+            <div>
+                <h2>Become an Icebolethu Group supplier</h2>
+                <p>Complete your application in four short steps. You can save your progress between steps, and we'll email you as soon as it's been reviewed.</p>
+                <a href="{{ url_for('onboarding_profile') }}" class="ad-btn ad-btn--primary ad-btn--lg ad-mt">Start your application</a>
+            </div>
+            <ol class="ad-howto">
+                <li><strong>Company profile</strong><span>Registration, tax, address, contact and directors</span></li>
+                <li><strong>Category</strong><span>The goods or services you supply</span></li>
+                <li><strong>Documents</strong><span>CIPC, IDs, SARS, bank letter, B-BBEE, proof of address, declaration (PDF)</span></li>
+                <li><strong>Review &amp; submit</strong><span>Check everything and send it for review</span></li>
+            </ol>
+        </section>
+    {% else %}
+        {% set flow = ['submitted', 'under_review', 'decision'] %}
+        {% set stage = 2 if application.status in ['approved', 'declined'] else (1 if application.status in ['under_review', 'returned_for_update'] else 0) %}
+        <div class="ad-grid ad-grid--2-1">
+            <section class="ad-card">
+                <div class="ad-card-head">
+                    <div>
+                        <h2>Your application</h2>
+                        <p>{{ application.company_name }} · {{ application.category_names|join(', ') }}</p>
                     </div>
+                    {{ ad.status_badge(application.status) }}
                 </div>
 
-                <div class="dashboard-actions">
-                    <a href="{{ url_for('notifications') }}" class="dashboard-notification" aria-label="Notifications">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
-                        </svg>
-                        {% if unread_notifications > 0 %}
-                            <span class="notification-badge">{{ unread_notifications }}</span>
-                        {% endif %}
-                    </a>
-                    <a class="dashboard-logout" href="{{ url_for('logout') }}">Logout</a>
-                </div>
-            </header>
+                <ol class="ad-track">
+                    <li class="{{ 'is-done' if stage > 0 else 'is-current' }}"><strong>Submitted</strong><span>{{ application.created_at.strftime('%d %b %Y') if application.created_at else '' }}</span></li>
+                    <li class="{{ 'is-done' if stage > 1 else ('is-current' if stage == 1 else '') }}"><strong>In review</strong><span>Our procurement team checks your details and documents</span></li>
+                    <li class="{{ 'is-current is-' ~ application.status if stage == 2 else '' }}"><strong>Decision</strong><span>{% if application.status == 'approved' %}Approved{% elif application.status == 'declined' %}Declined{% else %}Approved or declined{% endif %}</span></li>
+                </ol>
 
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-
-            <section class="dashboard-cards-grid">
-                <div class="dashboard-card detail-card">
-                    <span class="dashboard-label">Supplier ID</span>
-                    <h2>{{ user.supplier_id or 'N/A' }}</h2>
-                    <p>{{ user.email }}</p>
-                </div>
-
-                <div class="dashboard-card detail-card">
-                    <span class="dashboard-label">Contact Person</span>
-                    <h2>{{ user.contact_name }}</h2>
-                    <p>{{ contact_phone or user.phone }}</p>
-                </div>
-            </section>
-
-            <section class="dashboard-form-panel">
-                <div class="panel-head">
-                    <h3>APPLY NOW</h3>
-                </div>
-
-                <div class="dashboard-hero-actions">
-                    {% if applications %}
-                        <a class="dashboard-cta" href="{{ url_for('edit_application', application_id=applications[0].id) }}">Edit Your Application</a>
-                    {% else %}
-                        <a class="dashboard-cta" href="{{ url_for('onboarding_profile') }}">Start Your Application</a>
-                    {% endif %}
-                </div>
-            </section>
-
-            <section class="dashboard-panel">
-                <div class="panel-head">
-                    <h3>Application Status</h3>
-                </div>
-
-                {% if applications %}
-                    {% for application in applications %}
-                        <div class="app-row">
-                            <div>
-                                <strong>{{ application.company_name }}</strong>
-                                <small>Submitted on {{ application.created_at.strftime('%Y-%m-%d') if application.created_at else 'N/A' }}</small>
-                            </div>
-                            <div>
-                                <span class="status {{ application.status }}">
-                                    {{ application.status|replace('_', ' ')|title }}
-                                </span>
-                                {% if application.review_comments %}
-                                    <div class="review-comment">{{ application.review_comments }}</div>
-                                {% endif %}
-                                <a href="{{ url_for('edit_application', application_id=application.id) }}" class="filter-btn" style="padding:6px 14px; font-size:12px; margin-top:10px; display:inline-block;">Edit Application</a>
-                            </div>
+                {% if application.status == 'returned_for_update' %}
+                    <div class="ad-callout ad-callout--attention">
+                        <strong>Action needed:</strong> we've returned your application for changes. Please update it and resubmit.
+                    </div>
+                {% elif application.status == 'approved' %}
+                    <div class="ad-callout ad-callout--success"><strong>Congratulations!</strong> Your application has been approved and your supplier account is active.</div>
+                    {% if user.active %}
+                        <div class="ad-callout ad-callout--attention">
+                            <strong>Next step:</strong> add the products and services you supply so Icebolethu Group can request them.
+                            <a href="{{ url_for('inventory') }}" class="ad-link">Go to inventory →</a>
                         </div>
-                    {% endfor %}
-                {% else %}
-                    <div class="dashboard-empty">
-                        No applications have been submitted yet.
+                    {% endif %}
+                {% endif %}
+
+                {% if application.review_comments %}
+                    <div class="ad-comment">
+                        <span class="ad-comment-label">Comments from Icebolethu Group</span>
+                        <p>{{ application.review_comments }}</p>
                     </div>
                 {% endif %}
             </section>
-        </main>
-    </div>
 
-    <footer class="footer">
-        <p>NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
-    </footer>
-</body>
-</html>
+            <section class="ad-card">
+                <div class="ad-card-head"><h2>Your details</h2></div>
+                <dl class="ad-fields ad-fields--1">
+                    <div class="ad-field"><dt>Supplier ID</dt><dd class="ad-mono">{{ user.supplier_id or '—' }}</dd></div>
+                    <div class="ad-field"><dt>Contact person</dt><dd>{{ user.contact_name }}</dd></div>
+                    <div class="ad-field"><dt>Phone</dt><dd>{{ contact_phone or user.phone }}</dd></div>
+                    <div class="ad-field"><dt>Login email</dt><dd>{{ user.email }}</dd></div>
+                </dl>
+                <a href="{{ url_for('supplier_settings') }}" class="ad-link ad-mt" style="display:inline-block;">Update your details</a>
+            </section>
+        </div>
+    {% endif %}
+{% endblock %}

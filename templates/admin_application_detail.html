@@ -1,312 +1,259 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Application | IGSP</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
-</head>
-<body class="admin-body">
-    <div class="admin-shell">
-        <aside class="admin-sidebar">
-            <div class="admin-brand">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
+{% extends "admin_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+
+{% macro field(label, value, wide=false, mono=false) -%}
+    <div class="ad-field{% if wide %} ad-field--wide{% endif %}">
+        <dt>{{ label }}</dt>
+        <dd{% if mono %} class="ad-mono"{% endif %}>{% if value %}{{ value }}{% else %}<span class="ad-muted">—</span>{% endif %}</dd>
+    </div>
+{%- endmacro %}
+
+{% block title %}{{ application.company_name }}{% endblock %}
+{% block breadcrumb %}<a href="{{ url_for('admin_applications') }}" class="ad-crumb">{{ ad.icon('back') }} Applications</a>{% endblock %}
+{% block page_title %}{{ application.company_name }} {{ ad.status_badge(application.status) }}{% endblock %}
+{% block page_subtitle %}
+    {% if supplier and supplier.supplier_id %}<span class="ad-mono">{{ supplier.supplier_id }}</span> · {% endif %}
+    Submitted {{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}
+    {% if application.updated_at and application.created_at and application.updated_at > application.created_at %} · Updated {{ application.updated_at.strftime('%d %b %Y') }}{% endif %}
+{% endblock %}
+{% block page_actions %}
+    <a href="{{ url_for('admin_application_history', application_id=application.id) }}" class="ad-btn ad-btn--ghost">{{ ad.icon('clock') }} History <span class="ad-count">{{ history_count }}</span></a>
+    <a href="{{ url_for('download_all_documents', application_id=application.id) }}" class="ad-btn ad-btn--ghost">{{ ad.icon('download') }} Download all</a>
+{% endblock %}
+
+{% block content %}
+    <div class="ad-detail">
+        <div class="ad-detail-main">
+
+            <section class="ad-card">
+                <div class="ad-card-head"><h2>Company</h2></div>
+                <dl class="ad-fields">
+                    {{ field('Registered vendor name', application.registered_vendor_name, wide=true) }}
+                    {{ field('Trading name', application.trading_name) }}
+                    {{ field('Registration number', application.business_registration_number, mono=true) }}
+                    {{ field('VAT number', application.vat_number, mono=true) }}
+                    {{ field('Tax number', application.tax_number, mono=true) }}
+                    {{ field('Website', application.website, wide=true) }}
+                </dl>
+            </section>
+
+            <div class="ad-grid ad-grid--2">
+                <section class="ad-card">
+                    <div class="ad-card-head"><h2>Address</h2></div>
+                    <dl class="ad-fields ad-fields--1">
+                        {{ field('Physical address', application.physical_address) }}
+                        {{ field('City / Province', [application.city, application.province]|select|join(', ')) }}
+                        {{ field('Postal code', application.postal_code) }}
+                    </dl>
+                </section>
+                <section class="ad-card">
+                    <div class="ad-card-head"><h2>Contact</h2></div>
+                    <dl class="ad-fields ad-fields--1">
+                        {{ field('Primary contact', [application.primary_contact_person, application.contact_person_role]|select|join(' · ')) }}
+                        {{ field('Phone', application.contact_number or application.phone) }}
+                        {{ field('E-mail', application.email_address) }}
+                        {{ field('Account login', application.email) }}
+                    </dl>
+                </section>
             </div>
 
-            <div class="admin-menu-block">
-                <div class="admin-menu-label">Administration</div>
-                <a href="{{ url_for('admin_dashboard') }}" class="admin-btn">Dashboard</a>
-                <a href="{{ url_for('admin_reports') }}" class="admin-btn">Reports</a>
-                <a href="{{ url_for('admin_suppliers') }}" class="admin-btn">Suppliers</a>
-                <a href="{{ url_for('admin_applications') }}" class="admin-btn">Applications</a>
-                <a href="{{ url_for('admin_logout') }}" class="admin-btn" style="background:#dc3545;">Logout</a>
-            </div>
-        </aside>
-
-        <main class="admin-main">
-            <header class="admin-header">
-                <div>
-                    <div class="admin-profile-name">{{ application.company_name }}</div>
-                </div>
-
-                <div class="admin-actions">
-                    <a href="{{ url_for('admin_notifications') }}" class="dashboard-notification" aria-label="Notifications">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
-                        </svg>
-                        {% if unread_notifications is defined and unread_notifications > 0 %}
-                            <span class="notification-badge">{{ unread_notifications }}</span>
-                        {% endif %}
-                    </a>
-                    <a class="admin-logout" href="{{ url_for('admin_applications') }}">Back to Applications</a>
-                </div>
-            </header>
-
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
+            <section class="ad-card">
+                <div class="ad-card-head"><h2>Supplier category</h2></div>
+                <div class="ad-chips">
+                    {% for app_cat in application.application_categories %}
+                        <div class="ad-chip">
+                            <strong>{{ app_cat.category }}</strong>
+                            {% if app_cat.category_detail %}<span>{{ app_cat.category_detail }}</span>{% endif %}
+                        </div>
+                    {% else %}
+                        <div class="ad-chip"><strong>{{ application.supplier_category or '—' }}</strong></div>
                     {% endfor %}
-                {% endif %}
-            {% endwith %}
-
-            <section class="admin-panel">
-                <div class="admin-panel-head">
-                    <h3>Application Overview</h3>
-                    <span class="admin-badge admin-badge-{{ application.status }}">
-                        {{ application.status|replace('_', ' ')|title }}
-                    </span>
-                </div>
-
-                <div class="admin-cards-grid">
-                    <div class="admin-card">
-                        <span class="admin-card-label">Supplier ID</span>
-                        <span class="admin-card-value">{{ supplier.supplier_id if supplier else 'N/A' }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">Company Name</span>
-                        <span class="admin-card-value">{{ application.company_name }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">Key Contact</span>
-                        <span class="admin-card-value">{{ application.contact_name }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">Email</span>
-                        <span class="admin-card-value">{{ application.email }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">Category</span>
-                        <span class="admin-card-value">
-                            {% for app_cat in application.application_categories %}
-                                {{ app_cat.category }}
-                                {% if not loop.last %}, {% endif %}
-                            {% endfor %}
-                        </span>
-                        {% for app_cat in application.application_categories %}
-                            {% if app_cat.category_detail %}
-                                <span style="display:block; margin-top:4px; color:var(--text-light);">{{ app_cat.category_detail }}</span>
-                            {% endif %}
-                        {% endfor %}
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">Submitted</span>
-                        <span class="admin-card-value">{{ application.created_at.strftime('%Y-%m-%d') if application.created_at else 'N/A' }}</span>
-                    </div>
                 </div>
             </section>
 
-            <section class="admin-panel">
-                <div class="admin-panel-head">
-                    <h3>Company Registration Details</h3>
+            <section class="ad-card">
+                <div class="ad-card-head">
+                    <h2>Directors &amp; shareholders</h2>
+                    <span class="ad-muted">{{ application.directors|length }}</span>
                 </div>
-                <div class="admin-cards-grid">
-                    <div class="admin-card">
-                        <span class="admin-card-label">Registered Vendor Name</span>
-                        <span class="admin-card-value">{{ application.registered_vendor_name }}</span>
+                {% if application.directors %}
+                    <div class="ad-table-wrap">
+                        <table class="ad-table ad-table--compact">
+                            <thead><tr><th>Name</th><th>ID / passport</th><th>Role</th><th>Nationality</th></tr></thead>
+                            <tbody>
+                                {% for director in application.directors %}
+                                    <tr>
+                                        <td>{{ director.initials_surname }}</td>
+                                        <td class="ad-mono">{{ director.id_number }}</td>
+                                        <td>{{ director.role }}</td>
+                                        <td>{{ director.nationality }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">Trading Name</span>
-                        <span class="admin-card-value">{{ application.trading_name or 'N/A' }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">Business Registration Number</span>
-                        <span class="admin-card-value">{{ application.business_registration_number }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">VAT Number</span>
-                        <span class="admin-card-value">{{ application.vat_number or 'N/A' }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">Tax Number</span>
-                        <span class="admin-card-value">{{ application.tax_number }}</span>
-                    </div>
-                </div>
-            </section>
-
-            <section class="admin-panel">
-                <div class="admin-panel-head">
-                    <h3>Company Address</h3>
-                </div>
-                <div class="admin-cards-grid">
-                    <div class="admin-card" style="grid-column: 1 / -1;">
-                        <span class="admin-card-label">Physical Address</span>
-                        <span class="admin-card-value">{{ application.physical_address or 'N/A' }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">City</span>
-                        <span class="admin-card-value">{{ application.city or 'N/A' }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">Province</span>
-                        <span class="admin-card-value">{{ application.province or 'N/A' }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">Postal Code</span>
-                        <span class="admin-card-value">{{ application.postal_code or 'N/A' }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">Website</span>
-                        <span class="admin-card-value">{{ application.website or 'N/A' }}</span>
-                    </div>
-                </div>
-            </section>
-
-            <section class="admin-panel">
-                <div class="admin-panel-head">
-                    <h3>Contact Details</h3>
-                </div>
-                <div class="admin-cards-grid">
-                    <div class="admin-card">
-                        <span class="admin-card-label">Primary Contact Person</span>
-                        <span class="admin-card-value">{{ application.primary_contact_person }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">Contact Person's Role</span>
-                        <span class="admin-card-value">{{ application.contact_person_role or 'N/A' }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">Contact Number(s)</span>
-                        <span class="admin-card-value">{{ application.contact_number }}</span>
-                    </div>
-                    <div class="admin-card">
-                        <span class="admin-card-label">E-Mail Address</span>
-                        <span class="admin-card-value">{{ application.email_address }}</span>
-                    </div>
-                </div>
-            </section>
-
-            {% if application.directors %}
-            <section class="admin-panel">
-                <div class="admin-panel-head">
-                    <h3>Ownership Details (Directors and Shareholders)</h3>
-                </div>
-                <div style="overflow-x:auto;">
-                    <table class="admin-table">
-                        <thead>
-                            <tr>
-                                <th>Initials and Surname</th>
-                                <th>ID Number</th>
-                                <th>Role</th>
-                                <th>Nationality</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for director in application.directors %}
-                            <tr>
-                                <td>{{ director.initials_surname }}</td>
-                                <td>{{ director.id_number }}</td>
-                                <td>{{ director.role }}</td>
-                                <td>{{ director.nationality }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-            {% endif %}
-
-            {% set company_profile_doc = documents | selectattr('document_type', 'equalto', 'Company Profile') | list %}
-            <section class="admin-panel">
-                <div class="admin-panel-head">
-                    <h3>Company Profile</h3>
-                </div>
-                {% if company_profile_doc %}
-                    <a href="javascript:void(0);" class="document-view-link" onclick="togglePdf(this); return false;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                    </a>
-                    <iframe src="/uploads/{{ company_profile_doc[0].file_path|replace('\\', '/') }}#toolbar=0&navpanes=0" class="pdf-viewer"></iframe>
                 {% else %}
-                    <p style="color:var(--text); line-height:1.7; white-space:pre-wrap;">{{ application.company_profile }}</p>
+                    <div class="ad-empty ad-empty--sm"><span>No directors recorded.</span></div>
                 {% endif %}
             </section>
 
-            <section class="admin-panel">
-                <div class="admin-panel-head">
-                    <h3>Submitted Documents</h3>
-                    <a href="{{ url_for('download_all_documents', application_id=application.id) }}" class="admin-btn-sm admin-btn-primary">Download All</a>
+            <section class="ad-card">
+                <div class="ad-card-head">
+                    <h2>Documents</h2>
+                    <span class="ad-muted">{{ documents|length }} uploaded</span>
                 </div>
-
+                {% if missing_documents %}
+                    <div class="ad-flash ad-flash--error ad-flash--inline">
+                        <strong>Missing required documents:</strong> {{ missing_documents|join(', ') }}
+                    </div>
+                {% endif %}
                 {% if documents %}
-                    <div class="documents-grid">
+                    <ul class="ad-docs">
                         {% for doc in documents %}
-                            <div class="document-card">
-                                <div class="document-card-header">
-                                    <span class="document-number">{{ loop.index }}</span>
-                                    <h4>{{ doc.document_type }}</h4>
+                            <li class="ad-doc">
+                                <span class="ad-doc-icon" aria-hidden="true">{{ ad.icon('file') }}</span>
+                                <div class="ad-doc-text">
+                                    <strong>{{ doc.document_type }}</strong>
+                                    <span>{{ doc.original_filename }}{% if doc.uploaded_at %} · {{ doc.uploaded_at.strftime('%d %b %Y') }}{% endif %}</span>
                                 </div>
-                                <div class="document-uploaded">
-                                    <span class="document-status-badge">Uploaded</span>
-                                    <a href="javascript:void(0);" class="document-view-link" onclick="togglePdf(this); return false;">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                                </a>
-                                <iframe src="/uploads/{{ doc.file_path|replace('\\', '/') }}#toolbar=0&navpanes=0" class="pdf-viewer"></iframe>
-                                    <form method="post" action="{{ url_for('replace_admin_document', application_id=application.id, document_id=doc.id) }}" enctype="multipart/form-data" style="display:inline; margin-left:8px;">
-                                        <label for="replace_doc_{{ doc.id }}" class="document-view-link" style="cursor:pointer;">Replace</label>
-                                        <input type="file" id="replace_doc_{{ doc.id }}" name="document_file" style="display:none;" onchange="this.form.submit()">
+                                <div class="ad-doc-actions">
+                                    <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" target="_blank" rel="noopener" class="ad-btn ad-btn--ghost ad-btn--sm">View</a>
+                                    {% if is_mine %}
+                                    <form method="post" action="{{ url_for('replace_admin_document', application_id=application.id, document_id=doc.id) }}" enctype="multipart/form-data">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <label class="ad-btn ad-btn--ghost ad-btn--sm" for="replace_doc_{{ doc.id }}">Replace</label>
+                                        <input type="file" id="replace_doc_{{ doc.id }}" name="document_file" accept="application/pdf,.pdf" class="ad-sr" onchange="this.form.submit()">
                                     </form>
+                                    {% endif %}
                                 </div>
-                            </div>
+                            </li>
                         {% endfor %}
-                    </div>
+                    </ul>
                 {% else %}
-                    <div class="dashboard-empty">No documents uploaded for this application.</div>
+                    <div class="ad-empty ad-empty--sm"><span>No documents uploaded.</span></div>
                 {% endif %}
             </section>
 
-            <section class="admin-panel">
-                <div class="admin-panel-head">
-                    <h3>Review & Update</h3>
+        </div>
+
+        <aside class="ad-detail-side">
+            {% set owner = application.assigned_admin %}
+            <section class="ad-card ad-assigned{% if not owner %} ad-assigned--none{% endif %}">
+                <div class="ad-assigned-row">
+                    {% if owner %}
+                        <div class="ad-avatar" aria-hidden="true">{{ ((owner.name or owner.email)[:1])|upper }}</div>
+                        <div>
+                            <strong>{{ 'Assigned to you' if is_mine else 'Assigned to ' ~ (owner.name or owner.email) }}</strong>
+                            <span class="ad-muted">since {{ application.assigned_at.strftime('%d %b %Y, %H:%M') if application.assigned_at else '—' }}</span>
+                        </div>
+                    {% else %}
+                        <span class="ad-assign-icon" aria-hidden="true">{{ ad.icon('alert') }}</span>
+                        <div>
+                            <strong>Not assigned</strong>
+                            <span class="ad-muted">Assign it to yourself to review and decide on it.</span>
+                        </div>
+                    {% endif %}
+                </div>
+                {% if is_mine %}
+                    <form method="post" action="{{ url_for('release_application', application_id=application.id) }}"
+                          onsubmit="return confirm('Unassign yourself so another admin can assign this application to themselves?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="ad-btn ad-btn--ghost ad-btn--block ad-mt">Unassign</button>
+                    </form>
+                {% elif owner %}
+                    <p class="ad-hint ad-mt">You can view this application, but only {{ owner.name or owner.email }} can work on it until they unassign themselves.</p>
+                {% else %}
+                    <form method="post" action="{{ url_for('assign_application', application_id=application.id) }}" class="ad-mt">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="ad-btn ad-btn--primary ad-btn--block">Assign to me</button>
+                    </form>
+                {% endif %}
+            </section>
+{% if is_mine %}
+            <section class="ad-card ad-decision">
+                <div class="ad-card-head">
+                    <h2>Review decision</h2>
+                    {{ ad.status_badge(application.status) }}
                 </div>
 
-                <form method="post" action="{{ url_for('update_application', application_id=application.id) }}" class="admin-form">
-                    <div class="admin-form-row">
-                        <label for="status">Status</label>
-                        <select name="status" id="status">
-                            {% for status in ['submitted', 'pending_review', 'approved', 'rejected'] %}
-                                <option value="{{ status }}" {% if application.status == status %}selected{% endif %}>{{ status|replace('_', ' ')|title }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
+                <form method="post" action="{{ url_for('update_application', application_id=application.id) }}" id="reviewForm" class="ad-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-                    <div class="admin-form-row">
-                        <label for="review_comments">Review Comments</label>
-                        <textarea id="review_comments" name="review_comments" rows="4">{{ application.review_comments or '' }}</textarea>
-                    </div>
+                    <label for="documents_status">Documents</label>
+                    <select name="documents_status" id="documents_status">
+                        {% for doc_status in ['pending', 'complete'] %}
+                            <option value="{{ doc_status }}" {% if application.documents_status == doc_status %}selected{% endif %}>{{ doc_status|title }}</option>
+                        {% endfor %}
+                    </select>
 
-                    <div class="admin-form-row">
-                        <label for="documents_status">Documents Status</label>
-                        <select name="documents_status" id="documents_status">
-                            {% for doc_status in ['pending', 'complete'] %}
-                                <option value="{{ doc_status }}" {% if application.documents_status == doc_status %}selected{% endif %}>{{ doc_status|title }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
+                    <label for="review_comments">Comments to supplier</label>
+                    <textarea name="review_comments" id="review_comments" rows="5" placeholder="Required when declining or returning an application. The supplier sees this.">{{ application.review_comments or '' }}</textarea>
+                    <p class="ad-form-error" id="commentError" hidden>Please add a comment so the supplier knows what to fix.</p>
 
-                    <div class="admin-actions-row">
-                        <button type="submit" class="admin-btn-sm admin-btn-primary">Save Changes</button>
-                        <a href="{{ url_for('admin_applications') }}" class="admin-btn-sm admin-btn-secondary">Cancel</a>
+                    <div class="ad-decision-actions">
+                        <button type="submit" name="status" value="approved" class="ad-btn ad-btn--success ad-btn--block">Approve</button>
+                        <button type="submit" name="status" value="under_review" class="ad-btn ad-btn--ghost ad-btn--block">Mark under review</button>
+                        <button type="submit" name="status" value="returned_for_update" class="ad-btn ad-btn--warning ad-btn--block" data-needs-comment>Return to supplier</button>
+                        <button type="submit" name="status" value="declined" class="ad-btn ad-btn--danger ad-btn--block" data-needs-comment>Decline</button>
                     </div>
+                    <button type="submit" name="status" value="{{ application.status }}" class="ad-link ad-link--block">Save comments only</button>
                 </form>
             </section>
-        </main>
-    </div>
+{% else %}
+            <section class="ad-card">
+                <div class="ad-card-head">
+                    <h2>Review</h2>
+                    {{ ad.status_badge(application.status) }}
+                </div>
+                <dl class="ad-fields ad-fields--1">
+                    <div class="ad-field"><dt>Documents</dt><dd>{{ (application.documents_status or 'pending')|title }}</dd></div>
+                    <div class="ad-field"><dt>Comments to supplier</dt><dd>{% if application.review_comments %}<span class="ad-prewrap">{{ application.review_comments }}</span>{% else %}<span class="ad-muted">None</span>{% endif %}</dd></div>
+                </dl>
+                <p class="ad-hint ad-mt">{{ 'Only the assigned admin can record a decision.' if application.assigned_admin_id else 'Assign this application to yourself to record a decision.' }}</p>
+            </section>
+{% endif %}
 
-    <script>
-        function togglePdf(link) {
-            var iframe = link.parentNode.querySelector('.pdf-viewer');
-            if (!iframe) return;
-            var eye = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
-            var eyeOff = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
-            if (iframe.style.display === 'none') {
-                iframe.style.display = 'block';
-                link.innerHTML = eyeOff;
-            } else {
-                iframe.style.display = 'none';
-                link.innerHTML = eye;
-            }
+            {% if supplier %}
+                <section class="ad-card">
+                    <div class="ad-card-head">
+                        <h2>Supplier account</h2>
+                        {% if supplier.active %}<span class="ad-badge ad-badge--active">Active</span>{% else %}<span class="ad-badge ad-badge--inactive">Inactive</span>{% endif %}
+                    </div>
+                    <dl class="ad-fields ad-fields--1">
+                        {{ field('Registered', supplier.created_at.strftime('%d %b %Y') if supplier.created_at else '') }}
+                        {{ field('Contact', supplier.contact_name ~ ' · ' ~ supplier.phone) }}
+                    </dl>
+                    {% if is_mine %}
+                    <form method="post" action="{{ url_for('toggle_supplier', supplier_id=supplier.id) }}" class="ad-mt"
+                          onsubmit="return confirm('{{ 'Deactivate' if supplier.active else 'Activate' }} this supplier account?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="next" value="{{ request.path }}">
+                        <button type="submit" class="ad-btn ad-btn--ghost ad-btn--block">{{ 'Deactivate account' if supplier.active else 'Activate account' }}</button>
+                    </form>
+                    {% endif %}
+                </section>
+            {% endif %}
+        </aside>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Declining or returning needs a comment for the supplier; the server enforces this too.
+    var reviewForm = document.getElementById('reviewForm');
+    if (reviewForm) reviewForm.addEventListener('submit', function (e) {
+        var button = e.submitter;
+        var comments = document.getElementById('review_comments');
+        var error = document.getElementById('commentError');
+        if (button && button.hasAttribute('data-needs-comment') && !comments.value.trim()) {
+            e.preventDefault();
+            error.hidden = false;
+            comments.focus();
+            return;
         }
-    </script>
-</body>
-</html>
+        if (button && button.value === 'declined' && !confirm('Decline this application? The supplier will be notified.')) {
+            e.preventDefault();
+        }
+    });
+</script>
+{% endblock %}

@@ -1,132 +1,126 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Admin Dashboard | IGSP</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
-</head>
-<body class="admin-body">
-    <div class="admin-shell">
-        <aside class="admin-sidebar">
-            <div class="admin-brand">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
-            </div>
+{% extends "admin_base.html" %}
+{% import "admin_macros.html" as ad with context %}
 
-            <div class="admin-menu-block">
-                <div class="admin-menu-label">Administration</div>
-                <a href="{{ url_for('admin_dashboard') }}" class="admin-btn">Dashboard</a>
-                <a href="{{ url_for('admin_reports') }}" class="admin-btn">Reports</a>
-                <a href="{{ url_for('admin_suppliers') }}" class="admin-btn">Suppliers</a>
-                <a href="{{ url_for('admin_applications') }}" class="admin-btn">Applications</a>
-                <a href="{{ url_for('admin_logout') }}" class="admin-btn" style="background:#dc3545;">Logout</a>
-            </div>
-        </aside>
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Welcome back{% if admin.name %}, {{ admin.name.split()[0] }}{% endif %}{% endblock %}
+{% block page_subtitle %}Here's what needs your attention across the supplier portal.{% endblock %}
+{% block page_actions %}
+    <a href="{{ url_for('admin_reports') }}" class="ad-btn ad-btn--ghost">{{ ad.icon('reports') }} Reports</a>
+    <a href="{{ url_for('admin_applications', assigned='unassigned') }}" class="ad-btn ad-btn--ghost">Unassigned</a>
+    <a href="{{ url_for('admin_applications', assigned='me') }}" class="ad-btn ad-btn--primary">My assigned applications</a>
+{% endblock %}
 
-        <main class="admin-main">
-            <header class="admin-header">
+{% block content %}
+    <section class="ad-stats" aria-label="Key figures">
+        <a class="ad-stat ad-stat--accent" href="{{ url_for('admin_applications', status='pending_review') }}">
+            <span class="ad-stat-label">Awaiting review</span>
+            <span class="ad-stat-value">{{ awaiting_count }}</span>
+            <span class="ad-stat-sub">{{ assigned_to_me_count }} assigned to you · {{ unassigned_count }} unassigned</span>
+        </a>
+        <a class="ad-stat" href="{{ url_for('admin_applications') }}">
+            <span class="ad-stat-label">Total applications</span>
+            <span class="ad-stat-value">{{ total_applications }}</span>
+            <span class="ad-stat-sub">{{ status_counts.returned_for_update }} returned to suppliers</span>
+        </a>
+        <a class="ad-stat" href="{{ url_for('admin_applications', status='approved') }}">
+            <span class="ad-stat-label">Approved</span>
+            <span class="ad-stat-value">{{ approved_count }}</span>
+            <span class="ad-stat-sub">{{ rejected_count }} declined</span>
+        </a>
+        <a class="ad-stat" href="{{ url_for('admin_suppliers') }}">
+            <span class="ad-stat-label">Suppliers</span>
+            <span class="ad-stat-value">{{ total_suppliers }}</span>
+            <span class="ad-stat-sub">{{ active_suppliers }} active</span>
+        </a>
+    </section>
+
+    <div class="ad-grid ad-grid--2-1">
+        <section class="ad-card">
+            <div class="ad-card-head">
                 <div>
-                    <div class="admin-profile-name">{{ admin.name }}</div>
-                    <div class="admin-profile-role">Administrator</div>
+                    <h2>Awaiting review</h2>
+                    <p>Oldest first</p>
                 </div>
-
-                <div class="admin-actions">
-                    <a href="{{ url_for('admin_notifications') }}" class="dashboard-notification" aria-label="Notifications">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
-                        </svg>
-                        {% if unread_notifications > 0 %}
-                            <span class="notification-badge">{{ unread_notifications }}</span>
-                        {% endif %}
-                    </a>
-                    <a class="admin-logout" href="{{ url_for('admin_logout') }}">Logout</a>
-                </div>
-            </header>
-
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
+                <a href="{{ url_for('admin_applications', status='pending_review') }}" class="ad-link">View all</a>
+            </div>
+            {% if awaiting_review %}
+                <ul class="ad-queue">
+                    {% for application in awaiting_review %}
+                        <li>
+                            <a href="{{ url_for('admin_application_detail', application_id=application.id) }}" class="ad-queue-item">
+                                <div class="ad-queue-main">
+                                    <strong>{{ application.company_name }}</strong>
+                                    <span>{{ application.category_names|join(', ') or '—' }}</span>
+                                </div>
+                                <div class="ad-queue-meta">
+                                    {{ ad.status_badge(application.status) }}
+                                    {{ ad.assignee(application, admin) }}
+                                    <span class="ad-muted">{{ application.created_at.strftime('%d %b %Y') if application.created_at else '' }}</span>
+                                </div>
+                            </a>
+                        </li>
                     {% endfor %}
-                {% endif %}
-            {% endwith %}
+                </ul>
+            {% else %}
+                <div class="ad-empty">
+                    <strong>All caught up</strong>
+                    <span>No applications are waiting for review.</span>
+                </div>
+            {% endif %}
+        </section>
 
-            <section class="admin-cards-grid">
-                <div class="admin-card">
-                    <span class="admin-card-label">Total Suppliers</span>
-                    <span class="admin-card-value">{{ total_suppliers }}</span>
+        <section class="ad-card">
+            <div class="ad-card-head">
+                <div>
+                    <h2>Applications by status</h2>
+                    <p>{{ total_applications }} total</p>
                 </div>
-                <div class="admin-card">
-                    <span class="admin-card-label">Total Applications</span>
-                    <span class="admin-card-value">{{ total_applications }}</span>
-                </div>
-                <div class="admin-card">
-                    <span class="admin-card-label">Pending Review</span>
-                    <span class="admin-card-value">{{ pending_count }}</span>
-                </div>
-                <div class="admin-card">
-                    <span class="admin-card-label">Approved</span>
-                    <span class="admin-card-value">{{ approved_count }}</span>
-                </div>
-            </section>
-
-            <section class="admin-panel">
-                <div class="admin-panel-head">
-                    <h3>Recent Applications</h3>
-                    <a href="{{ url_for('admin_applications') }}" class="admin-btn-sm admin-btn-primary">View All</a>
-                </div>
-
-                {% if recent_applications %}
-                    <div style="overflow-x:auto;">
-                        <table class="admin-table">
-                            <thead>
-                                <tr>
-                                    <th>Company</th>
-                                    <th>Contact</th>
-                                    <th>Category</th>
-                                    <th>Status</th>
-                                    <th>Submitted</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for app in recent_applications %}
-                                    <tr class="clickable-row" data-href="{{ url_for('admin_application_detail', application_id=app.id) }}">
-                                        <td>{{ app.company_name }}</td>
-                                        <td>{{ app.contact_name }}</td>
-                                        <td>
-                                            {% for ac in app.application_categories %}
-                                                {% if not loop.first %}, {% endif %}
-                                                {{ ac.category }}
-                                            {% endfor %}
-                                        </td>
-                                        <td>
-                                            <span class="admin-badge admin-badge-{{ app.status }}">
-                                                {{ app.status|replace('_', ' ')|title }}
-                                            </span>
-                                        </td>
-                                        <td>{{ app.created_at.strftime('%Y-%m-%d') if app.created_at else 'N/A' }}</td>
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                {% else %}
-                    <div class="dashboard-empty">No applications found.</div>
-                {% endif %}
-            </section>
-        </main>
+            </div>
+            {% set max_count = (status_counts.values()|max) or 1 %}
+            <ul class="ad-bars">
+                {% for status, count in status_counts.items() %}
+                    <li>
+                        <a href="{{ url_for('admin_applications', status=status) }}" class="ad-bar-row">
+                            <span class="ad-bar-label">{{ status_label(status) }}</span>
+                            <span class="ad-bar-track"><span class="ad-bar-fill" style="width: {{ (count / max_count * 100)|round(1) }}%"></span></span>
+                            <span class="ad-bar-value">{{ count }}</span>
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
+        </section>
     </div>
 
-    <script>
-        document.querySelectorAll('.clickable-row').forEach(function(row) {
-            row.addEventListener('click', function() {
-                const href = this.dataset.href;
-                if (href) {
-                    window.location.href = href;
-                }
-            });
-        });
-    </script>
-</body>
-</html>
+    <section class="ad-card">
+        <div class="ad-card-head">
+            <div>
+                <h2>Recent applications</h2>
+                <p>Latest submissions</p>
+            </div>
+            <a href="{{ url_for('admin_applications') }}" class="ad-link">View all applications</a>
+        </div>
+        {% if recent_applications %}
+            <div class="ad-table-wrap">
+                <table class="ad-table">
+                    <thead>
+                        <tr><th>Company</th><th>Contact</th><th>Category</th><th>Status</th><th>Submitted</th><th><span class="ad-sr">Open</span></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for application in recent_applications %}
+                            <tr>
+                                <td><a class="ad-row-link" href="{{ url_for('admin_application_detail', application_id=application.id) }}">{{ application.company_name }}</a></td>
+                                <td>{{ application.contact_name }}</td>
+                                <td>{{ application.category_names|join(', ') or '—' }}</td>
+                                <td>{{ ad.status_badge(application.status) }}</td>
+                                <td class="ad-nowrap">{{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}</td>
+                                <td class="ad-cell-action"><a href="{{ url_for('admin_application_detail', application_id=application.id) }}" class="ad-link">Open</a></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="ad-empty"><strong>No applications yet</strong><span>Submitted applications will appear here.</span></div>
+        {% endif %}
+    </section>
+{% endblock %}

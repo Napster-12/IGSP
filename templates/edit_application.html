@@ -1,503 +1,65 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Edit Application | IGSP</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
-    <style>
-        .category-section {
-            margin-bottom: 22px;
-        }
-        .section-header {
-            font-weight: 700;
-            font-size: 14px;
-            color: var(--primary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 12px;
-            padding-bottom: 8px;
-            border-bottom: 2px solid var(--primary-light);
-        }
-        .checkbox-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 10px 16px;
-        }
-        .checkbox-item label {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            cursor: pointer;
-            font-size: 14px;
-            color: var(--text);
-            padding: 10px 14px;
-            border-radius: 10px;
-            border: 1px solid var(--border);
-            background: #fff;
-            transition: var(--transition);
-        }
-        .checkbox-item label:hover {
-            border-color: var(--primary);
-            background: var(--primary-light);
-        }
-        .checkbox-item input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            accent-color: var(--primary);
-            flex-shrink: 0;
-        }
-        .detail-input {
-            margin-top: 8px;
-            margin-left: 28px;
-        }
-        .detail-input input {
-            width: 100%;
-            padding: 10px 14px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            font-size: 14px;
-            background: #fafafa;
-            transition: var(--transition);
-        }
-        .detail-input input:focus {
-            outline: none;
-            border-color: var(--primary);
-            box-shadow: 0 0 0 4px rgba(236,110,0,.15);
-            background: #fff;
-        }
-    </style>
-</head>
-<body class="dashboard-body">
-    <div class="dashboard-shell">
-        <aside class="dashboard-sidebar">
-            <div class="sidebar-brand">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
+{% extends "supplier_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+{% import "form_macros.html" as f with context %}
+
+{% block title %}Edit application{% endblock %}
+{% block breadcrumb %}<a href="{{ url_for('application_detail', application_id=application.id) }}" class="ad-crumb">{{ ad.icon('back') }} My application</a>{% endblock %}
+{% block page_title %}{{ 'Update & resubmit' if application.status in ['returned_for_update', 'declined'] else 'Edit application' }} {{ ad.status_badge(application.status) }}{% endblock %}
+{% block page_subtitle %}Change any details below; only upload files for documents you want to replace.{% endblock %}
+
+{% block content %}
+    {% if application.review_comments %}
+        <div class="ad-comment ad-comment--card">
+            <span class="ad-comment-label">Comments from Icebolethu Group</span>
+            <p>{{ application.review_comments }}</p>
+        </div>
+    {% endif %}
+
+    {% set by_type = {} %}
+    {% for doc in documents %}{% set _ = by_type.update({doc.document_type: doc}) %}{% endfor %}
+
+    <form class="ad-form ad-stack" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <section class="ad-card">
+            <div class="ad-card-head"><h2>Account</h2></div>
+            <div class="ad-form-grid">
+                {{ f.input('company_name', 'Company name', application.company_name, required=true) }}
+                {{ f.input('contact_name', 'Key contact', application.contact_name, required=true) }}
+                {{ f.input('phone', 'Phone number', application.phone, required=true, type='tel') }}
+                <div class="ad-field-row">
+                    <label for="email">Login email</label>
+                    <input id="email" type="email" value="{{ application.email }}" readonly title="Your login email can't be changed here.">
+                </div>
             </div>
+        </section>
 
-            <div class="sidebar-menu-block">
-                <div class="sidebar-menu-label">Supplier Dashboard</div>
-                <a href="{{ url_for('onboarding_profile') }}" class="sidebar-btn">Apply</a>
-                <a href="{{ url_for('dashboard') }}" class="sidebar-btn">Dashboard</a>
+        {% set values = application %}
+        {% include "_profile_sections.html" %}
+
+        <section class="ad-card">
+            <div class="ad-card-head"><h2>Supplier category</h2></div>
+            {{ f.category_picker(selected_categories, selected_details) }}
+        </section>
+
+        <section class="ad-card">
+            <div class="ad-card-head">
+                <div><h2>Documents</h2><p>Choose a new PDF only for documents you want to replace</p></div>
             </div>
-        </aside>
+            <div class="ad-slots">
+                {{ f.document_slot('document_file_company_profile', 'Company profile', by_type.get('Company Profile'), number='P', required=false) }}
+                {% for doc_type in doc_types %}
+                    {{ f.document_slot('document_file_' ~ loop.index, doc_type, by_type.get(doc_type), number=loop.index) }}
+                {% endfor %}
+                {{ f.document_slot('document_file_other', 'Other supporting documents', by_type.get('Other Supporting Documents'), number='+', required=false) }}
+            </div>
+        </section>
 
-        <main class="dashboard-main">
-            <header class="dashboard-header">
-                <div class="dashboard-profile-summary">
-                    <div class="dashboard-profile-name">{{ user.contact_name or user.company_name }}</div>
-                    <div class="dashboard-profile-role">Supplier</div>
-                    <div class="dashboard-status">
-                        {% if user.active %}
-                            <span class="status-badge active">Active</span>
-                        {% else %}
-                            <span class="status-badge inactive">Inactive</span>
-                        {% endif %}
-                    </div>
-                </div>
+        <div class="ad-form-actions ad-form-actions--sticky">
+            <a href="{{ url_for('application_detail', application_id=application.id) }}" class="ad-btn ad-btn--ghost">Cancel</a>
+            <button type="submit" class="ad-btn ad-btn--primary">{{ 'Save & resubmit for review' if application.status in ['returned_for_update', 'declined'] else 'Save changes' }}</button>
+        </div>
+    </form>
+{% endblock %}
 
-                <div class="dashboard-actions">
-                    <a href="{{ url_for('notifications') }}" class="dashboard-notification" aria-label="Notifications">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
-                        </svg>
-                        {% if unread_notifications > 0 %}
-                            <span class="notification-badge">{{ unread_notifications }}</span>
-                        {% endif %}
-                    </a>
-                    <a class="dashboard-logout" href="{{ url_for('logout') }}">Logout</a>
-                </div>
-            </header>
-
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-
-            <section class="dashboard-form-panel">
-                <div class="panel-head">
-                    <h3>Edit Application</h3>
-                    <span>Update your company information and replace documents</span>
-                </div>
-
-                <form class="igsp-form dashboard-form" method="post" enctype="multipart/form-data">
-                    <div class="form-grid">
-                        <div class="form-row">
-                            <label for="company_name">Company Name</label>
-                            <input id="company_name" name="company_name" type="text" value="{{ application.company_name }}" required>
-                        </div>
-
-                        <div class="form-row">
-                            <label for="contact_name">Key Contact Individual</label>
-                            <input id="contact_name" name="contact_name" type="text" value="{{ application.contact_name }}" required>
-                        </div>
-
-                        <div class="form-row">
-                            <label for="email">Email Address</label>
-                            <input id="email" name="email" type="email" value="{{ application.email }}" required>
-                        </div>
-
-                        <div class="form-row">
-                            <label for="phone">Phone Number</label>
-                            <input id="phone" name="phone" type="text" value="{{ application.phone }}" required>
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <label for="supplier_category">Supplier Category</label>
-                        <p style="color:var(--text-light); font-size:14px; margin-bottom:16px;">Select all categories that apply to your business.</p>
-                    </div>
-
-                    {% set selected_set = selected_categories or [] %}
-                    {% set details = selected_details or {} %}
-
-                    {% for section in CATEGORY_SECTIONS %}
-                        {% if section.name %}
-                        <div class="category-section">
-                            <div class="section-header">{{ section.name }}</div>
-                            <div class="checkbox-grid">
-                        {% else %}
-                        <div class="category-section">
-                            <div class="checkbox-grid">
-                        {% endif %}
-
-                        {% for item in section['items'] %}
-                            <div class="checkbox-item">
-                                <label>
-                                    <input type="checkbox" name="categories" value="{{ item.value }}" {% if item.value in selected_set %}checked{% endif %} data-index="{{ item.index }}">
-                                    {{ item.label }}
-                                </label>
-                                {% if item.specify %}
-                                    <div class="detail-input" data-for="{{ item.index }}" style="display:none;">
-                                        <input type="text" name="category_detail_{{ item.index }}" value="{{ details.get(item.value, '') }}" placeholder="Please specify...">
-                                    </div>
-                                {% endif %}
-                            </div>
-                        {% endfor %}
-
-                            </div>
-                        </div>
-                    {% endfor %}
-
-                    <div class="section-title">Company Registration Details</div>
-                    <div class="form-grid">
-                        <div class="form-row">
-                            <label for="registered_vendor_name">Registered Vendor Name <span style="color:#dc3545;">*</span></label>
-                            <input id="registered_vendor_name" name="registered_vendor_name" type="text" value="{{ application.registered_vendor_name }}" required>
-                        </div>
-
-                        <div class="form-row">
-                            <label for="trading_name">Trading Name (if applicable)</label>
-                            <input id="trading_name" name="trading_name" type="text" value="{{ application.trading_name }}">
-                        </div>
-
-                        <div class="form-row">
-                            <label for="business_registration_number">Business Registration Number <span style="color:#dc3545;">*</span></label>
-                            <input id="business_registration_number" name="business_registration_number" type="text" value="{{ application.business_registration_number }}" required>
-                        </div>
-
-                        <div class="form-row">
-                            <label for="vat_number">VAT Number</label>
-                            <input id="vat_number" name="vat_number" type="text" value="{{ application.vat_number }}">
-                        </div>
-
-                        <div class="form-row">
-                            <label for="tax_number">Tax Number <span style="color:#dc3545;">*</span></label>
-                            <input id="tax_number" name="tax_number" type="text" value="{{ application.tax_number }}" required>
-                        </div>
-                    </div>
-
-                    <div class="section-title">Company Address</div>
-                    <div class="form-grid">
-                        <div class="form-row" style="grid-column: 1 / -1;">
-                            <label for="physical_address">Company's Physical Address <span style="color:#dc3545;">*</span></label>
-                            <input id="physical_address" name="physical_address" type="text" value="{{ application.physical_address }}" required>
-                        </div>
-
-                        <div class="form-row">
-                            <label for="city">City <span style="color:#dc3545;">*</span></label>
-                            <input id="city" name="city" type="text" value="{{ application.city }}" required>
-                        </div>
-
-                        <div class="form-row">
-                            <label for="province">Province <span style="color:#dc3545;">*</span></label>
-                            <select id="province" name="province" required>
-                                <option value="">Select Province</option>
-                                <option value="Eastern Cape" {% if application.province == 'Eastern Cape' %}selected{% endif %}>Eastern Cape</option>
-                                <option value="Free State" {% if application.province == 'Free State' %}selected{% endif %}>Free State</option>
-                                <option value="Gauteng" {% if application.province == 'Gauteng' %}selected{% endif %}>Gauteng</option>
-                                <option value="KwaZulu-Natal" {% if application.province == 'KwaZulu-Natal' %}selected{% endif %}>KwaZulu-Natal</option>
-                                <option value="Limpopo" {% if application.province == 'Limpopo' %}selected{% endif %}>Limpopo</option>
-                                <option value="Mpumalanga" {% if application.province == 'Mpumalanga' %}selected{% endif %}>Mpumalanga</option>
-                                <option value="Northern Cape" {% if application.province == 'Northern Cape' %}selected{% endif %}>Northern Cape</option>
-                                <option value="North West" {% if application.province == 'North West' %}selected{% endif %}>North West</option>
-                                <option value="Western Cape" {% if application.province == 'Western Cape' %}selected{% endif %}>Western Cape</option>
-                            </select>
-                        </div>
-
-                        <div class="form-row">
-                            <label for="postal_code">Postal Code <span style="color:#dc3545;">*</span></label>
-                            <input id="postal_code" name="postal_code" type="text" value="{{ application.postal_code }}" required>
-                        </div>
-
-                        <div class="form-row">
-                            <label for="website">Website</label>
-                                <input id="website" name="website" type="text" value="{{ application.website }}">
-                        </div>
-                    </div>
-
-                    <div class="section-title">Contact Details</div>
-                    <div class="form-grid">
-                        <div class="form-row">
-                            <label for="primary_contact_person">Primary Contact Person <span style="color:#dc3545;">*</span></label>
-                            <input id="primary_contact_person" name="primary_contact_person" type="text" value="{{ application.primary_contact_person }}" required>
-                        </div>
-
-                        <div class="form-row">
-                            <label for="contact_person_role">Contact Person's Role <span style="color:#dc3545;">*</span></label>
-                            <input id="contact_person_role" name="contact_person_role" type="text" value="{{ application.contact_person_role }}" required>
-                        </div>
-
-                        <div class="form-row">
-                            <label for="contact_number">Contact Number(s) <span style="color:#dc3545;">*</span></label>
-                            <input id="contact_number" name="contact_number" type="text" value="{{ application.contact_number }}" required>
-                        </div>
-
-                        <div class="form-row">
-                            <label for="email_address">E-Mail Address <span style="color:#dc3545;">*</span></label>
-                            <input id="email_address" name="email_address" type="email" value="{{ application.email_address }}" required>
-                        </div>
-                    </div>
-
-                    <div class="section-title">Ownership Details (Directors and Shareholders)</div>
-                    <p style="color:var(--text-light); font-size:14px; margin-bottom:12px;">Provide details for all directors and shareholders.</p>
-                    <button type="button" class="btn-add-row" onclick="addDirectorRow()">+ Add Director / Shareholder</button>
-                    <div style="overflow-x:auto; margin-top:12px;">
-                        <table class="directors-table" id="directors-table">
-                            <thead>
-                                <tr>
-                                    <th style="width:25%;">Initials and Surname <span style="color:#dc3545;">*</span></th>
-                                    <th style="width:20%;">ID Number</th>
-                                    <th style="width:20%;">Role <span style="color:#dc3545;">*</span></th>
-                                    <th style="width:20%;">Nationality <span style="color:#dc3545;">*</span></th>
-                                    <th style="width:15%;">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for director in directors %}
-                                <tr>
-                                    <td><input type="text" name="director_initials_{{ loop.index0 }}" value="{{ director.initials_surname }}" placeholder="e.g. J. Doe" required></td>
-                                    <td><input type="text" name="director_id_{{ loop.index0 }}" value="{{ director.id_number }}" placeholder="ID Number"></td>
-                                    <td><input type="text" name="director_role_{{ loop.index0 }}" value="{{ director.role }}" placeholder="Director / Shareholder" required></td>
-                                    <td><input type="text" name="director_nationality_{{ loop.index0 }}" value="{{ director.nationality }}" placeholder="Nationality" required></td>
-                                    <td><button type="button" class="btn-remove-row" onclick="removeRow(this)">Remove</button></td>
-                                </tr>
-                                {% endfor %}
-                                <tr id="director-row-template" style="display:none;">
-                                    <td><input type="text" name="director_initials_{INDEX}" placeholder="e.g. J. Doe"></td>
-                                    <td><input type="text" name="director_id_{INDEX}" placeholder="ID Number"></td>
-                                    <td><input type="text" name="director_role_{INDEX}" placeholder="Director / Shareholder"></td>
-                                    <td><input type="text" name="director_nationality_{INDEX}" placeholder="Nationality"></td>
-                                    <td><button type="button" class="btn-remove-row" onclick="removeRow(this)">Remove</button></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-
-                    {% set company_profile_doc = documents | selectattr('document_type', 'equalto', 'Company Profile') | list %}
-                    <div class="form-row" style="margin-top:24px;">
-                        <label>Company Profile</label>
-                        <div class="document-card" style="border-left:4px solid var(--primary);">
-                            <div class="document-card-header">
-                                <span class="document-number">8</span>
-                                <h4>Company Profile</h4>
-                            </div>
-                            {% if company_profile_doc %}
-                                <div class="document-uploaded">
-                                    <span class="document-status-badge">Uploaded</span>
-                                    <a href="javascript:void(0);" class="document-view-link" onclick="togglePdf(this); return false;">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                                </a>
-                                <iframe src="/uploads/{{ company_profile_doc[0].file_path|replace('\\', '/') }}#toolbar=0&navpanes=0" class="pdf-viewer"></iframe>
-                                </div>
-                            {% else %}
-                                <div class="document-uploaded">
-                                    <span class="document-status-badge" style="background:#f8d7da; color:#721c24;">Not Uploaded</span>
-                                </div>
-                            {% endif %}
-                            <div class="document-file-input">
-                                <input type="file" name="document_file_company_profile" id="doc-company-profile">
-                                <label for="doc-company-profile" class="document-file-label">{{ 'Replace File' if company_profile_doc else 'Choose File' }}</label>
-                                <span class="document-selected-name">{{ company_profile_doc[0].original_filename if company_profile_doc else 'No file chosen' }}</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <script>
-                        function toggleDetailInputs() {
-                            document.querySelectorAll('input[type="checkbox"][name="categories"]').forEach(function(cb) {
-                                const idx = cb.getAttribute('data-index');
-                                const detailDiv = document.querySelector('.detail-input[data-for="' + idx + '"]');
-                                if (detailDiv) {
-                                    detailDiv.style.display = cb.checked ? 'block' : 'none';
-                                }
-                            });
-                        }
-
-                        document.addEventListener('DOMContentLoaded', function() {
-                            document.querySelectorAll('input[type="checkbox"][name="categories"]').forEach(function(cb) {
-                                cb.addEventListener('change', toggleDetailInputs);
-                            });
-                            toggleDetailInputs();
-                        });
-
-                        let directorCount = {{ directors|length }};
-                        function addDirectorRow() {
-                            const tbody = document.querySelector('#directors-table tbody');
-                            const template = document.getElementById('director-row-template');
-                            const clone = template.cloneNode(true);
-                            clone.style.display = '';
-                            clone.id = '';
-                            clone.innerHTML = clone.innerHTML.replace(/{INDEX}/g, directorCount);
-                            tbody.appendChild(clone);
-                            directorCount++;
-                        }
-                        function removeRow(btn) {
-                            const row = btn.closest('tr');
-                            row.parentNode.removeChild(row);
-                        }
-                    </script>
-
-                    <div class="form-row">
-                        <label>Documents</label>
-                        <p style="color:var(--text-light); font-size:14px; margin-bottom:16px;">Upload new files to replace existing documents. Only upload files for documents you want to replace.</p>
-
-                        {% set uploaded_docs = {} %}
-                        {% for doc in documents %}
-                            {% set _ = uploaded_docs.update({doc.document_type: doc}) %}
-                        {% endfor %}
-
-                        <div class="documents-grid">
-                            {% for doc_type in doc_types %}
-                                {% set uploaded = uploaded_docs.get(doc_type) %}
-                                <div class="document-card">
-                                    <div class="document-card-header">
-                                        <span class="document-number">{{ loop.index }}</span>
-                                        <h4>{{ doc_type }}</h4>
-                                    </div>
-                                    {% if uploaded %}
-                                        <div class="document-uploaded">
-                                            <span class="document-status-badge">Uploaded</span>
-                                            <a href="javascript:void(0);" class="document-view-link" onclick="togglePdf(this); return false;">
-                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                                        </a>
-                                        <iframe src="/uploads/{{ uploaded.file_path|replace('\\', '/') }}#toolbar=0&navpanes=0" class="pdf-viewer"></iframe>
-                                        </div>
-                                    {% else %}
-                                        <div class="document-uploaded">
-                                            <span class="document-status-badge" style="background:#f8d7da; color:#721c24;">Not Uploaded</span>
-                                        </div>
-                                    {% endif %}
-                                    <div class="document-file-input">
-                                        <input type="file" name="document_file_{{ loop.index }}" id="doc-{{ loop.index }}">
-                                        <label for="doc-{{ loop.index }}" class="document-file-label">{{ 'Replace File' if uploaded else 'Choose File' }}</label>
-                                        <span class="document-selected-name">{{ uploaded.original_filename if uploaded else 'No file chosen' }}</span>
-                                    </div>
-                            </div>
-                        {% endfor %}
-                    </div>
-
-                        <div class="document-card" style="margin-top:18px; border-left:4px solid var(--primary);">
-                            <div class="document-card-header">
-                                <span class="document-number">7</span>
-                                <h4>Declaration Form</h4>
-                            </div>
-                            <p style="color:var(--text-light); font-size:14px; margin-bottom:12px;">
-                                Download, print, sign, and upload the completed declaration form.
-                                <a href="/static/Declaration.pdf" target="_blank" rel="noopener" style="color:var(--primary); font-weight:700; text-decoration:underline;">Download Declaration Form</a>
-                            </p>
-                            {% set uploaded_declaration = documents | selectattr('document_type', 'equalto', 'Declaration Form') | list %}
-                            {% if uploaded_declaration %}
-                                <div class="document-uploaded">
-                                    <span class="document-status-badge">Uploaded</span>
-                                    <a href="javascript:void(0);" class="document-view-link" onclick="togglePdf(this); return false;">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                                </a>
-                                <iframe src="/uploads/{{ uploaded_declaration[0].file_path|replace('\\', '/') }}#toolbar=0&navpanes=0" class="pdf-viewer"></iframe>
-                                </div>
-                            {% else %}
-                                <div class="document-uploaded">
-                                    <span class="document-status-badge" style="background:#f8d7da; color:#721c24;">Not Uploaded</span>
-                                </div>
-                            {% endif %}
-                            <div class="document-file-input">
-                                <input type="file" name="document_file_7" id="doc-7">
-                                <label for="doc-7" class="document-file-label">Replace File</label>
-                                <span class="document-selected-name">{{ uploaded_declaration[0].original_filename if uploaded_declaration else 'No file chosen' }}</span>
-                            </div>
-                        </div>
-
-                        <div class="document-card" style="margin-top:18px; border-left:4px solid var(--primary);">
-                            <div class="document-card-header">
-                                <span class="document-number">*</span>
-                                <h4>Other Supporting Documents</h4>
-                            </div>
-                            <p style="color:var(--text-light); font-size:14px; margin-bottom:12px;">You may upload additional relevant documents such as:</p>
-                            <ul style="margin:0 0 14px 18px; color:var(--text-light); font-size:14px; line-height:1.7;">
-                                <li>Valid Public Liability Insurance, where applicable to the service provided</li>
-                                <li>Valid industry-specific license, permit, registration, accreditation or professional certificate, where required</li>
-                                <li>Valid COIDA / Workmen’s Compensation Letter of Good Standing</li>
-                            </ul>
-                        {% set uploaded_other = documents | selectattr('document_type', 'equalto', 'Other Supporting Documents') | list %}
-                        <div class="document-file-input">
-                            <input type="file" name="document_file_other" id="doc-other">
-                            <label for="doc-other" class="document-file-label">Choose File</label>
-                                <span class="document-selected-name">{{ uploaded_other[0].original_filename if uploaded_other else 'No file chosen' }}</span>
-                        </div>
-                        </div>
-                    </div>
-
-                    <div class="wizard-actions">
-                         <a href="{{ url_for('dashboard') }}" class="secondary-link">Cancel</a>
-                        <button type="submit">Save Changes</button>
-                    </div>
-                </form>
-            </section>
-        </main>
-    </div>
-
-    <script>
-        function togglePdf(link) {
-            var iframe = link.parentNode.querySelector('.pdf-viewer');
-            if (!iframe) return;
-            var eye = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
-            var eyeOff = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
-            if (iframe.style.display === 'none') {
-                iframe.style.display = 'block';
-                link.innerHTML = eyeOff;
-            } else {
-                iframe.style.display = 'none';
-                link.innerHTML = eye;
-            }
-        }
-        document.querySelectorAll('.document-file-input input[type="file"]').forEach(function (input) {
-            const selectedName = input.closest('.document-file-input').querySelector('.document-selected-name');
-            input.addEventListener('change', function () {
-                if (this.files && this.files[0]) {
-                    selectedName.textContent = this.files[0].name;
-                } else {
-                    selectedName.textContent = 'No file chosen';
-                }
-            });
-        });
-    </script>
-
-    <footer class="footer">
-        <p>NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
-    </footer>
-</body>
-</html>
+{% block scripts %}<script src="{{ url_for('static', filename='js/directors.js') }}"></script>{% endblock %}

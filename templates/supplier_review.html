@@ -1,205 +1,153 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Review Supplier Application | IGSP</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
-</head>
-<body class="dashboard-body">
-    <div class="dashboard-shell">
-        <aside class="dashboard-sidebar">
-            <div class="sidebar-brand">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
-            </div>
+{% extends "supplier_base.html" %}
+{% import "form_macros.html" as f with context %}
 
-            <div class="sidebar-menu-block">
-                <div class="sidebar-menu-label">Supplier Dashboard</div>
-                <a href="{{ url_for('onboarding_profile') }}" class="sidebar-btn">Apply</a>
-                <a href="{{ url_for('dashboard') }}" class="sidebar-btn">View Applications</a>
-            </div>
-        </aside>
+{% macro field(label, value, wide=false) -%}
+    <div class="rv-field{% if wide %} rv-field-wide{% endif %}">
+        <dt>{{ label }}</dt>
+        <dd>{% if value %}{{ value }}{% else %}<span class="rv-empty">Not provided</span>{% endif %}</dd>
+    </div>
+{%- endmacro %}
 
-        <main class="dashboard-main">
-            <header class="dashboard-header">
-                <div class="dashboard-profile-summary">
-                    <div class="dashboard-profile-name">{{ user.contact_name or user.company_name }}</div>
-                    <div class="dashboard-profile-role">Supplier</div>
-                </div>
+{% macro section_head(number, title, edit_url) -%}
+    <div class="rv-section-head">
+        <h4><span class="rv-step">{{ number }}</span>{{ title }}</h4>
+        <a href="{{ edit_url }}" class="rv-edit">Edit</a>
+    </div>
+{%- endmacro %}
 
-                <div class="dashboard-actions">
-                    <a href="{{ url_for('notifications') }}" class="dashboard-notification" aria-label="Notifications">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
-                        </svg>
-                        {% if unread_notifications > 0 %}
-                            <span class="notification-badge">{{ unread_notifications }}</span>
-                        {% endif %}
-                    </a>
-                    <a class="dashboard-logout" href="{{ url_for('logout') }}">Logout</a>
-                </div>
-            </header>
+{% block title %}Apply — Review{% endblock %}
+{% block page_title %}Supplier application{% endblock %}
+{% block page_subtitle %}Step 4 of 4 · Check your details carefully before submitting{% endblock %}
 
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
+{% block content %}
+    {{ f.steps(4) }}
+    <div class="rv-layout">
+        <div class="rv-main">
 
-            <section class="dashboard-form-panel">
-                <div class="panel-head">
-                    <h3>Review Supplier Application</h3>
-                    <span>Confirm your details before submission</span>
-                </div>
+            <section class="rv-section">
+                {{ section_head(1, 'Company Details', url_for('onboarding_profile')) }}
+                <dl class="rv-fields">
+                    {{ field('Registered Vendor Name', draft.registered_vendor_name, wide=true) }}
+                    {{ field('Trading Name', draft.trading_name) }}
+                    {{ field('Business Registration Number', draft.business_registration_number) }}
+                    {{ field('VAT Number', draft.vat_number) }}
+                    {{ field('Tax Number', draft.tax_number) }}
+                    {{ field('Website', draft.website, wide=true) }}
+                </dl>
+            </section>
 
-                <div class="wizard-progress">
-                    <div class="wizard-progress-track"></div>
-                    <div class="wizard-pill done">1. Profile</div>
-                    <div class="wizard-pill done">2. Category</div>
-                    <div class="wizard-pill done">3. Documents</div>
-                    <div class="wizard-pill active">4. Review</div>
-                </div>
+            <section class="rv-section">
+                {{ section_head(2, 'Company Address', url_for('onboarding_profile')) }}
+                <dl class="rv-fields">
+                    {{ field('Physical Address', draft.physical_address, wide=true) }}
+                    {{ field('City', draft.city) }}
+                    {{ field('Province', draft.province) }}
+                    {{ field('Postal Code', draft.postal_code) }}
+                </dl>
+            </section>
 
-                <div class="review-grid">
-                    <div class="review-card">
-                        <strong>Registered Vendor Name</strong>
-                        <span>{{ draft.registered_vendor_name }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>Business Registration Number</strong>
-                        <span>{{ draft.business_registration_number }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>Tax Number</strong>
-                        <span>{{ draft.tax_number }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>Primary Contact Person</strong>
-                        <span>{{ draft.primary_contact_person }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>Contact Number(s)</strong>
-                        <span>{{ draft.contact_number }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>E-Mail Address</strong>
-                        <span>{{ draft.email_address }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>Supplier Category</strong>
-                        {% if draft.supplier_categories %}
-                            {% for cat in draft.supplier_categories %}
-                                <span>{{ cat }}</span>
-                                {% set detail = draft.supplier_category_details and draft.supplier_category_details.get(cat, '') %}
-                                {% if detail %}
-                                    <span style="display:block; margin-left:10px; color:var(--text-light);">{{ detail }}</span>
-                                {% endif %}
-                            {% endfor %}
-                        {% else %}
-                            <span>{{ draft.supplier_category }}</span>
-                        {% endif %}
-                    </div>
-                    <div class="review-card">
-                        <strong>Contact Name</strong>
-                        <span>{{ draft.contact_name }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>Email</strong>
-                        <span>{{ draft.email }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>Phone</strong>
-                        <span>{{ draft.phone }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>Compliance Documents Status</strong>
-                        <span>{{ draft.documents_status }}</span>
-                    </div>
-                    {% if draft.directors %}
-                    <div class="review-card" style="grid-column: 1 / -1;">
-                        <strong>Directors and Shareholders</strong>
-                        <div style="margin-top:8px; overflow-x:auto;">
-                            <table style="width:100%; border-collapse:collapse; font-size:14px;">
-                                <thead>
-                                    <tr style="background:#f5f5f5;">
-                                        <th style="text-align:left; padding:8px; border:1px solid var(--border);">Initials and Surname</th>
-                                        <th style="text-align:left; padding:8px; border:1px solid var(--border);">ID Number</th>
-                                        <th style="text-align:left; padding:8px; border:1px solid var(--border);">Role</th>
-                                        <th style="text-align:left; padding:8px; border:1px solid var(--border);">Nationality</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for director in draft.directors %}
-                                    <tr>
-                                        <td style="padding:8px; border:1px solid var(--border);">{{ director.initials_surname }}</td>
-                                        <td style="padding:8px; border:1px solid var(--border);">{{ director.id_number }}</td>
-                                        <td style="padding:8px; border:1px solid var(--border);">{{ director.role }}</td>
-                                        <td style="padding:8px; border:1px solid var(--border);">{{ director.nationality }}</td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
+            <section class="rv-section">
+                {{ section_head(3, 'Contact Details', url_for('onboarding_profile')) }}
+                <dl class="rv-fields">
+                    {{ field('Primary Contact Person', draft.primary_contact_person) }}
+                    {{ field("Contact Person's Role", draft.contact_person_role) }}
+                    {{ field('Contact Number(s)', draft.contact_number) }}
+                    {{ field('E-Mail Address', draft.email_address) }}
+                </dl>
+                <p class="rv-note">Account: <strong>{{ user.company_name }}</strong> · {{ user.contact_name }} · {{ user.email }} · {{ user.phone }}</p>
+            </section>
 
-                {% if documents %}
-                <section class="filter-section">
-                    <div class="panel-head">
-                        <h3>Supporting Documents</h3>
-                    </div>
-                    <div class="documents-grid">
-                        {% for doc in documents %}
-                            <div class="document-card">
-                                <div class="document-card-header">
-                                    <span class="document-number">{{ loop.index }}</span>
-                                    <h4>{{ doc.document_type }}</h4>
-                                </div>
-                                <div class="document-uploaded">
-                                    <span class="document-status-badge">Uploaded</span>
-                                    <a href="javascript:void(0);" class="document-view-link" onclick="togglePdf(this); return false;">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                                </a>
-                                <iframe src="/uploads/{{ doc.file_path|replace('\\', '/') }}#toolbar=0&navpanes=0" class="pdf-viewer"></iframe>
-                                </div>
+            <section class="rv-section">
+                {{ section_head(4, 'Supplier Category', url_for('onboarding_category')) }}
+                {% set details = draft.supplier_category_details or {} %}
+                {% if draft.supplier_categories %}
+                    <div class="rv-chips">
+                        {% for cat in draft.supplier_categories %}
+                            <div class="rv-chip">
+                                <strong>{{ cat }}</strong>
+                                {% if details.get(cat) %}<span>{{ details.get(cat) }}</span>{% endif %}
                             </div>
                         {% endfor %}
                     </div>
-                </section>
+                {% else %}
+                    <p class="rv-empty">No category selected.</p>
                 {% endif %}
-
-                <form class="igsp-form dashboard-form" method="post">
-                    <div class="wizard-actions">
-                        <a href="{{ url_for('onboarding_documents') }}" class="filter-btn filter-btn-secondary">Back</a>
-                        <button type="submit" class="filter-btn">Submit</button>
-                    </div>
-                </form>
             </section>
-        </main>
+
+            <section class="rv-section">
+                {{ section_head(5, 'Directors & Shareholders', url_for('onboarding_profile')) }}
+                {% if draft.directors %}
+                    <div class="rv-table-wrap">
+                        <table class="rv-table">
+                            <thead>
+                                <tr><th>Initials &amp; Surname</th><th>ID / Passport Number</th><th>Role</th><th>Nationality</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for director in draft.directors %}
+                                    <tr>
+                                        <td>{{ director.initials_surname }}</td>
+                                        <td class="rv-mono">{{ director.id_number }}</td>
+                                        <td>{{ director.role }}</td>
+                                        <td>{{ director.nationality }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="rv-empty">No directors or shareholders added.</p>
+                {% endif %}
+            </section>
+
+            <section class="rv-section">
+                {{ section_head(6, 'Documents', url_for('onboarding_documents')) }}
+                <ul class="rv-docs">
+                    {% for doc_type in required_documents + optional_documents %}
+                        {% set doc = documents_by_type.get(doc_type) %}
+                        {% set required = doc_type in required_documents %}
+                        {% if doc or required %}
+                            <li class="rv-doc {% if not doc %}rv-doc-missing{% endif %}">
+                                <span class="rv-doc-icon" aria-hidden="true">{% if doc %}✓{% else %}!{% endif %}</span>
+                                <div class="rv-doc-text">
+                                    <strong>{{ doc_type }}</strong>
+                                    <span>{% if doc %}{{ doc.original_filename }}{% else %}Required — not uploaded{% endif %}</span>
+                                </div>
+                                {% if doc %}
+                                    <a class="rv-doc-view" href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" target="_blank" rel="noopener">View</a>
+                                {% else %}
+                                    <a class="rv-doc-view" href="{{ url_for('onboarding_documents') }}">Upload</a>
+                                {% endif %}
+                            </li>
+                        {% endif %}
+                    {% endfor %}
+                </ul>
+            </section>
+        </div>
+
+        <aside class="rv-side">
+            <div class="rv-summary">
+                <h4>Ready to submit?</h4>
+                {% set docs_done = required_documents|length - missing_documents|length %}
+                <ul class="rv-checklist">
+                    <li class="{{ 'ok' if profile_complete else 'todo' }}">Company profile</li>
+                    <li class="{{ 'ok' if draft.supplier_categories else 'todo' }}">Supplier category</li>
+                    <li class="{{ 'ok' if draft.directors else 'todo' }}">Directors &amp; shareholders ({{ draft.directors|length }})</li>
+                    <li class="{{ 'ok' if not missing_documents else 'todo' }}">Required documents ({{ docs_done }}/{{ required_documents|length }})</li>
+                </ul>
+
+                {% set can_submit = profile_complete and draft.supplier_categories and draft.directors and not missing_documents %}
+                <form method="post" class="rv-submit-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <label class="rv-confirm">
+                        <input type="checkbox" name="confirm" value="1" required {% if not can_submit %}disabled{% endif %}>
+                        <span>I confirm that the information and documents provided are true and correct.</span>
+                    </label>
+                    <button type="submit" class="rv-submit" {% if not can_submit %}disabled{% endif %}>Submit Application</button>
+                    {% if not can_submit %}
+                        <p class="rv-blocked">Complete the items above before submitting.</p>
+                    {% endif %}
+                </form>
+                <a href="{{ url_for('onboarding_documents') }}" class="rv-back">← Back to documents</a>
+            </div>
+        </aside>
     </div>
-
-    <footer class="footer">
-        <p>NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
-    </footer>
-
-    <script>
-        function togglePdf(link) {
-            var iframe = link.parentNode.querySelector('.pdf-viewer');
-            if (!iframe) return;
-            var eye = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
-            var eyeOff = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
-            if (iframe.style.display === 'none') {
-                iframe.style.display = 'block';
-                link.innerHTML = eyeOff;
-            } else {
-                iframe.style.display = 'none';
-                link.innerHTML = eye;
-            }
-        }
-    </script>
-</body>
-</html>
+{% endblock %}

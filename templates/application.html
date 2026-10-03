@@ -1,192 +1,37 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>View Applications | IGSP</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
-</head>
-<body class="dashboard-body">
-    <div class="dashboard-shell">
-        <aside class="dashboard-sidebar">
-            <div class="sidebar-brand">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
+{% extends "supplier_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+{% import "_macros.html" as ui with context %}
+
+{% block title %}My applications{% endblock %}
+{% block page_title %}My applications{% endblock %}
+{% block page_subtitle %}{{ total_count }} application{{ '' if total_count == 1 else 's' }}{% endblock %}
+
+{% block content %}
+    <section class="ad-card">
+        {% if applications %}
+            <div class="ad-table-wrap">
+                <table class="ad-table">
+                    <thead><tr><th>Company</th><th>Category</th><th>Status</th><th>Submitted</th><th><span class="ad-sr">Open</span></th></tr></thead>
+                    <tbody>
+                        {% for application in applications %}
+                            <tr>
+                                <td><a class="ad-row-link" href="{{ url_for('application_detail', application_id=application.id) }}">{{ application.company_name }}</a></td>
+                                <td>{{ application.category_names|join(', ') or '—' }}</td>
+                                <td>{{ ad.status_badge(application.status) }}</td>
+                                <td class="ad-nowrap">{{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}</td>
+                                <td class="ad-cell-action"><a href="{{ url_for('application_detail', application_id=application.id) }}" class="ad-btn ad-btn--ghost ad-btn--sm">View</a></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
-
-            <div class="sidebar-menu-block">
-                <div class="sidebar-menu-label">Supplier Dashboard</div>
-                {% if applications %}
-                    <a href="{{ url_for('edit_application', application_id=applications[0].id) }}" class="sidebar-btn">Edit Application</a>
-                {% else %}
-                    <a href="{{ url_for('onboarding_profile') }}" class="sidebar-btn">Apply</a>
-                {% endif %}
-                <a href="{{ url_for('dashboard') }}" class="sidebar-btn">View Applications</a>
+            {{ ui.render_pagination(pagination, 'applications') }}
+        {% else %}
+            <div class="ad-empty">
+                <strong>No applications yet</strong>
+                <span>Start your supplier application to get registered.</span>
+                <a href="{{ url_for('onboarding_profile') }}" class="ad-btn ad-btn--primary ad-mt">Start application</a>
             </div>
-        </aside>
-
-        <main class="dashboard-main">
-            <header class="dashboard-header">
-                <div class="dashboard-profile-summary">
-                    <div class="dashboard-profile-name">{{ user.contact_name or user.company_name }}</div>
-                    <div class="dashboard-profile-role">Supplier</div>
-                </div>
-
-                <div class="dashboard-actions">
-                    <a href="{{ url_for('notifications') }}" class="dashboard-notification" aria-label="Notifications">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
-                        </svg>
-                        {% if unread_notifications > 0 %}
-                            <span class="notification-badge">{{ unread_notifications }}</span>
-                        {% endif %}
-                    </a>
-                    <a class="dashboard-logout" href="{{ url_for('logout') }}">Logout</a>
-                </div>
-            </header>
-
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-
-            <section class="apps-summary-grid">
-                <div class="dashboard-card stat-card approved">
-                    <span class="dashboard-label">Approved</span>
-                    <h2>{{ approved_count }}</h2>
-                    <p>Successfully approved applications</p>
-                </div>
-
-                <div class="dashboard-card stat-card review">
-                    <span class="dashboard-label">Under Review</span>
-                    <h2>{{ under_review_count }}</h2>
-                    <p>Applications awaiting review</p>
-                </div>
-
-                <div class="dashboard-card stat-card declined">
-                    <span class="dashboard-label">Declined</span>
-                    <h2>{{ declined_count }}</h2>
-                    <p>Applications not approved</p>
-                </div>
-            </section>
-
-            <section class="dashboard-form-panel applications-panel">
-                <div class="panel-head">
-                    <h3>Filters & Analytics</h3>
-                </div>
-
-                <form method="get" class="applications-filter-form">
-                    <div class="filter-row">
-                        <select name="status">
-                            <option value="all" {% if current_status == 'all' %}selected{% endif %}>All Statuses</option>
-                            <option value="approved" {% if current_status == 'approved' %}selected{% endif %}>Approved</option>
-                            <option value="pending_review" {% if current_status == 'pending_review' %}selected{% endif %}>Under Review</option>
-                            <option value="declined" {% if current_status == 'declined' %}selected{% endif %}>Declined</option>
-                        </select>
-
-                        <input type="text" name="q" value="{{ search_query }}" placeholder="Search company, contact or email">
-                        <button type="submit">Apply Filters</button>
-                    </div>
-                </form>
-
-                <div class="chart-grid">
-                    <div class="chart-card">
-                        <h4>Status Distribution</h4>
-                        <div class="chart-bars">
-                            <div class="chart-bar-row">
-                                <span>Approved</span>
-                                <div class="bar-track"><div class="bar-fill approved" style="width: {{ approved_percent }}%"></div></div>
-                                <strong>{{ approved_count }}</strong>
-                            </div>
-                            <div class="chart-bar-row">
-                                <span>Under Review</span>
-                                <div class="bar-track"><div class="bar-fill review" style="width: {{ under_review_percent }}%"></div></div>
-                                <strong>{{ under_review_count }}</strong>
-                            </div>
-                            <div class="chart-bar-row">
-                                <span>Declined</span>
-                                <div class="bar-track"><div class="bar-fill declined" style="width: {{ declined_percent }}%"></div></div>
-                                <strong>{{ declined_count }}</strong>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="chart-card">
-                        <h4>Application Mix</h4>
-                        <div class="donut-legend">
-                            <div class="legend-item"><span class="dot approved"></span> Approved</div>
-                            <div class="legend-item"><span class="dot review"></span> Under Review</div>
-                            <div class="legend-item"><span class="dot declined"></span> Declined</div>
-                        </div>
-                        <div class="donut-chart">
-                            <div class="donut-ring">
-                                <div class="donut-center">
-                                    <strong>{{ applications|length }}</strong>
-                                    <small>Total</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <section class="dashboard-panel applications-list-panel">
-                <div class="panel-head">
-                    <h3>All Applications</h3>
-                </div>
-
-                {% if applications %}
-                    <div class="application-table-wrap">
-                        <table class="application-table">
-                            <thead>
-                                <tr>
-                                    <th>Company</th>
-                                    <th>Policy Holder</th>
-                                    <th>Contact</th>
-                                    <th>Email</th>
-                                    <th>Status</th>
-                                    <th>Submitted</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for application in applications %}
-                                    <tr class="clickable-row" data-href="{{ url_for('application_detail', application_id=application.id) }}">
-                                        <td>{{ application.company_name }}</td>
-                                        <td>{{ application.contact_name }}</td>
-                                        <td>{{ application.phone }}</td>
-                                        <td>{{ application.email }}</td>
-                                        <td>
-                                            <span class="status-pill {{ application.status }}">{{ application.status|replace('_', ' ')|title }}</span>
-                                        </td>
-                                        <td>{{ application.created_at.strftime('%Y-%m-%d') if application.created_at else 'N/A' }}</td>
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                {% else %}
-                    <div class="dashboard-empty">No applications match the selected filters.</div>
-                {% endif %}
-            </section>
-        </main>
-    </div>
-
-    <script>
-        document.querySelectorAll('.clickable-row').forEach(function(row) {
-            row.addEventListener('click', function() {
-                const href = this.dataset.href;
-                if (href) {
-                    window.location.href = href;
-                }
-            });
-        });
-    </script>
-
-    <footer class="footer">
-        <p>NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
-    </footer>
-</body>
-</html>
+        {% endif %}
+    </section>
+{% endblock %}

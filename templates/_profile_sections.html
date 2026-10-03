@@ -1,0 +1,47 @@
+{#- Company profile form sections, shared by onboarding step 1 and the edit page.
+    Expects: `values` (draft dict or application), `directors` (list of dicts). -#}
+{% import "form_macros.html" as f with context %}
+
+<section class="ad-card">
+    <div class="ad-card-head">
+        <div><h2>Company registration</h2><p>As registered with CIPC and SARS</p></div>
+    </div>
+    <div class="ad-form-grid">
+        {{ f.input('registered_vendor_name', 'Registered vendor name', values.registered_vendor_name, required=true, wide=true,
+                   hint='Must match your CIPC registration exactly.') }}
+        {{ f.input('trading_name', 'Trading name (if different)', values.trading_name) }}
+        {{ f.input('business_registration_number', 'Business registration number', values.business_registration_number, required=true, attrs='placeholder="e.g. 2020/123456/07"') }}
+        {{ f.input('tax_number', 'Tax number', values.tax_number, required=true) }}
+        {{ f.input('vat_number', 'VAT number', values.vat_number) }}
+        {{ f.input('website', 'Website', values.website, hint='Required if you don\'t upload a company profile.', attrs='placeholder="www.yourcompany.co.za" inputmode="url"') }}
+    </div>
+</section>
+
+<section class="ad-card">
+    <div class="ad-card-head"><h2>Company address</h2></div>
+    <div class="ad-form-grid">
+        {{ f.input('physical_address', "Physical address", values.physical_address, required=true, wide=true) }}
+        {{ f.input('city', 'City', values.city, required=true) }}
+        {{ f.province_select(values.province) }}
+        {{ f.input('postal_code', 'Postal code', values.postal_code, required=true, attrs='inputmode="numeric"') }}
+    </div>
+</section>
+
+<section class="ad-card">
+    <div class="ad-card-head">
+        <div><h2>Contact details</h2><p>Pre-filled from your registration — change them if someone else should be contacted</p></div>
+    </div>
+    <div class="ad-form-grid">
+        {{ f.input('primary_contact_person', 'Primary contact person', values.primary_contact_person, required=true) }}
+        {{ f.input('contact_person_role', "Contact person's role", values.contact_person_role, required=true, attrs='placeholder="e.g. Director"') }}
+        {{ f.input('contact_number', 'Contact number(s)', values.contact_number, required=true, type='tel') }}
+        {{ f.input('email_address', 'E-mail address', values.email_address, required=true, type='email') }}
+    </div>
+</section>
+
+<section class="ad-card">
+    <div class="ad-card-head">
+        <div><h2>Directors &amp; shareholders</h2><p>South African directors need a valid 13-digit ID number; others a passport number</p></div>
+    </div>
+    {{ f.directors_table(directors) }}
+</section>

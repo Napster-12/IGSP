@@ -1,0 +1,83 @@
+{#- Shared layout for every signed-in supplier page (same design system as admin_base.html). -#}
+{% import "admin_macros.html" as ad with context %}
+{% set app_endpoints = ['application_detail', 'edit_application', 'applications', 'onboarding_profile', 'onboarding_category', 'onboarding_documents', 'onboarding_review'] %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Supplier Portal{% endblock %} | Icebolethu Supplier Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body class="ad-body">
+    <div class="ad-shell">
+        <aside class="ad-sidebar">
+            <a class="ad-brand" href="{{ url_for('dashboard') }}">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Icebolethu Group">
+                <span>Supplier Portal</span>
+            </a>
+
+            <nav class="ad-nav" aria-label="Supplier">
+                <a href="{{ url_for('dashboard') }}" class="ad-nav-link{% if request.endpoint == 'dashboard' %} is-active{% endif %}" {% if request.endpoint == 'dashboard' %}aria-current="page"{% endif %}>
+                    {{ ad.icon('dashboard') }}<span>Dashboard</span>
+                </a>
+                {% set app_url = url_for('application_detail', application_id=supplier_application.id) if supplier_application else url_for('onboarding_profile') %}
+                <a href="{{ app_url }}" class="ad-nav-link{% if request.endpoint in app_endpoints %} is-active{% endif %}" {% if request.endpoint in app_endpoints %}aria-current="page"{% endif %}>
+                    {{ ad.icon('applications') }}<span>{{ 'My application' if supplier_application else 'Apply now' }}</span>
+                </a>
+                {% if user.active %}
+                    {% set inv = request.endpoint in ['inventory', 'product_form'] %}
+                    <a href="{{ url_for('inventory') }}" class="ad-nav-link{% if inv %} is-active{% endif %}" {% if inv %}aria-current="page"{% endif %}>
+                        {{ ad.icon('box') }}<span>Inventory</span>
+                    </a>
+                    {% set reqs = request.endpoint in ['supplier_requests', 'supplier_request_detail'] %}
+                    <a href="{{ url_for('supplier_requests') }}" class="ad-nav-link{% if reqs %} is-active{% endif %}" {% if reqs %}aria-current="page"{% endif %}>
+                        {{ ad.icon('cart') }}<span>Requests</span>
+                        {% if open_request_count > 0 %}<span class="ad-nav-count" title="New requests awaiting your response">{{ open_request_count }}</span>{% endif %}
+                    </a>
+                {% endif %}
+                <a href="{{ url_for('notifications') }}" class="ad-nav-link{% if request.endpoint == 'notifications' %} is-active{% endif %}" {% if request.endpoint == 'notifications' %}aria-current="page"{% endif %}>
+                    {{ ad.icon('bell') }}<span>Notifications</span>
+                    {% if unread_notifications > 0 %}<span class="ad-nav-count">{{ unread_notifications }}</span>{% endif %}
+                </a>
+                <a href="{{ url_for('supplier_settings') }}" class="ad-nav-link{% if request.endpoint == 'supplier_settings' %} is-active{% endif %}" {% if request.endpoint == 'supplier_settings' %}aria-current="page"{% endif %}>
+                    {{ ad.icon('settings') }}<span>Settings</span>
+                </a>
+            </nav>
+
+            <div class="ad-account">
+                <div class="ad-avatar" aria-hidden="true">{{ ((user.contact_name or user.company_name or 'S')[:1])|upper }}</div>
+                <div class="ad-account-text">
+                    <strong>{{ user.company_name }}</strong>
+                    <span>{{ user.supplier_id or user.email }}</span>
+                </div>
+                <a href="{{ url_for('logout') }}" class="ad-logout" title="Log out" aria-label="Log out">{{ ad.icon('logout') }}</a>
+            </div>
+        </aside>
+
+        <main class="ad-main">
+            <header class="ad-page-head">
+                <div class="ad-page-title">
+                    {% block breadcrumb %}{% endblock %}
+                    <h1>{% block page_title %}{% endblock %}</h1>
+                    <p class="ad-subtitle">{% block page_subtitle %}{% endblock %}</p>
+                </div>
+                <div class="ad-page-actions">{% block page_actions %}{% endblock %}</div>
+            </header>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                    <div class="ad-flash ad-flash--{{ category }}" role="status">{{ message }}</div>
+                {% endfor %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+
+            <p class="ad-disclaimer">NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
+        </main>
+    </div>
+    <script src="{{ url_for('static', filename='js/portal.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

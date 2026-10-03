@@ -1,110 +1,79 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Manage Suppliers | IGSP</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
-</head>
-<body class="admin-body">
-    <div class="admin-shell">
-        <aside class="admin-sidebar">
-            <div class="admin-brand">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
-            </div>
+{% extends "admin_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+{% import "_macros.html" as ui with context %}
 
-            <div class="admin-menu-block">
-                <div class="admin-menu-label">Administration</div>
-                <a href="{{ url_for('admin_dashboard') }}" class="admin-btn">Dashboard</a>
-                <a href="{{ url_for('admin_reports') }}" class="admin-btn">Reports</a>
-                <a href="{{ url_for('admin_suppliers') }}" class="admin-btn">Suppliers</a>
-                <a href="{{ url_for('admin_applications') }}" class="admin-btn">Applications</a>
-                <a href="{{ url_for('admin_logout') }}" class="admin-btn" style="background:#dc3545;">Logout</a>
-            </div>
-        </aside>
+{% block title %}Suppliers{% endblock %}
+{% block page_title %}Suppliers{% endblock %}
+{% block page_subtitle %}{{ pagination.total }} registered supplier{{ '' if pagination.total == 1 else 's' }}{% if search %} · matching “{{ search }}”{% endif %}{% endblock %}
 
-        <main class="admin-main">
-            <header class="admin-header">
-                <div>
-                    <div class="admin-profile-name">{{ admin.name }}</div>
-                    <div class="admin-profile-role">Administrator</div>
-                </div>
+{% block content %}
+    <section class="ad-card">
+        <form method="get" class="ad-toolbar">
+            <label class="ad-search">
+                {{ ad.icon('search') }}
+                <span class="ad-sr">Search</span>
+                <input type="search" name="search" value="{{ search }}" placeholder="Search company, contact, email or supplier ID">
+            </label>
+            <button type="submit" class="ad-btn ad-btn--primary">Search</button>
+            {% if search %}<a href="{{ url_for('admin_suppliers') }}" class="ad-btn ad-btn--ghost">Clear</a>{% endif %}
+        </form>
 
-                <div class="admin-actions">
-                    <a href="{{ url_for('admin_notifications') }}" class="dashboard-notification" aria-label="Notifications">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
-                        </svg>
-                        {% if unread_notifications is defined and unread_notifications > 0 %}
-                            <span class="notification-badge">{{ unread_notifications }}</span>
-                        {% endif %}
-                    </a>
-                    <a class="admin-logout" href="{{ url_for('admin_logout') }}">Logout</a>
-                </div>
-            </header>
-
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-
-            <section class="admin-panel">
-                <div class="admin-panel-head">
-                    <h3>All Suppliers</h3>
-                    <form method="get" style="display:flex; gap:8px;">
-                        <input type="text" name="search" placeholder="Search suppliers..." value="{{ search or '' }}" style="padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:14px;">
-                        <button type="submit" class="admin-btn-sm admin-btn-primary">Search</button>
-                    </form>
-                </div>
-
-                {% if suppliers %}
-                    <div style="overflow-x:auto;">
-                        <table class="admin-table">
-                            <thead>
+        {% if suppliers %}
+            <div class="ad-table-wrap">
+                <table class="ad-table">
+                    <thead>
+                        <tr><th>Supplier</th><th>Contact</th><th>Phone</th><th>Application</th><th>Account</th><th class="ad-cell-action">Actions</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for supplier in suppliers %}
+                            {% set application = applications_by_email.get(normalize_email(supplier.email)) %}
                             <tr>
-                                <th>Supplier ID</th>
-                                <th>Company</th>
-                                <th>Key Contact</th>
-                                <th>Email</th>
-                                <th>Phone</th>
-                                <th>Status</th>
-                                <th>Action</th>
+                                <td>
+                                    <strong>{{ supplier.company_name }}</strong>
+                                    <span class="ad-cell-sub ad-mono">{{ supplier.supplier_id or '—' }}</span>
+                                </td>
+                                <td>
+                                    {{ supplier.contact_name }}
+                                    <span class="ad-cell-sub">{{ supplier.email }}</span>
+                                </td>
+                                <td class="ad-nowrap">{{ supplier.phone }}</td>
+                                <td>
+                                    {% if application %}
+                                        <a href="{{ url_for('admin_application_detail', application_id=application.id) }}" class="ad-badge-link">{{ ad.status_badge(application.status) }}</a>
+                                    {% else %}
+                                        <span class="ad-muted">Not submitted</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if supplier.active %}
+                                        <span class="ad-badge ad-badge--active">Active</span>
+                                    {% else %}
+                                        <span class="ad-badge ad-badge--inactive">Inactive</span>
+                                    {% endif %}
+                                </td>
+                                <td class="ad-cell-action">
+                                    <form method="post" action="{{ url_for('toggle_supplier', supplier_id=supplier.id) }}"
+                                          onsubmit="return confirm(this.querySelector('[data-confirm]').dataset.confirm);">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="next" value="{{ request.full_path }}">
+                                        {% if supplier.active %}
+                                            <button type="submit" class="ad-btn ad-btn--ghost ad-btn--sm" data-confirm="Deactivate {{ supplier.company_name }}?">Deactivate</button>
+                                        {% else %}
+                                            <button type="submit" class="ad-btn ad-btn--success ad-btn--sm" data-confirm="Activate {{ supplier.company_name }}?">Activate</button>
+                                        {% endif %}
+                                    </form>
+                                </td>
                             </tr>
-                        </thead>
-                        <tbody>
-                            {% for supplier in suppliers %}
-                                <tr>
-                                    <td>{{ supplier.supplier_id or 'N/A' }}</td>
-                                    <td>{{ supplier.company_name }}</td>
-                                        <td>{{ supplier.contact_name }}</td>
-                                        <td>{{ supplier.email }}</td>
-                                        <td>{{ supplier.phone }}</td>
-                                        <td>
-                                            <span class="admin-badge {% if supplier.active %}admin-badge-active{% else %}admin-badge-inactive{% endif %}">
-                                                {% if supplier.active %}Active{% else %}Inactive{% endif %}
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <form method="post" action="{{ url_for('toggle_supplier', supplier_id=supplier.id) }}" style="display:inline;">
-                                                <button type="submit" class="admin-btn-sm {% if supplier.active %}admin-btn-secondary{% else %}admin-btn-primary{% endif %}">
-                                                    {% if supplier.active %}Deactivate{% else %}Activate{% endif %}
-                                                </button>
-                                            </form>
-                                        </td>
-                                    </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                {% else %}
-                    <div class="dashboard-empty">No suppliers found.</div>
-                {% endif %}
-            </section>
-        </main>
-    </div>
-</body>
-</html>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {{ ui.render_pagination(pagination, 'admin_suppliers', {'search': search} if search else {}) }}
+        {% else %}
+            <div class="ad-empty">
+                <strong>No suppliers found</strong>
+                <span>{% if search %}Try a different search.{% else %}Suppliers appear here once they register.{% endif %}</span>
+            </div>
+        {% endif %}
+    </section>
+{% endblock %}

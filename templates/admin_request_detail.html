@@ -1,0 +1,65 @@
+{% extends "admin_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+
+{% block title %}Request {{ req.reference }}{% endblock %}
+{% block breadcrumb %}<a href="{{ url_for('admin_requests') }}" class="ad-crumb">{{ ad.icon('back') }} Requests</a>{% endblock %}
+{% block page_title %}Request <span class="ad-mono">{{ req.reference }}</span> {{ ad.status_badge(req.status) }}{% endblock %}
+{% block page_actions %}
+    {% if req.status in ['accepted', 'delivered', 'completed'] %}
+        <a href="{{ url_for('admin_request_quotation', request_id=req.id) }}" target="_blank" rel="noopener" class="ad-btn ad-btn--ghost">{{ ad.icon('file') }} Print quotation</a>
+        <a href="{{ url_for('admin_request_quotation_pdf', request_id=req.id) }}" class="ad-btn ad-btn--primary">{{ ad.icon('download') }} Download quotation (PDF)</a>
+    {% elif req.status == 'requested' %}
+        <span class="ad-btn ad-btn--ghost" aria-disabled="true" title="Available once the supplier accepts">{{ ad.icon('file') }} Quotation available once accepted</span>
+    {% endif %}
+{% endblock %}
+{% block page_subtitle %}{{ req.supplier.company_name }} · requested by {{ 'you' if req.admin_id == admin.id else (req.admin.name or req.admin.email) }}{% endblock %}
+
+{% block content %}
+    <div class="ad-detail">
+        <div class="ad-detail-main">
+            {% include "_request_summary.html" %}
+        </div>
+        <aside class="ad-detail-side">
+            <section class="ad-card ad-decision">
+                <div class="ad-card-head"><h2>Actions</h2>{{ ad.status_badge(req.status) }}</div>
+                {% if req.status in ['requested', 'accepted', 'delivered'] %}
+                    <form method="post" action="{{ url_for('admin_update_request', request_id=req.id) }}" class="ad-form" id="adminRequestForm">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <label for="note">Note to supplier</label>
+                        <textarea id="note" name="note" rows="3" placeholder="Required when cancelling."></textarea>
+                        <div class="ad-stack ad-mt" style="gap:8px;">
+                            {% if req.status == 'delivered' %}
+                                <button type="submit" name="action" value="complete" class="ad-btn ad-btn--success ad-btn--block">Confirm received &amp; complete</button>
+                            {% else %}
+                                <p class="ad-hint">{{ 'Waiting for the supplier to accept or decline.' if req.status == 'requested' else 'Accepted by the supplier — waiting for delivery.' }}</p>
+                                <button type="submit" name="action" value="cancel" class="ad-btn ad-btn--danger ad-btn--block" data-needs-note>Cancel request</button>
+                            {% endif %}
+                        </div>
+                    </form>
+                {% else %}
+                    <p class="ad-hint">This request is {{ status_label(req.status)|lower }}. No further action is needed.</p>
+                {% endif %}
+                <a href="{{ url_for('admin_catalogue', supplier=req.supplier_id) }}" class="ad-link ad-link--block">More from {{ req.supplier.company_name }}</a>
+            </section>
+        </aside>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    var adminRequestForm = document.getElementById('adminRequestForm');
+    if (adminRequestForm) adminRequestForm.addEventListener('submit', function (e) {
+        var note = document.getElementById('note');
+        if (e.submitter && e.submitter.hasAttribute('data-needs-note')) {
+            if (!note.value.trim()) {
+                e.preventDefault();
+                note.setCustomValidity('Please give the supplier a reason for cancelling.');
+                note.reportValidity();
+                note.addEventListener('input', function () { note.setCustomValidity(''); }, { once: true });
+            } else if (!confirm('Cancel this request? The supplier will be notified.')) {
+                e.preventDefault();
+            }
+        }
+    });
+</script>
+{% endblock %}

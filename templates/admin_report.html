@@ -1,0 +1,137 @@
+{% extends "admin_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+
+{% block title %}{{ title }} report{% endblock %}
+{% block page_title %}Reports{% endblock %}
+{% block page_subtitle %}{{ description }}{% endblock %}
+{% block page_actions %}
+    <a href="{{ url_for('admin_report_export', kind=kind, period=period) }}" class="ad-btn ad-btn--primary">{{ ad.icon('download') }} Export CSV</a>
+{% endblock %}
+{% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>{% endblock %}
+
+{% block content %}
+    {% include "_report_tabs.html" %}
+
+    {% if report.snapshot %}
+        <p class="ad-snapshot">{{ ad.icon('clock') }} Live snapshot of the current inventory — period filters don't apply.</p>
+    {% else %}
+        <nav class="ad-tabs" aria-label="Period">
+            {% for key, label in periods %}
+                <a href="{{ url_for('admin_report', kind=kind, period=key) }}" class="ad-tab{% if key == period %} is-active{% endif %}">{{ label }}</a>
+            {% endfor %}
+        </nav>
+    {% endif %}
+
+    <section class="ad-stats ad-stats--5" aria-label="Key figures">
+        {% for label, value, sub in report.kpis %}
+            <div class="ad-stat">
+                <span class="ad-stat-label">{{ label }}</span>
+                <span class="ad-stat-value{% if value is string and value|length > 9 %} ad-stat-value--md{% endif %}">{{ value }}</span>
+                <span class="ad-stat-sub">{{ sub }}</span>
+            </div>
+        {% endfor %}
+    </section>
+
+    <div class="ad-grid ad-grid--2">
+        {% for chart in report.charts %}
+            <section class="ad-card{% if loop.last and loop.length is odd %} ad-span-2{% endif %}">
+                <div class="ad-card-head"><div><h2>{{ chart.title }}</h2><p>{{ chart.subtitle }}</p></div></div>
+                {% if chart.labels %}
+                    {% set h = [140, 40 * chart.labels|length + 50]|max if chart.horizontal else 260 %}
+                    <div class="ad-chart" style="height: {{ h }}px"><canvas id="{{ chart.id }}" role="img" aria-label="{{ chart.title }}"></canvas></div>
+                {% else %}
+                    <p class="ad-muted ad-chart-fallback">No data for this period.</p>
+                {% endif %}
+            </section>
+        {% endfor %}
+    </div>
+
+    <section class="ad-card">
+        <div class="ad-card-head">
+            <div><h2>Details</h2><p>{{ report.rows|length }} row{{ '' if report.rows|length == 1 else 's' }}{% if report.rows|length >= 500 %} (most recent 500){% endif %}</p></div>
+        </div>
+        {% if report.rows %}
+            <div class="ad-table-wrap ad-table-wrap--scroll">
+                <table class="ad-table">
+                    <thead><tr>{% for column in report.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead>
+                    <tbody>
+                        {% for row in report.rows %}
+                            <tr>
+                                {% for c in row %}
+                                    <td class="{% if c.num %}ad-num ad-nowrap{% endif %}{% if c.mono %} ad-mono{% endif %}">
+                                        {%- if c.badge -%}<span class="ad-badge ad-badge--{{ c.badge }}">{{ c.text }}</span>
+                                        {%- elif c.href -%}<a class="ad-row-link" href="{{ c.href }}">{{ c.text }}</a>
+                                        {%- else -%}{{ c.text }}{%- endif -%}
+                                    </td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="ad-empty"><strong>Nothing to show</strong><span>Try a longer period.</span></div>
+        {% endif %}
+    </section>
+
+    <script type="application/json" id="report-charts">{{ report.charts|tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var charts = JSON.parse(document.getElementById('report-charts').textContent);
+    if (!window.Chart) {
+        document.querySelectorAll('.ad-chart').forEach(function (el) {
+            el.innerHTML = '<p class="ad-muted ad-chart-fallback">Charts could not load (no internet connection?). The table below is unaffected.</p>';
+        });
+        return;
+    }
+    var brand = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#F26522';
+    var ink = '#231F20', muted = '#6E696A', grid = '#EFEDED';
+    Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+    Chart.defaults.font.size = 12;
+    Chart.defaults.color = muted;
+
+    function money(v) { return 'R ' + Number(v).toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
+    function month(key) {
+        var p = key.split('-');
+        return new Date(+p[0], +p[1] - 1).toLocaleString('default', { month: 'short', year: '2-digit' });
+    }
+    function wrap(text, width) {
+        var lines = [], line = '';
+        String(text).split(' ').forEach(function (w) {
+            if ((line + ' ' + w).trim().length > width && line) { lines.push(line); line = w; } else { line = (line + ' ' + w).trim(); }
+        });
+        if (line) { lines.push(line); }
+        return lines;
+    }
+
+    charts.forEach(function (spec) {
+        var canvas = document.getElementById(spec.id);
+        if (!canvas || !spec.labels || !spec.labels.length) { return; }
+        var horizontal = !!spec.horizontal;
+        var valueAxis = { beginAtZero: true, grid: { color: grid }, border: { display: false },
+                          ticks: { precision: 0, callback: spec.money ? function (v) { return money(v); } : undefined } };
+        var labelAxis = { grid: { display: false }, border: { display: false }, ticks: { color: ink, autoSkip: !horizontal } };
+        new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels: spec.labels.map(function (l) { return spec.months ? month(l) : wrap(l, 26); }),
+                datasets: [{ data: spec.values, backgroundColor: brand, hoverBackgroundColor: '#C9501A', borderRadius: 4,
+                             borderSkipped: false, maxBarThickness: 28 }]
+            },
+            options: {
+                indexAxis: horizontal ? 'y' : 'x', responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { backgroundColor: ink, padding: 10, displayColors: false,
+                               callbacks: { label: function (ctx) { var v = ctx.parsed[horizontal ? 'x' : 'y']; return spec.money ? money(v) : String(v); } } }
+                },
+                scales: horizontal ? { x: valueAxis, y: labelAxis } : { x: labelAxis, y: valueAxis }
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

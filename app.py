@@ -1,24 +1,100 @@
+"""IGSP — Icebolethu Group Supplier Portal.
+
+Configuration is read from environment variables (or a local ``.env`` file);
+see ``.env.example`` for the full list.
+"""
+import csv
+import io
+import json
 import os
 import re
-import subprocess
-import xml.etree.ElementTree as ET
+import secrets
+import smtplib
+import threading
+import time
 import zipfile
-from datetime import datetime
-from urllib.parse import quote_plus
-import base64
-import io
+from collections import defaultdict
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
+from email.mime.text import MIMEText
+from functools import wraps
+from urllib.parse import quote_plus, urlparse
 
-from flask import Flask, flash, jsonify, redirect, render_template, request, session, send_file, url_for
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import text
-from werkzeug.security import check_password_hash, generate_password_hash
+import click
 from authlib.integrations.flask_client import OAuth
-import mimetypes
-import pyotp
-import qrcode
+from dotenv import load_dotenv
+from flask import (
+    Flask,
+    Response,
+    abort,
+    flash,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
+)
+from flask_sqlalchemy import SQLAlchemy
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from sqlalchemy import case, func, text
+from sqlalchemy.exc import OperationalError
+from werkzeug.exceptions import HTTPException
+from werkzeug.security import check_password_hash, generate_password_hash, safe_join
+from werkzeug.utils import secure_filename
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Load .env from the project folder regardless of the directory the app is started from.
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+UPLOAD_ROOT = os.path.join(STATIC_DIR, "uploads")
+
+
+def env_flag(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+# ---------------------------------------------------------------------------
+# App configuration
+# ---------------------------------------------------------------------------
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "igsp-dev-key")
+
+_secret_key = os.getenv("SECRET_KEY")
+if not _secret_key:
+    _secret_key = secrets.token_hex(32)
+    app.logger.warning("SECRET_KEY is not set; using a random key. Sessions will reset on restart.")
+
+MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
+MYSQL_USER = os.getenv("MYSQL_USER", "root")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
+MYSQL_DB = os.getenv("MYSQL_DB", "igsp")
+
+DATABASE_URL = os.getenv("DATABASE_URL") or (
+    f"mysql+pymysql://{quote_plus(MYSQL_USER)}:{quote_plus(MYSQL_PASSWORD)}@"
+    f"{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}?charset=utf8mb4"
+)
+
+app.config.update(
+    SECRET_KEY=_secret_key,
+    SQLALCHEMY_DATABASE_URI=DATABASE_URL,
+    SQLALCHEMY_TRACK_MODIFICATIONS=False,
+    SQLALCHEMY_ENGINE_OPTIONS={"pool_pre_ping": True, "pool_recycle": 280},
+    MAX_CONTENT_LENGTH=int(os.getenv("MAX_UPLOAD_MB", "25")) * 1024 * 1024,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=env_flag("SESSION_COOKIE_SECURE"),
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+    CSRF_ENABLED=True,
+)
+
+DB = SQLAlchemy(app)
 
 oauth = OAuth(app)
 MICROSOFT_CLIENT_ID = os.getenv("MICROSOFT_CLIENT_ID", "")
@@ -32,67 +108,171 @@ if MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET:
         name="microsoft",
         client_id=MICROSOFT_CLIENT_ID,
         client_secret=MICROSOFT_CLIENT_SECRET,
-        authority=MICROSOFT_AUTHORITY,
-        access_token_url=f"{MICROSOFT_AUTHORITY}/oauth2/v2.0/token",
-        authorize_url=f"{MICROSOFT_AUTHORITY}/oauth2/v2.0/authorize",
-        userinfo_endpoint="https://graph.microsoft.com/oidc/userinfo",
+        server_metadata_url=f"{MICROSOFT_AUTHORITY}/.well-known/openid-configuration",
         client_kwargs={"scope": " ".join(MICROSOFT_SCOPE)},
     )
 
-MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
-MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
-MYSQL_USER = os.getenv("MYSQL_USER", "root")
-MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "@@Codnell12")
-MYSQL_DB = os.getenv("MYSQL_DB", "igsp")
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER)
 
-app.config["SQLALCHEMY_DATABASE_URI"] = (
-    f"mysql+pymysql://{quote_plus(MYSQL_USER)}:{quote_plus(MYSQL_PASSWORD)}@"
-    f"{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}?charset=utf8mb4"
-)
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+# Shown on printed quotations. Optional; blank values are simply left off the document.
+COMPANY_DETAILS = {
+    "name": os.getenv("COMPANY_NAME", "Icebolethu Group"),
+    "address": os.getenv("COMPANY_ADDRESS", ""),
+    "registration_number": os.getenv("COMPANY_REG_NUMBER", ""),
+    "vat_number": os.getenv("COMPANY_VAT_NUMBER", ""),
+    "phone": os.getenv("COMPANY_PHONE", ""),
+    "email": os.getenv("COMPANY_EMAIL", ""),
+}
+VAT_RATE = Decimal(os.getenv("VAT_RATE", "15"))
 
-DB = SQLAlchemy(app)
 
+# ---------------------------------------------------------------------------
+# Domain constants
+# ---------------------------------------------------------------------------
 
+RENTALS = "Burials related rentals and Purchases"
 SUPPLIER_CATEGORIES = [
     {"value": "Catering", "label": "Catering", "specify": False, "group": "SERVICES"},
-    {"value": "Body Storage and other Burial Services", "label": "Body Storage and other Burial Services", "specify": False, "group": "SERVICES"},
+    {"value": "Body Storage, Cold-Room and other Burial Services", "label": "Body Storage, Cold-Room and other Burial Services", "specify": False, "group": "SERVICES"},
     {"value": "Consulting", "label": "Consulting", "specify": False, "group": "SERVICES"},
-    {"value": "Other - Services", "label": "Other, please specify:", "specify": True, "group": "SERVICES"},
+    {"value": "Other", "label": "Other, please specify:", "specify": True, "group": "SERVICES"},
     {"value": "Caskets", "label": "Caskets", "specify": False, "group": "GOODS"},
     {"value": "Livestock", "label": "Livestock", "specify": False, "group": "GOODS"},
+    {"value": "Tombstones", "label": "Tombstones", "specify": False, "group": "GOODS"},
     {"value": "Flowers, crosses and plaques", "label": "Flowers, crosses and plaques", "specify": False, "group": "GOODS"},
-    {"value": "ICT Equipment", "label": "ICT Equipment, please specify:", "specify": True, "group": "GOODS"},
-    {"value": "Tents", "label": "Tents", "specify": False, "group": "Burials related rentals and Purchases"},
-    {"value": "Draping and Décor", "label": "Draping and Décor", "specify": False, "group": "Burials related rentals and Purchases"},
-    {"value": "Family Car", "label": "Family Car, please specify make:", "specify": True, "group": "Burials related rentals and Purchases"},
-    {"value": "Hearse", "label": "Hearse, please specify make:", "specify": True, "group": "Burials related rentals and Purchases"},
-    {"value": "Lowering Device", "label": "Lowering Device", "specify": False, "group": "Burials related rentals and Purchases"},
-    {"value": "Cold-Room", "label": "Cold-Room", "specify": False, "group": "Burials related rentals and Purchases"},
-    {"value": "Media/Electronic Devices", "label": "Media/Electronic Devices, please specify:", "specify": True, "group": "Burials related rentals and Purchases"},
-    {"value": "Mobile toilet", "label": "Mobile toilet", "specify": False, "group": "Burials related rentals and Purchases"},
-    {"value": "Other - Rentals", "label": "Other (Please Specify)", "specify": True, "group": "Burials related rentals and Purchases"},
+    {"value": "ICT Equipment, Media and Electronic Devices", "label": "ICT Equipment, Media and Electronic Devices, please specify:", "specify": True, "group": "GOODS"},
+    {"value": "Tents, Draping and Décor", "label": "Tents, Draping and Décor", "specify": False, "group": RENTALS},
+    {"value": "Funeral Vehicles (Hearse / Family Car)", "label": "Funeral Vehicles (Hearse / Family Car), please specify:", "specify": True, "group": RENTALS},
+    {"value": "Lowering Device", "label": "Lowering Device", "specify": False, "group": RENTALS},
+    {"value": "Mobile toilet", "label": "Mobile toilet", "specify": False, "group": RENTALS},
 ]
-
+CATEGORY_VALUES = {cat["value"] for cat in SUPPLIER_CATEGORIES}
+# Old category names, mapped to the merged category that replaced them.
 LEGACY_CATEGORY_MAP = {
     "Catering services": "Catering",
-    "Other": "Other - Services",
+    "Body Storage and other Burial Services": "Body Storage, Cold-Room and other Burial Services",
+    "Cold-Room": "Body Storage, Cold-Room and other Burial Services",
+    "ICT Equipment": "ICT Equipment, Media and Electronic Devices",
+    "Media/Electronic Devices": "ICT Equipment, Media and Electronic Devices",
+    "Tents": "Tents, Draping and Décor",
+    "Draping and Décor": "Tents, Draping and Décor",
+    "Hearse": "Funeral Vehicles (Hearse / Family Car)",
+    "Family Car": "Funeral Vehicles (Hearse / Family Car)",
 }
+
+# Required documents, in upload-slot order (form field document_file_1 .. _7).
+REQUIRED_DOCUMENTS = [
+    "CIPC Company Registration Document",
+    "Certified ID copies of all Directors",
+    "SARS VAT Certificate",
+    "Confirmation of Bank Account Letter (not older than 3 months)",
+    "Valid B-BBEE certificate, letter from Accountant or Sworn Affidavit",
+    "Proof of Company residential address (not older than 3 months)",
+    "Declaration Form",
+]
+COMPANY_PROFILE_DOC = "Company Profile"
+OTHER_DOCS = "Other Supporting Documents"
+
+UPLOAD_SLOTS = {f"document_file_{i}": doc for i, doc in enumerate(REQUIRED_DOCUMENTS, start=1)}
+UPLOAD_SLOTS["document_file_other"] = OTHER_DOCS
+UPLOAD_SLOTS["document_file_company_profile"] = COMPANY_PROFILE_DOC
+
+STATUSES = ["draft", "submitted", "pending_review", "under_review", "approved", "declined", "returned_for_update"]
+DOCUMENT_STATUSES = ["pending", "complete"]
+EDITABLE_STATUSES = {"draft", "submitted", "pending_review", "under_review", "returned_for_update", "declined"}
+
+PROVINCES = [
+    "Eastern Cape", "Free State", "Gauteng", "KwaZulu-Natal", "Limpopo",
+    "Mpumalanga", "Northern Cape", "North West", "Western Cape",
+]
+
+PROFILE_FIELD_LABELS = {
+    "registered_vendor_name": "Registered Vendor Name",
+    "trading_name": "Trading Name",
+    "business_registration_number": "Business Registration Number",
+    "vat_number": "VAT Number",
+    "tax_number": "Tax Number",
+    "physical_address": "Physical Address",
+    "city": "City",
+    "province": "Province",
+    "postal_code": "Postal Code",
+    "website": "Website",
+    "primary_contact_person": "Primary Contact Person",
+    "contact_person_role": "Contact Person's Role",
+    "contact_number": "Contact Number",
+    "email_address": "E-Mail Address",
+}
+PROFILE_FIELDS = list(PROFILE_FIELD_LABELS)
+OPTIONAL_PROFILE_FIELDS = {"trading_name", "vat_number", "website"}
+REQUIRED_PROFILE_FIELDS = [f for f in PROFILE_FIELDS if f not in OPTIONAL_PROFILE_FIELDS]
+
+SOUTH_AFRICA = "South Africa"
+# Director nationality choices; South Africa first, then alphabetical.
+COUNTRIES = [SOUTH_AFRICA] + [
+    'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Antigua and Barbuda', 'Argentina', 'Armenia',
+    'Australia', 'Austria', 'Azerbaijan', 'Bahamas', 'Bahrain', 'Bangladesh', 'Barbados', 'Belarus',
+    'Belgium', 'Belize', 'Benin', 'Bhutan', 'Bolivia', 'Bosnia and Herzegovina', 'Botswana', 'Brazil',
+    'Brunei', 'Bulgaria', 'Burkina Faso', 'Burundi', 'Cabo Verde', 'Cambodia', 'Cameroon', 'Canada',
+    'Central African Republic', 'Chad', 'Chile', 'China', 'Colombia', 'Comoros',
+    'Congo (Democratic Republic)', 'Congo (Republic)', 'Costa Rica', "Côte d'Ivoire", 'Croatia', 'Cuba',
+    'Cyprus', 'Czechia', 'Denmark', 'Djibouti', 'Dominica', 'Dominican Republic', 'Ecuador', 'Egypt',
+    'El Salvador', 'Equatorial Guinea', 'Eritrea', 'Estonia', 'Eswatini', 'Ethiopia', 'Fiji', 'Finland',
+    'France', 'Gabon', 'Gambia', 'Georgia', 'Germany', 'Ghana', 'Greece', 'Grenada', 'Guatemala', 'Guinea',
+    'Guinea-Bissau', 'Guyana', 'Haiti', 'Honduras', 'Hungary', 'Iceland', 'India', 'Indonesia', 'Iran',
+    'Iraq', 'Ireland', 'Israel', 'Italy', 'Jamaica', 'Japan', 'Jordan', 'Kazakhstan', 'Kenya', 'Kiribati',
+    'Kuwait', 'Kyrgyzstan', 'Laos', 'Latvia', 'Lebanon', 'Lesotho', 'Liberia', 'Libya', 'Liechtenstein',
+    'Lithuania', 'Luxembourg', 'Madagascar', 'Malawi', 'Malaysia', 'Maldives', 'Mali', 'Malta',
+    'Marshall Islands', 'Mauritania', 'Mauritius', 'Mexico', 'Micronesia', 'Moldova', 'Monaco', 'Mongolia',
+    'Montenegro', 'Morocco', 'Mozambique', 'Myanmar', 'Namibia', 'Nauru', 'Nepal', 'Netherlands',
+    'New Zealand', 'Nicaragua', 'Niger', 'Nigeria', 'North Korea', 'North Macedonia', 'Norway', 'Oman',
+    'Pakistan', 'Palau', 'Palestine', 'Panama', 'Papua New Guinea', 'Paraguay', 'Peru', 'Philippines',
+    'Poland', 'Portugal', 'Qatar', 'Romania', 'Russia', 'Rwanda', 'Saint Kitts and Nevis', 'Saint Lucia',
+    'Saint Vincent and the Grenadines', 'Samoa', 'San Marino', 'São Tomé and Príncipe', 'Saudi Arabia',
+    'Senegal', 'Serbia', 'Seychelles', 'Sierra Leone', 'Singapore', 'Slovakia', 'Slovenia', 'Solomon Islands',
+    'Somalia', 'South Korea', 'South Sudan', 'Spain', 'Sri Lanka', 'Sudan', 'Suriname', 'Sweden',
+    'Switzerland', 'Syria', 'Taiwan', 'Tajikistan', 'Tanzania', 'Thailand', 'Timor-Leste', 'Togo', 'Tonga',
+    'Trinidad and Tobago', 'Tunisia', 'Turkey', 'Turkmenistan', 'Tuvalu', 'Uganda', 'Ukraine',
+    'United Arab Emirates', 'United Kingdom', 'United States', 'Uruguay', 'Uzbekistan', 'Vanuatu',
+    'Vatican City', 'Venezuela', 'Vietnam', 'Yemen', 'Zambia', 'Zimbabwe',
+]
+COUNTRY_SET = set(COUNTRIES)
+# Older records stored demonyms or free text.
+NATIONALITY_ALIASES = {"south african": SOUTH_AFRICA, "rsa": SOUTH_AFRICA, "sa": SOUTH_AFRICA,
+                       "zimbabwean": "Zimbabwe", "nigerian": "Nigeria", "motswana": "Botswana",
+                       "mozambican": "Mozambique"}
+PASSPORT_RE = re.compile(r"^[A-Z0-9]{6,20}$")
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+DIRECTOR_FIELD_RE = re.compile(r"^director_(initials|id|role|nationality)_(\d+)$")
+
+VERIFY_CODE_MAX_ATTEMPTS = 5
+RESEND_COOLDOWN_SECONDS = 30
+PASSWORD_RESET_MAX_AGE = 3600
+
+
+def utcnow():
+    """Naive UTC timestamp, matching how MySQL DATETIME columns store values."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def normalize_email(value):
+    return (value or "").strip().lower()
 
 
 def normalize_category_value(value):
-    if value in LEGACY_CATEGORY_MAP:
-        return LEGACY_CATEGORY_MAP[value]
-    return value
+    return LEGACY_CATEGORY_MAP.get(value, value)
 
 
 def get_specify_categories():
-    """Return set of category values that require a detail/specification."""
     return {cat["value"] for cat in SUPPLIER_CATEGORIES if cat.get("specify")}
 
 
 def get_category_sections():
-    """Group SUPPLIER_CATEGORIES into sections for checkbox rendering."""
+    """Group SUPPLIER_CATEGORIES into sections for rendering."""
     sections = []
     current = {"name": "", "items": []}
     for i, cat in enumerate(SUPPLIER_CATEGORIES):
@@ -108,6 +288,14 @@ def get_category_sections():
         sections.append(current)
     return sections
 
+
+def status_label(status):
+    return (status or "").replace("_", " ").title()
+
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
 
 class SupplierApplicationCategory(DB.Model):
     __tablename__ = "supplier_application_categories"
@@ -132,8 +320,8 @@ class SupplierApplication(DB.Model):
     documents_status = DB.Column(DB.String(50), default="pending")
     status = DB.Column(DB.String(50), default="submitted")
     review_comments = DB.Column(DB.Text, default="")
-    created_at = DB.Column(DB.DateTime, default=datetime.utcnow)
-    updated_at = DB.Column(DB.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = DB.Column(DB.DateTime, default=utcnow)
+    updated_at = DB.Column(DB.DateTime, default=utcnow, onupdate=utcnow)
 
     registered_vendor_name = DB.Column(DB.String(150), default="")
     trading_name = DB.Column(DB.String(150), default="")
@@ -150,19 +338,22 @@ class SupplierApplication(DB.Model):
     contact_number = DB.Column(DB.String(50), default="")
     email_address = DB.Column(DB.String(120), default="")
 
+    # The admin currently responsible for reviewing this application (see /assign).
+    assigned_admin_id = DB.Column(DB.Integer, DB.ForeignKey("admins.id"), nullable=True, index=True)
+    assigned_at = DB.Column(DB.DateTime, nullable=True)
+    assigned_admin = DB.relationship("Admin", foreign_keys=[assigned_admin_id])
+
     application_categories = DB.relationship(
-        "SupplierApplicationCategory",
-        backref="application",
-        cascade="all, delete-orphan",
-        lazy=True,
+        "SupplierApplicationCategory", backref="application", cascade="all, delete-orphan", lazy=True,
+    )
+    directors = DB.relationship(
+        "SupplierDirector", backref="application", cascade="all, delete-orphan", lazy=True,
     )
 
-    directors = DB.relationship(
-        "SupplierDirector",
-        backref="application",
-        cascade="all, delete-orphan",
-        lazy=True,
-    )
+    @property
+    def category_names(self):
+        names = [ac.category for ac in self.application_categories if ac.category]
+        return names or ([self.supplier_category] if self.supplier_category else [])
 
 
 class SupplierDocument(DB.Model):
@@ -174,7 +365,7 @@ class SupplierDocument(DB.Model):
     document_type = DB.Column(DB.String(120), nullable=False)
     file_path = DB.Column(DB.String(255), nullable=False)
     original_filename = DB.Column(DB.String(255), nullable=False)
-    uploaded_at = DB.Column(DB.DateTime, default=datetime.utcnow)
+    uploaded_at = DB.Column(DB.DateTime, default=utcnow)
 
 
 class SupplierDirector(DB.Model):
@@ -183,9 +374,115 @@ class SupplierDirector(DB.Model):
     id = DB.Column(DB.Integer, primary_key=True)
     application_id = DB.Column(DB.Integer, DB.ForeignKey("supplier_applications.id"), nullable=False)
     initials_surname = DB.Column(DB.String(120), nullable=False)
-    id_number = DB.Column(DB.String(50), nullable=True)
+    id_number = DB.Column(DB.String(50), nullable=False)
     role = DB.Column(DB.String(120), nullable=False)
     nationality = DB.Column(DB.String(80), nullable=False)
+
+
+class ApplicationEvent(DB.Model):
+    """Append-only audit trail for an application. Nothing in the app updates or deletes these rows."""
+    __tablename__ = "application_events"
+
+    id = DB.Column(DB.Integer, primary_key=True)
+    application_id = DB.Column(DB.Integer, DB.ForeignKey("supplier_applications.id"), nullable=False, index=True)
+    created_at = DB.Column(DB.DateTime, default=utcnow, nullable=False, index=True)
+    actor_type = DB.Column(DB.String(20), nullable=False, default="system")  # supplier | admin | system
+    actor_id = DB.Column(DB.Integer, nullable=True)
+    actor_name = DB.Column(DB.String(150), nullable=False, default="")
+    actor_email = DB.Column(DB.String(120), nullable=False, default="")
+    action = DB.Column(DB.String(40), nullable=False)
+    summary = DB.Column(DB.String(255), nullable=False, default="")
+    from_status = DB.Column(DB.String(50), nullable=True)
+    to_status = DB.Column(DB.String(50), nullable=True)
+    changes_json = DB.Column(DB.Text, nullable=True)
+    ip_address = DB.Column(DB.String(64), nullable=False, default="")
+
+    @property
+    def changes(self):
+        try:
+            return json.loads(self.changes_json) if self.changes_json else []
+        except ValueError:
+            return []
+
+
+PRODUCT_UNITS = ["each", "per day", "per hour", "per event", "per kg", "per litre", "per box", "per set", "per service"]
+REQUEST_STATUSES = ["requested", "accepted", "declined", "delivered", "completed", "cancelled"]
+OPEN_REQUEST_STATUSES = {"requested", "accepted", "delivered"}
+
+
+class Product(DB.Model):
+    """An item or service an approved supplier offers to Icebolethu Group."""
+    __tablename__ = "products"
+
+    id = DB.Column(DB.Integer, primary_key=True)
+    user_id = DB.Column(DB.Integer, DB.ForeignKey("users.id"), nullable=False, index=True)
+    name = DB.Column(DB.String(150), nullable=False)
+    category = DB.Column(DB.String(120), nullable=False, default="")
+    description = DB.Column(DB.Text, nullable=False, default="")
+    unit = DB.Column(DB.String(40), nullable=False, default="each")
+    price = DB.Column(DB.Numeric(12, 2), nullable=False, default=0)
+    quantity_available = DB.Column(DB.Integer, nullable=True)  # None = not tracked (e.g. services)
+    lead_time_days = DB.Column(DB.Integer, nullable=True)
+    is_listed = DB.Column(DB.Boolean, nullable=False, default=True)
+    is_archived = DB.Column(DB.Boolean, nullable=False, default=False)
+    created_at = DB.Column(DB.DateTime, default=utcnow)
+    updated_at = DB.Column(DB.DateTime, default=utcnow, onupdate=utcnow)
+
+    supplier = DB.relationship("User", backref=DB.backref("products", lazy=True))
+
+    @property
+    def in_stock(self):
+        return self.quantity_available is None or self.quantity_available > 0
+
+
+class ProductRequest(DB.Model):
+    """An admin's request for a supplier's product. Name, unit and price are copied at request time."""
+    __tablename__ = "product_requests"
+
+    id = DB.Column(DB.Integer, primary_key=True)
+    product_id = DB.Column(DB.Integer, DB.ForeignKey("products.id"), nullable=False, index=True)
+    supplier_id = DB.Column(DB.Integer, DB.ForeignKey("users.id"), nullable=False, index=True)
+    admin_id = DB.Column(DB.Integer, DB.ForeignKey("admins.id"), nullable=False, index=True)
+    product_name = DB.Column(DB.String(150), nullable=False)
+    unit = DB.Column(DB.String(40), nullable=False, default="each")
+    unit_price = DB.Column(DB.Numeric(12, 2), nullable=False, default=0)
+    quantity = DB.Column(DB.Integer, nullable=False, default=1)
+    required_by = DB.Column(DB.Date, nullable=True)
+    delivery_location = DB.Column(DB.String(255), nullable=False, default="")
+    notes = DB.Column(DB.Text, nullable=False, default="")
+    status = DB.Column(DB.String(20), nullable=False, default="requested", index=True)
+    supplier_note = DB.Column(DB.Text, nullable=False, default="")
+    created_at = DB.Column(DB.DateTime, default=utcnow, index=True)
+    updated_at = DB.Column(DB.DateTime, default=utcnow, onupdate=utcnow)
+
+    product = DB.relationship("Product")
+    supplier = DB.relationship("User")
+    admin = DB.relationship("Admin")
+    events = DB.relationship("ProductRequestEvent", backref="request", lazy=True,
+                             order_by="ProductRequestEvent.id.desc()")
+
+    @property
+    def reference(self):
+        return f"PR-{self.id:05d}"
+
+    @property
+    def total(self):
+        return (self.unit_price or Decimal("0")) * (self.quantity or 0)
+
+
+class ProductRequestEvent(DB.Model):
+    """Append-only history of a product request."""
+    __tablename__ = "product_request_events"
+
+    id = DB.Column(DB.Integer, primary_key=True)
+    request_id = DB.Column(DB.Integer, DB.ForeignKey("product_requests.id"), nullable=False, index=True)
+    created_at = DB.Column(DB.DateTime, default=utcnow, nullable=False)
+    actor_type = DB.Column(DB.String(20), nullable=False, default="system")
+    actor_name = DB.Column(DB.String(150), nullable=False, default="")
+    action = DB.Column(DB.String(30), nullable=False)
+    from_status = DB.Column(DB.String(20), nullable=True)
+    to_status = DB.Column(DB.String(20), nullable=True)
+    note = DB.Column(DB.Text, nullable=False, default="")
 
 
 class Notification(DB.Model):
@@ -198,7 +495,7 @@ class Notification(DB.Model):
     message = DB.Column(DB.Text, nullable=False)
     is_read = DB.Column(DB.Boolean, nullable=False, default=False)
     related_application_id = DB.Column(DB.Integer, DB.ForeignKey("supplier_applications.id"), nullable=True)
-    created_at = DB.Column(DB.DateTime, default=datetime.utcnow)
+    created_at = DB.Column(DB.DateTime, default=utcnow)
 
     user = DB.relationship("User", backref=DB.backref("notifications", lazy=True))
     admin = DB.relationship("Admin", backref=DB.backref("notifications", lazy=True))
@@ -217,14 +514,37 @@ class User(DB.Model):
     contact_name = DB.Column(DB.String(120), nullable=False)
     phone = DB.Column(DB.String(50), nullable=False)
     address = DB.Column(DB.String(255), nullable=False, default="")
+    email_verified = DB.Column(DB.Boolean, nullable=False, default=False)
     active = DB.Column(DB.Boolean, nullable=False, default=False)
-    created_at = DB.Column(DB.DateTime, default=datetime.utcnow)
+    verification_code_hash = DB.Column(DB.String(256), nullable=True)
+    verification_code_expires = DB.Column(DB.DateTime, nullable=True)
+    created_at = DB.Column(DB.DateTime, default=utcnow)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+    def generate_verification_code(self):
+        code = f"{secrets.randbelow(900000) + 100000}"
+        self.verification_code_hash = generate_password_hash(code)
+        self.verification_code_expires = utcnow() + timedelta(minutes=10)
+        return code
+
+    def verify_code(self, code):
+        if not code or not self.verification_code_hash or not self.verification_code_expires:
+            return False
+        expires = self.verification_code_expires
+        if expires.tzinfo is not None:
+            expires = expires.astimezone(timezone.utc).replace(tzinfo=None)
+        if utcnow() > expires:
+            return False
+        return check_password_hash(self.verification_code_hash, code)
+
+    def clear_verification_code(self):
+        self.verification_code_hash = None
+        self.verification_code_expires = None
 
 
 class Admin(DB.Model):
@@ -234,7 +554,7 @@ class Admin(DB.Model):
     email = DB.Column(DB.String(120), unique=True, nullable=False)
     password_hash = DB.Column(DB.String(256), nullable=False)
     name = DB.Column(DB.String(100), nullable=False, default="")
-    created_at = DB.Column(DB.DateTime, default=datetime.utcnow)
+    created_at = DB.Column(DB.DateTime, default=utcnow)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -243,1276 +563,1513 @@ class Admin(DB.Model):
         return check_password_hash(self.password_hash, password)
 
 
-class User2FA(DB.Model):
-    __tablename__ = "user_2fa"
+def find_user_by_email(email):
+    return User.query.filter(func.lower(User.email) == normalize_email(email)).first()
 
-    id = DB.Column(DB.Integer, primary_key=True)
-    user_id = DB.Column(DB.Integer, DB.ForeignKey("users.id"), nullable=False, unique=True)
-    totp_secret = DB.Column(DB.String(64), nullable=False)
-    confirmed = DB.Column(DB.Boolean, nullable=False, default=False)
-    created_at = DB.Column(DB.DateTime, default=datetime.utcnow)
 
-    user = DB.relationship("User", backref=DB.backref("two_fa", uselist=False))
+def find_admin_by_email(email):
+    return Admin.query.filter(func.lower(Admin.email) == normalize_email(email)).first()
 
+
+def get_user_application(user):
+    return (
+        SupplierApplication.query.filter(func.lower(SupplierApplication.email) == normalize_email(user.email))
+        .order_by(SupplierApplication.created_at.desc())
+        .first()
+    )
+
+
+def get_application_supplier(application):
+    return find_user_by_email(application.email)
+
+
+def documents_for_application(application, supplier):
+    """Documents attached to an application, plus the supplier's not-yet-attached uploads."""
+    query = SupplierDocument.query
+    if supplier:
+        query = query.filter(
+            DB.or_(
+                SupplierDocument.application_id == application.id,
+                DB.and_(SupplierDocument.user_id == supplier.id, SupplierDocument.application_id.is_(None)),
+            )
+        )
+    else:
+        query = query.filter(SupplierDocument.application_id == application.id)
+    return query.order_by(SupplierDocument.id).all()
+
+
+# ---------------------------------------------------------------------------
+# Email
+# ---------------------------------------------------------------------------
+
+def smtp_configured():
+    return bool(SMTP_USER and SMTP_PASSWORD)
+
+
+def _deliver(to_email, subject, body, subtype):
+    msg = MIMEText(body, subtype, "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_email
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASSWORD)
+        server.sendmail(SMTP_FROM, [to_email], msg.as_string())
+
+
+def _deliver_in_background(to_email, subject, body, subtype):
+    def run():
+        try:
+            _deliver(to_email, subject, body, subtype)
+        except Exception as exc:  # noqa: BLE001 — log and carry on; email is best-effort
+            app.logger.error("Failed to send email to %s: %s", to_email, exc)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def render_email(subject, message, recipient_name, application=None, action_url=None, action_label=None):
+    return render_template(
+        "email/notification.html",
+        subject=subject,
+        recipient_name=recipient_name,
+        message=message,
+        application=application,
+        action_url=action_url,
+        action_label=action_label,
+        logo_url=url_for("static", filename="images/logo.png", _external=True),
+    )
+
+
+def send_verification_email(to_email, code):
+    """Send a login code synchronously so the caller can report failures."""
+    if not smtp_configured():
+        app.logger.warning("SMTP not configured. Verification code for %s: %s", to_email, code)
+        return True
+    body = render_email(
+        "Your IGSP Verification Code",
+        f"Your verification code is {code}. It expires in 10 minutes. "
+        "If you did not try to sign in, you can ignore this email.",
+        "Supplier",
+    )
+    try:
+        _deliver(to_email, "Your IGSP Verification Code", body, "html")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        app.logger.error("Failed to send verification email to %s: %s", to_email, exc)
+        return False
+
+
+def send_notification_email(to_email, subject, body, recipient_name=None, application=None,
+                            action_url=None, action_label=None):
+    if not to_email:
+        return False
+    if not smtp_configured():
+        app.logger.info("SMTP not configured. Email to %s: %s", to_email, subject)
+        return False
+    html = render_email(subject, body, recipient_name or "Supplier", application, action_url, action_label)
+    _deliver_in_background(to_email, subject, html, "html")
+    return True
+
+
+def notify_supplier(supplier, title, message, application=None):
+    DB.session.add(Notification(
+        user_id=supplier.id,
+        title=title,
+        message=message,
+        related_application_id=application.id if application else None,
+    ))
+    send_notification_email(
+        supplier.email, title, message,
+        recipient_name=supplier.contact_name or supplier.company_name,
+        application=application,
+        action_url=url_for("dashboard", _external=True),
+        action_label="Open your dashboard",
+    )
+
+
+def notify_admins(title, message, application=None):
+    action_url = (
+        url_for("admin_application_detail", application_id=application.id, _external=True)
+        if application else None
+    )
+    for admin in Admin.query.all():
+        DB.session.add(Notification(
+            admin_id=admin.id,
+            title=title,
+            message=message,
+            related_application_id=application.id if application else None,
+        ))
+        send_notification_email(
+            admin.email, title, message,
+            recipient_name=admin.name or "Admin",
+            application=application,
+            action_url=action_url,
+            action_label="Review application" if action_url else None,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Security helpers: auth, CSRF, rate limiting, headers
+# ---------------------------------------------------------------------------
+
+def get_current_user():
+    if "user" not in g:
+        user_id = session.get("user_id")
+        g.user = DB.session.get(User, user_id) if user_id else None
+    return g.user
+
+
+def get_current_admin():
+    if "admin" not in g:
+        admin_id = session.get("admin_id")
+        g.admin = DB.session.get(Admin, admin_id) if admin_id else None
+    return g.admin
+
+
+def login_required(view_func):
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if not get_current_user():
+            session.pop("user_id", None)
+            return redirect(url_for("login", next=request.path))
+        return view_func(*args, **kwargs)
+    return wrapper
+
+
+def admin_required(view_func):
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if not get_current_admin():
+            session.pop("admin_id", None)
+            return redirect(url_for("admin_login"))
+        g.is_admin_view = True
+        return view_func(*args, **kwargs)
+    return wrapper
+
+
+def safe_next_url(target, fallback):
+    """Only follow redirects that stay on this site."""
+    if target:
+        parsed = urlparse(target)
+        if not parsed.scheme and not parsed.netloc and target.startswith("/") and not target.startswith("//"):
+            return target
+    return fallback
+
+
+def csrf_token():
+    token = session.get("_csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+@app.before_request
+def protect_requests():
+    # Supplier uploads live under static/ for historical reasons; never serve them
+    # through the public static route — /uploads/ enforces access control instead.
+    if request.path.startswith("/static/uploads/"):
+        abort(404)
+
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and app.config.get("CSRF_ENABLED", True):
+        sent = request.form.get("csrf_token") or request.headers.get("X-CSRFToken", "")
+        expected = session.get("_csrf_token", "")
+        if not expected or not secrets.compare_digest(sent, expected):
+            flash("Your session expired. Please try again.", "error")
+            referrer = request.referrer or ""
+            ref = urlparse(referrer)
+            if ref.netloc == request.host:
+                return redirect(ref.path + (f"?{ref.query}" if ref.query else ""))
+            return redirect(url_for("home"))
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if g.get("user") or g.get("admin"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+class RateLimiter:
+    """Small in-process sliding-window limiter. Good enough for a single app server."""
+
+    def __init__(self, limit, window_seconds):
+        self.limit = limit
+        self.window = window_seconds
+        self.hits = defaultdict(list)
+        self.lock = threading.Lock()
+
+    def _prune(self, key, now):
+        self.hits[key] = [t for t in self.hits[key] if now - t < self.window]
+
+    def is_blocked(self, key):
+        with self.lock:
+            now = time.monotonic()
+            self._prune(key, now)
+            return len(self.hits[key]) >= self.limit
+
+    def hit(self, key):
+        with self.lock:
+            now = time.monotonic()
+            self._prune(key, now)
+            self.hits[key].append(now)
+
+    def reset(self, key):
+        with self.lock:
+            self.hits.pop(key, None)
+
+
+login_limiter = RateLimiter(limit=10, window_seconds=15 * 60)
+reset_limiter = RateLimiter(limit=5, window_seconds=15 * 60)
+
+
+def client_ip():
+    return request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
+
+
+EVENT_LABELS = {
+    "submitted": "Application submitted",
+    "updated": "Application updated by supplier",
+    "resubmitted": "Application resubmitted",
+    "status_changed": "Status changed",
+    "review_updated": "Review details updated",
+    "document_replaced": "Document replaced by admin",
+    "documents_downloaded": "All documents downloaded",
+    "account_activated": "Supplier account activated",
+    "account_deactivated": "Supplier account deactivated",
+    "assigned": "Assigned to admin",
+    "unassigned": "Unassigned",
+    "document_viewed": "Document viewed",
+}
+
+AUDIT_FIELD_LABELS = {
+    "company_name": "Company name", "contact_name": "Key contact", "phone": "Phone",
+    **PROFILE_FIELD_LABELS,
+}
+
+
+def log_event(application, action, summary="", from_status=None, to_status=None, changes=None, actor=None):
+    """Record one audit-trail entry. `actor` defaults to whoever is signed in for this request."""
+    if actor is None:
+        if g.get("is_admin_view") and get_current_admin():
+            actor = get_current_admin()
+        else:
+            actor = get_current_user()
+    if isinstance(actor, Admin):
+        actor_type, name = "admin", actor.name or actor.email
+    elif isinstance(actor, User):
+        actor_type, name = "supplier", actor.contact_name or actor.company_name
+    else:
+        actor_type, name = "system", "System"
+    DB.session.add(ApplicationEvent(
+        application_id=application.id,
+        actor_type=actor_type,
+        actor_id=getattr(actor, "id", None),
+        actor_name=(name or "")[:150],
+        actor_email=(getattr(actor, "email", "") or "")[:120],
+        action=action,
+        summary=(summary or EVENT_LABELS.get(action, action))[:255],
+        from_status=from_status,
+        to_status=to_status,
+        changes_json=json.dumps(changes) if changes else None,
+        ip_address=client_ip()[:64] if request else "",
+    ))
+
+
+def application_snapshot(application):
+    """Plain-text view of everything a supplier can edit, for before/after comparison."""
+    snapshot = {AUDIT_FIELD_LABELS[f]: (getattr(application, f) or "") for f in AUDIT_FIELD_LABELS}
+    snapshot["Category"] = "; ".join(
+        f"{c.category} ({c.category_detail})" if c.category_detail else c.category
+        for c in application.application_categories
+    )
+    snapshot["Directors & shareholders"] = "; ".join(
+        f"{d.initials_surname}, {d.role}, {d.nationality}, {d.id_number}" for d in application.directors
+    )
+    return snapshot
+
+
+def diff_snapshots(before, after):
+    return [{"field": k, "old": before.get(k, ""), "new": after.get(k, "")}
+            for k in after if (before.get(k) or "") != (after.get(k) or "")]
+
+
+def validate_new_password(password, confirm):
+    if password != confirm:
+        return "Passwords do not match."
+    if len(password) < 8:
+        return "Password must be at least 8 characters long."
+    if not re.search(r"[0-9]", password):
+        return "Password must contain at least one number."
+    if not re.search(r"[^a-zA-Z0-9]", password):
+        return "Password must contain at least one special character."
+    return None
+
+
+def password_reset_serializer():
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="igsp-password-reset")
+
+
+def make_password_reset_token(user):
+    # Embedding part of the hash makes the token single-use: it dies once the password changes.
+    return password_reset_serializer().dumps({"uid": user.id, "ph": user.password_hash[-16:]})
+
+
+def load_password_reset_token(token):
+    try:
+        data = password_reset_serializer().loads(token, max_age=PASSWORD_RESET_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return None
+    user = DB.session.get(User, data.get("uid"))
+    if not user or user.password_hash[-16:] != data.get("ph"):
+        return None
+    return user
+
+
+@app.template_filter("zar")
+def format_zar(value):
+    """R 1 234.50 (South African formatting)."""
+    try:
+        amount = Decimal(value or 0)
+    except (InvalidOperation, TypeError):
+        return value
+    return "R " + f"{amount:,.2f}".replace(",", " ")
+
+
+def open_request_count():
+    """Open product requests for the nav badge: the supplier's own, or all (for admins)."""
+    try:
+        if g.get("is_admin_view") and g.get("admin"):
+            return ProductRequest.query.filter(ProductRequest.status.in_(OPEN_REQUEST_STATUSES)).count()
+        if g.get("user") and g.user.active:
+            return ProductRequest.query.filter(ProductRequest.supplier_id == g.user.id,
+                                               ProductRequest.status == "requested").count()
+    except Exception:  # noqa: BLE001 — never break page rendering over a badge
+        DB.session.rollback()
+    return 0
+
+
+@app.context_processor
+def inject_globals():
+    cats = []
+    for i, cat in enumerate(SUPPLIER_CATEGORIES):
+        item = dict(cat)
+        item["index"] = i
+        cats.append(item)
+
+    unread = 0
+    supplier_application = None
+    if g.get("is_admin_view") and g.get("admin"):
+        unread = Notification.query.filter_by(admin_id=g.admin.id, is_read=False).count()
+    elif g.get("user"):
+        unread = Notification.query.filter_by(user_id=g.user.id, is_read=False).count()
+        supplier_application = get_user_application(g.user)
+
+    return {
+        "MICROSOFT_CLIENT_ID": MICROSOFT_CLIENT_ID,
+        "SUPPLIER_CATEGORIES": cats,
+        "CATEGORY_SECTIONS": get_category_sections(),
+        "PROVINCES": PROVINCES,
+        "COUNTRIES": COUNTRIES,
+        "normalize_nationality": normalize_nationality,
+        "csrf_token": csrf_token,
+        "status_label": status_label,
+        "unread_notifications": unread,
+        "supplier_application": supplier_application,
+        "REQUEST_STATUSES": REQUEST_STATUSES,
+        "PRODUCT_UNITS": PRODUCT_UNITS,
+        "open_request_count": open_request_count(),
+        "EDITABLE_STATUSES": EDITABLE_STATUSES,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Uploads
+# ---------------------------------------------------------------------------
+
+class UploadError(ValueError):
+    pass
+
+
+def validate_pdf(file_storage):
+    """Raise UploadError unless the upload is a non-empty PDF (by extension and content)."""
+    if not file_storage.filename.lower().endswith(".pdf"):
+        raise UploadError(f"'{file_storage.filename}' is not a PDF. Only PDF files are allowed.")
+    head = file_storage.stream.read(5)
+    file_storage.stream.seek(0)
+    if head != b"%PDF-":
+        raise UploadError(f"'{file_storage.filename}' does not appear to be a valid PDF file.")
+
+
+def collect_uploads(files, slots=None):
+    """Return [(document_type, FileStorage)] for every filled upload slot, validating each file."""
+    uploads = []
+    for field, doc_type in (slots or UPLOAD_SLOTS).items():
+        file_storage = files.get(field)
+        if file_storage and file_storage.filename:
+            validate_pdf(file_storage)
+            uploads.append((doc_type, file_storage))
+    return uploads
+
+
+def absolute_upload_path(relative_path):
+    """Map a stored file_path (``uploads/<user>/<file>``) to disk, refusing anything outside UPLOAD_ROOT."""
+    if not relative_path:
+        return None
+    path = safe_join(STATIC_DIR, relative_path.replace("\\", "/"))
+    if not path:
+        return None
+    path = os.path.realpath(path)
+    if not path.startswith(os.path.realpath(UPLOAD_ROOT) + os.sep):
+        return None
+    return path
+
+
+def save_upload(file_storage, user_id):
+    upload_dir = os.path.join(UPLOAD_ROOT, str(user_id))
+    os.makedirs(upload_dir, exist_ok=True)
+    safe_name = secure_filename(file_storage.filename) or "document.pdf"
+    filename = f"{int(time.time())}_{secrets.token_hex(4)}_{safe_name}"
+    file_storage.save(os.path.join(upload_dir, filename))
+    return f"uploads/{user_id}/{filename}"
+
+
+def remove_upload(relative_path):
+    path = absolute_upload_path(relative_path)
+    if path and os.path.isfile(path):
+        try:
+            os.remove(path)
+        except OSError as exc:
+            app.logger.warning("Could not delete %s: %s", path, exc)
+
+
+def store_document(user_id, application_id, document_type, file_storage):
+    """Save an upload, replacing any existing document of the same type for that application."""
+    query = SupplierDocument.query.filter_by(user_id=user_id, document_type=document_type)
+    if application_id is None:
+        query = query.filter(SupplierDocument.application_id.is_(None))
+    else:
+        query = query.filter(SupplierDocument.application_id == application_id)
+    existing = query.first()
+
+    relative_path = save_upload(file_storage, user_id)
+    if existing:
+        remove_upload(existing.file_path)
+        existing.file_path = relative_path
+        existing.original_filename = file_storage.filename
+        existing.uploaded_at = utcnow()
+        return existing
+
+    document = SupplierDocument(
+        user_id=user_id,
+        application_id=application_id,
+        document_type=document_type,
+        file_path=relative_path,
+        original_filename=file_storage.filename,
+    )
+    DB.session.add(document)
+    return document
+
+
+def missing_required_documents(documents):
+    uploaded = {doc.document_type for doc in documents}
+    return [doc for doc in REQUIRED_DOCUMENTS if doc not in uploaded]
+
+
+# ---------------------------------------------------------------------------
+# Form parsing
+# ---------------------------------------------------------------------------
+
+def read_fields(form, fields):
+    return {field: form.get(field, "").strip() for field in fields}
+
+
+def missing_field_labels(values, required, labels=None):
+    labels = labels or PROFILE_FIELD_LABELS
+    return [labels.get(f, f.replace("_", " ").title()) for f in required if not values.get(f)]
+
+
+def validate_profile_values(values):
+    missing = missing_field_labels(values, REQUIRED_PROFILE_FIELDS)
+    if missing:
+        return "Please complete the required fields: " + ", ".join(missing) + "."
+    if values.get("email_address") and not EMAIL_RE.match(values["email_address"]):
+        return "Please enter a valid e-mail address."
+    if values.get("province") and values["province"] not in PROVINCES:
+        return "Please select a valid province."
+    return None
+
+
+def normalize_nationality(value):
+    value = (value or "").strip()
+    if value in COUNTRY_SET:
+        return value
+    return NATIONALITY_ALIASES.get(value.lower(), "")
+
+
+def luhn_valid(digits):
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        n = int(ch)
+        if i % 2 == 1:
+            n *= 2
+            if n > 9:
+                n -= 9
+        total += n
+    return total % 10 == 0
+
+
+def sa_id_number_error(id_number):
+    """Validate a South African ID: YYMMDD SSSS C A Z (13 digits, Luhn checksum)."""
+    if not re.fullmatch(r"\d{13}", id_number):
+        return "must be exactly 13 digits"
+    yy, mm, dd = int(id_number[0:2]), int(id_number[2:4]), int(id_number[4:6])
+    valid_date = False
+    for century in (1900, 2000):
+        try:
+            datetime(century + yy, mm, dd)
+            valid_date = True
+        except ValueError:
+            pass
+    if not valid_date:
+        return "does not start with a valid date of birth (YYMMDD)"
+    if id_number[10] not in "012":
+        return "has an invalid citizenship digit"
+    if not luhn_valid(id_number):
+        return "is not a valid SA ID number (checksum failed)"
+    return None
+
+
+def director_id_error(id_number, nationality):
+    if nationality == SOUTH_AFRICA:
+        error = sa_id_number_error(id_number)
+        return f"ID number {error}" if error else None
+    if not PASSPORT_RE.match(id_number):
+        return "passport number must be 6–20 letters or digits"
+    return None
+
+
+def parse_directors(form):
+    """Parse director rows (director_<field>_<n>), tolerating gaps left by removed rows."""
+    rows = defaultdict(dict)
+    for key, value in form.items():
+        match = DIRECTOR_FIELD_RE.match(key)
+        if match:
+            rows[int(match.group(2))][match.group(1)] = value.strip()
+
+    directors = []
+    seen_ids = set()
+    for index in sorted(rows):
+        row = rows[index]
+        values = [row.get("initials", ""), row.get("id", ""), row.get("role", ""), row.get("nationality", "")]
+        if not any(values):
+            continue
+        if not all(values):
+            return None, ("All director/shareholder fields (Initials & Surname, ID Number, Role, "
+                          "Nationality) are required.")
+        name = values[0]
+        nationality = normalize_nationality(values[3])
+        if not nationality:
+            return None, f"Please select a nationality from the list for {name}."
+        id_number = re.sub(r"[\s-]", "", values[1]).upper()
+        error = director_id_error(id_number, nationality)
+        if error:
+            return None, f"{name}: {error}."
+        if id_number in seen_ids:
+            return None, f"{name}: the same ID/passport number is entered for more than one director."
+        seen_ids.add(id_number)
+        directors.append({
+            "initials_surname": name[:120],
+            "id_number": id_number[:50],
+            "role": values[2][:120],
+            "nationality": nationality,
+        })
+    if not directors:
+        return None, "Please provide at least one director or shareholder."
+    return directors, None
+
+
+def parse_categories(form):
+    """Return (categories, details, error). The UI offers a single choice; the model allows many."""
+    selected = [normalize_category_value(c) for c in form.getlist("categories") if c]
+    selected = [c for c in dict.fromkeys(selected) if c in CATEGORY_VALUES]
+    if not selected:
+        return None, None, "Please select a supplier category."
+
+    details = {}
+    for i, cat in enumerate(SUPPLIER_CATEGORIES):
+        if cat["value"] in selected and cat.get("specify"):
+            detail = form.get(f"category_detail_{i}", "").strip()
+            if not detail:
+                return None, None, f"Please provide details for '{cat['label'].rstrip(':')}'."
+            details[cat["value"]] = detail[:255]
+    return selected, details, None
+
+
+def replace_categories(application, categories, details):
+    application.application_categories.clear()
+    for value in categories:
+        application.application_categories.append(
+            SupplierApplicationCategory(category=value, category_detail=details.get(value, ""))
+        )
+    application.supplier_category = categories[0]
+    application.supplier_category_detail = details.get(categories[0], "")
+
+
+def replace_directors(application, directors):
+    application.directors.clear()
+    for director in directors:
+        application.directors.append(SupplierDirector(**director))
+
+
+# ---------------------------------------------------------------------------
+# Public pages and authentication
+# ---------------------------------------------------------------------------
 
 @app.route("/")
 def home():
-    user = get_current_user()
-    return render_template("index.html", user=user)
-
-
-def get_onboarding_draft():
-    draft = session.get("supplier_onboarding", {})
-    user = get_current_user()
-    if not draft or (user and draft.get("email") != user.email):
-        draft = {
-            "company_name": user.company_name if user else "",
-            "contact_name": user.contact_name if user else "",
-            "email": user.email if user else "",
-            "phone": user.phone if user else "",
-            "address": user.address if user else "",
-            "supplier_category": "",
-            "supplier_categories": [],
-            "supplier_category_detail": "",
-            "company_profile": "",
-            "documents_status": "pending",
-            "registered_vendor_name": "",
-            "trading_name": "",
-            "business_registration_number": "",
-            "vat_number": "",
-            "tax_number": "",
-            "physical_address": "",
-            "city": "",
-            "province": "",
-            "postal_code": "",
-            "website": "",
-            "primary_contact_person": "",
-            "contact_person_role": "",
-            "contact_number": "",
-            "email_address": "",
-            "directors": [],
-        }
-    session["supplier_onboarding"] = draft
-    return draft
-
-
-@app.route("/onboarding/profile", methods=["GET", "POST"])
-def onboarding_profile():
-    user = get_current_user()
-    if not user:
-        return redirect(url_for("login"))
-
-    draft = get_onboarding_draft()
-
-    if request.method == "POST":
-        draft["registered_vendor_name"] = request.form.get("registered_vendor_name", "").strip()
-        draft["trading_name"] = request.form.get("trading_name", "").strip()
-        draft["business_registration_number"] = request.form.get("business_registration_number", "").strip()
-        draft["vat_number"] = request.form.get("vat_number", "").strip()
-        draft["tax_number"] = request.form.get("tax_number", "").strip()
-        draft["physical_address"] = request.form.get("physical_address", "").strip()
-        draft["city"] = request.form.get("city", "").strip()
-        draft["province"] = request.form.get("province", "").strip()
-        draft["postal_code"] = request.form.get("postal_code", "").strip()
-        draft["website"] = request.form.get("website", "").strip()
-        draft["primary_contact_person"] = request.form.get("primary_contact_person", "").strip()
-        draft["contact_person_role"] = request.form.get("contact_person_role", "").strip()
-        draft["contact_number"] = request.form.get("contact_number", "").strip()
-        draft["email_address"] = request.form.get("email_address", "").strip()
-
-        directors = []
-        idx = 0
-        while True:
-            name = request.form.get(f"director_initials_{idx}", "").strip()
-            id_number = request.form.get(f"director_id_{idx}", "").strip()
-            role = request.form.get(f"director_role_{idx}", "").strip()
-            nationality = request.form.get(f"director_nationality_{idx}", "").strip()
-            if not any([name, id_number, role, nationality]):
-                break
-            directors.append({
-                "initials_surname": name,
-                "id_number": id_number,
-                "role": role,
-                "nationality": nationality,
-            })
-            idx += 1
-        draft["directors"] = directors
-
-        required = [
-            draft["company_name"], draft["contact_name"], draft["email"], draft["phone"],
-            draft["registered_vendor_name"],
-            draft["business_registration_number"], draft["tax_number"],
-            draft["physical_address"], draft["city"], draft["province"], draft["postal_code"],
-            draft["primary_contact_person"], draft["contact_person_role"], draft["contact_number"], draft["email_address"],
-        ]
-        if not all(required):
-            flash("Please complete all required company profile fields.", "error")
-            return redirect(url_for("onboarding_profile"))
-
-        if not draft.get("directors"):
-            flash("Please provide at least one director or shareholder.", "error")
-            return redirect(url_for("onboarding_profile"))
-
-        company_profile_file = request.files.get("document_file_company_profile")
-        existing_profile_doc = SupplierDocument.query.filter_by(user_id=user.id, document_type="Company Profile").first()
-        has_company_profile = existing_profile_doc or (company_profile_file and company_profile_file.filename)
-        has_website = draft.get("website", "").strip()
-        if not has_company_profile and not has_website:
-            flash("Please upload your Company Profile or provide a company website.", "error")
-            return redirect(url_for("onboarding_profile"))
-
-        if company_profile_file and company_profile_file.filename:
-            if not company_profile_file.filename.lower().endswith(".pdf"):
-                flash("Only PDF files are allowed.", "error")
-                return redirect(url_for("onboarding_profile"))
-            upload_dir = os.path.join("static", "uploads", str(user.id))
-            os.makedirs(upload_dir, exist_ok=True)
-
-            filename = f"{int(datetime.utcnow().timestamp())}_{company_profile_file.filename}"
-            relative_path = f"uploads/{user.id}/{filename}"
-            absolute_path = os.path.join("static", "uploads", str(user.id), filename)
-            company_profile_file.save(absolute_path)
-
-            if existing_profile_doc:
-                old_path = os.path.join("static", existing_profile_doc.file_path.replace("/", os.sep))
-                if os.path.exists(old_path):
-                    os.remove(old_path)
-                existing_profile_doc.file_path = relative_path
-                existing_profile_doc.original_filename = company_profile_file.filename
-            else:
-                document = SupplierDocument(
-                    user_id=user.id,
-                    document_type="Company Profile",
-                    file_path=relative_path,
-                    original_filename=company_profile_file.filename,
-                )
-                DB.session.add(document)
-            DB.session.commit()
-
-        session["supplier_onboarding"] = draft
-        return redirect(url_for("onboarding_category"))
-
-    return render_template("supplier_profile.html", user=user, draft=draft, unread_notifications=Notification.query.filter_by(user_id=user.id, is_read=False).count(), company_profile_doc=SupplierDocument.query.filter_by(user_id=user.id, document_type="Company Profile").first())
-
-
-@app.route("/onboarding/category", methods=["GET", "POST"])
-def onboarding_category():
-    user = get_current_user()
-    if not user:
-        return redirect(url_for("login"))
-
-    draft = get_onboarding_draft()
-
-    if request.method == "POST":
-        selected_categories = request.form.getlist("categories")
-        draft["supplier_categories"] = selected_categories
-
-        category_details = {}
-        for i, cat in enumerate(SUPPLIER_CATEGORIES):
-            if cat.get("specify") and cat["value"] in selected_categories:
-                detail = request.form.get(f"category_detail_{i}", "").strip()
-                if not detail:
-                    flash(f"Please provide details for '{cat['label']}'.", "error")
-                    return redirect(url_for("onboarding_category"))
-                category_details[cat["value"]] = detail
-
-        draft["supplier_category_details"] = category_details
-        draft["supplier_category"] = selected_categories[0] if selected_categories else ""
-
-        if not selected_categories:
-            flash("Please select at least one supplier category.", "error")
-            return redirect(url_for("onboarding_category"))
-
-        session["supplier_onboarding"] = draft
-        return redirect(url_for("onboarding_documents"))
-
-    return render_template("supplier_category.html", user=user, draft=draft, unread_notifications=Notification.query.filter_by(user_id=user.id, is_read=False).count())
-
-
-@app.route("/onboarding/documents", methods=["GET", "POST"])
-def onboarding_documents():
-    user = get_current_user()
-    if not user:
-        return redirect(url_for("login"))
-
-    draft = get_onboarding_draft()
-
-    if request.method == "POST":
-        doc_types = [
-            "CIPC Company Registration Document",
-            "Certified ID copies of all Directors",
-            "SARS VAT Certificate",
-            "Confirmation of Bank Account Letter (not older than 3 months)",
-            "Valid B-BBEE certificate, letter from Accountant or Sworn Affidavit",
-            "Proof of Company residential address (not older than 3 months)",
-            "Declaration Form",
-        ]
-
-        draft["documents_status"] = "pending"
-
-        for index, doc_type in enumerate(doc_types, start=1):
-            file = request.files.get(f"document_file_{index}")
-            if file and file.filename:
-                if not file.filename.lower().endswith(".pdf"):
-                    flash("Only PDF files are allowed.", "error")
-                    return redirect(url_for("onboarding_documents"))
-                upload_dir = os.path.join("static", "uploads", str(user.id))
-                os.makedirs(upload_dir, exist_ok=True)
-
-                filename = f"{int(datetime.utcnow().timestamp())}_{file.filename}"
-                relative_path = f"uploads/{user.id}/{filename}"
-                absolute_path = os.path.join("static", "uploads", str(user.id), filename)
-                file.save(absolute_path)
-
-                existing = SupplierDocument.query.filter_by(
-                    user_id=user.id, document_type=doc_type
-                ).first()
-                if existing:
-                    existing.file_path = relative_path
-                    existing.original_filename = file.filename
-                else:
-                    document = SupplierDocument(
-                        user_id=user.id,
-                        document_type=doc_type,
-                        file_path=relative_path,
-                        original_filename=file.filename,
-                    )
-                    DB.session.add(document)
-
-        other_file = request.files.get("document_file_other")
-        if other_file and other_file.filename:
-            if not other_file.filename.lower().endswith(".pdf"):
-                flash("Only PDF files are allowed.", "error")
-                return redirect(url_for("onboarding_documents"))
-            upload_dir = os.path.join("static", "uploads", str(user.id))
-            os.makedirs(upload_dir, exist_ok=True)
-
-            filename = f"{int(datetime.utcnow().timestamp())}_{other_file.filename}"
-            relative_path = f"uploads/{user.id}/{filename}"
-            absolute_path = os.path.join("static", "uploads", str(user.id), filename)
-            other_file.save(absolute_path)
-
-            existing = SupplierDocument.query.filter_by(
-                user_id=user.id, document_type="Other Supporting Documents"
-            ).first()
-            if existing:
-                old_path = os.path.join("static", existing.file_path.replace("/", os.sep))
-                if os.path.exists(old_path):
-                    os.remove(old_path)
-                existing.file_path = relative_path
-                existing.original_filename = other_file.filename
-            else:
-                document = SupplierDocument(
-                    user_id=user.id,
-                    document_type="Other Supporting Documents",
-                    file_path=relative_path,
-                    original_filename=other_file.filename,
-                )
-                DB.session.add(document)
-
-        DB.session.commit()
-
-        uploaded_types = {
-            doc.document_type
-            for doc in SupplierDocument.query.filter_by(user_id=user.id).all()
-        }
-        missing_docs = [doc_type for doc_type in doc_types if doc_type not in uploaded_types]
-        if missing_docs:
-            flash(
-                "Please upload all required documents before continuing. "
-                "Missing: " + ", ".join(missing_docs),
-                "error",
-            )
-            return redirect(url_for("onboarding_documents"))
-
-        draft["documents_status"] = "complete"
-        session["supplier_onboarding"] = draft
-        return redirect(url_for("onboarding_review"))
-
-    documents = SupplierDocument.query.filter_by(user_id=user.id).all()
-    return render_template("supplier_documents.html", user=user, draft=draft, documents=documents, unread_notifications=Notification.query.filter_by(user_id=user.id, is_read=False).count())
-
-
-@app.route("/onboarding/review", methods=["GET", "POST"])
-def onboarding_review():
-    user = get_current_user()
-    if not user:
-        return redirect(url_for("login"))
-
-    draft = get_onboarding_draft()
-
-    if request.method == "POST":
-        required_base = [
-            draft.get("company_name"), draft.get("contact_name"), draft.get("email"),
-            draft.get("phone"), draft.get("supplier_category"),
-            draft.get("registered_vendor_name"),
-            draft.get("business_registration_number"), draft.get("tax_number"),
-            draft.get("physical_address"), draft.get("city"), draft.get("province"), draft.get("postal_code"),
-            draft.get("primary_contact_person"), draft.get("contact_person_role"),
-            draft.get("contact_number"), draft.get("email_address"),
-        ]
-        if not all(required_base):
-            flash("Please complete every onboarding step before submitting.", "error")
-            return redirect(url_for("onboarding_profile"))
-
-        if not draft.get("directors"):
-            flash("Please provide at least one director or shareholder.", "error")
-            return redirect(url_for("onboarding_profile"))
-
-        has_company_profile = SupplierDocument.query.filter_by(user_id=user.id, document_type="Company Profile").first() is not None
-        has_website = draft.get("website", "").strip()
-        if not has_company_profile and not has_website:
-            flash("Please upload your Company Profile or provide a company website.", "error")
-            return redirect(url_for("onboarding_profile"))
-
-        application = SupplierApplication.query.filter_by(email=draft["email"]).first()
-        if not application:
-            application = SupplierApplication(
-                company_name=draft["company_name"],
-                contact_name=draft["contact_name"],
-                email=draft["email"],
-                phone=draft["phone"],
-            supplier_category=draft["supplier_category"],
-            supplier_category_detail=draft.get("supplier_category_detail", ""),
-            company_profile="",
-            documents_status=draft.get("documents_status", "pending"),
-            status="pending_review",
-                registered_vendor_name=draft.get("registered_vendor_name", ""),
-                trading_name=draft.get("trading_name", ""),
-                business_registration_number=draft.get("business_registration_number", ""),
-                vat_number=draft.get("vat_number", ""),
-                tax_number=draft.get("tax_number", ""),
-                physical_address=draft.get("physical_address", ""),
-                city=draft.get("city", ""),
-                province=draft.get("province", ""),
-                postal_code=draft.get("postal_code", ""),
-                website=draft.get("website", ""),
-                primary_contact_person=draft.get("primary_contact_person", ""),
-                contact_person_role=draft.get("contact_person_role", ""),
-                contact_number=draft.get("contact_number", ""),
-                email_address=draft.get("email_address", ""),
-            )
-            DB.session.add(application)
-        else:
-            application.company_name = draft["company_name"]
-            application.contact_name = draft["contact_name"]
-            application.phone = draft["phone"]
-        application.supplier_category = draft["supplier_category"]
-        application.supplier_category_detail = draft.get("supplier_category_detail", "")
-        application.documents_status = draft.get("documents_status", "pending")
-        application.status = "pending_review"
-        application.registered_vendor_name = draft.get("registered_vendor_name", "")
-        application.trading_name = draft.get("trading_name", "")
-        application.business_registration_number = draft.get("business_registration_number", "")
-        application.vat_number = draft.get("vat_number", "")
-        application.tax_number = draft.get("tax_number", "")
-        application.physical_address = draft.get("physical_address", "")
-        application.city = draft.get("city", "")
-        application.province = draft.get("province", "")
-        application.postal_code = draft.get("postal_code", "")
-        application.website = draft.get("website", "")
-        application.primary_contact_person = draft.get("primary_contact_person", "")
-        application.contact_person_role = draft.get("contact_person_role", "")
-        application.contact_number = draft.get("contact_number", "")
-        application.email_address = draft.get("email_address", "")
-
-        DB.session.commit()
-
-        SupplierApplicationCategory.query.filter_by(application_id=application.id).delete()
-        DB.session.commit()
-
-        for cat_value in draft.get("supplier_categories", []):
-            detail = draft.get("supplier_category_details", {}).get(cat_value, "")
-            cat_obj = SupplierApplicationCategory(
-                application_id=application.id,
-                category=cat_value,
-                category_detail=detail,
-            )
-            DB.session.add(cat_obj)
-
-        DB.session.commit()
-
-        SupplierDirector.query.filter_by(application_id=application.id).delete()
-        DB.session.commit()
-        for director in draft.get("directors", []):
-            director_obj = SupplierDirector(
-                application_id=application.id,
-                initials_surname=director.get("initials_surname", ""),
-                id_number=director.get("id_number", ""),
-                role=director.get("role", ""),
-                nationality=director.get("nationality", ""),
-            )
-            DB.session.add(director_obj)
-        DB.session.commit()
-
-        SupplierDocument.query.filter_by(user_id=user.id, application_id=None).update({"application_id": application.id})
-        DB.session.commit()
-
-        for admin in Admin.query.all():
-            notification = Notification(
-                admin_id=admin.id,
-                title="New Supplier Application",
-                message=f"New application submitted by {user.company_name} ({user.contact_name}) for {draft.get('supplier_category', 'N/A')}.",
-                related_application_id=application.id,
-            )
-            DB.session.add(notification)
-        DB.session.commit()
-
-        session.pop("supplier_onboarding", None)
-        flash("Supplier application submitted successfully.", "success")
-        return redirect(url_for("dashboard"))
-
-    documents = SupplierDocument.query.filter_by(user_id=user.id).all()
-    return render_template("supplier_review.html", user=user, draft=draft, documents=documents, unread_notifications=Notification.query.filter_by(user_id=user.id, is_read=False).count())
-
-
-@app.route("/register", methods=["POST"])
-def register_supplier():
-    draft = get_onboarding_draft()
-    required = [
-        draft.get("company_name"), draft.get("contact_name"), draft.get("email"),
-        draft.get("phone"), draft.get("supplier_category"),
-        draft.get("registered_vendor_name"),
-        draft.get("business_registration_number"), draft.get("tax_number"),
-        draft.get("physical_address"), draft.get("city"), draft.get("province"), draft.get("postal_code"),
-        draft.get("primary_contact_person"), draft.get("contact_person_role"),
-        draft.get("contact_number"), draft.get("email_address"),
-    ]
-    if not all(required):
-        flash("Please complete all supplier details before submitting.", "error")
-        return redirect(url_for("onboarding_profile"))
-
-    if not draft.get("directors"):
-        flash("Please provide at least one director or shareholder.", "error")
-        return redirect(url_for("onboarding_profile"))
-
-    has_company_profile = SupplierDocument.query.filter_by(user_id=user.id, document_type="Company Profile").first() is not None
-    has_website = draft.get("website", "").strip()
-    if not has_company_profile and not has_website:
-        flash("Please upload your Company Profile or provide a company website.", "error")
-        return redirect(url_for("onboarding_profile"))
-
-    application = SupplierApplication.query.filter_by(email=draft["email"]).first()
-    if not application:
-        application = SupplierApplication(
-            company_name=draft["company_name"],
-            contact_name=draft["contact_name"],
-            email=draft["email"],
-            phone=draft["phone"],
-            supplier_category=draft["supplier_category"],
-                supplier_category_detail=draft.get("supplier_category_detail", ""),
-                company_profile="",
-                documents_status=draft.get("documents_status", "pending"),
-            status="pending_review",
-            registered_vendor_name=draft.get("registered_vendor_name", ""),
-            trading_name=draft.get("trading_name", ""),
-            business_registration_number=draft.get("business_registration_number", ""),
-            vat_number=draft.get("vat_number", ""),
-            tax_number=draft.get("tax_number", ""),
-            physical_address=draft.get("physical_address", ""),
-            city=draft.get("city", ""),
-            province=draft.get("province", ""),
-            postal_code=draft.get("postal_code", ""),
-            website=draft.get("website", ""),
-            primary_contact_person=draft.get("primary_contact_person", ""),
-            contact_person_role=draft.get("contact_person_role", ""),
-            contact_number=draft.get("contact_number", ""),
-            email_address=draft.get("email_address", ""),
-        )
-        DB.session.add(application)
-    else:
-        application.company_name = draft["company_name"]
-        application.contact_name = draft["contact_name"]
-        application.phone = draft["phone"]
-        application.supplier_category = draft["supplier_category"]
-        application.supplier_category_detail = draft.get("supplier_category_detail", "")
-        application.documents_status = draft.get("documents_status", "pending")
-        application.status = "pending_review"
-        application.registered_vendor_name = draft.get("registered_vendor_name", "")
-        application.trading_name = draft.get("trading_name", "")
-        application.business_registration_number = draft.get("business_registration_number", "")
-        application.vat_number = draft.get("vat_number", "")
-        application.tax_number = draft.get("tax_number", "")
-        application.physical_address = draft.get("physical_address", "")
-        application.city = draft.get("city", "")
-        application.province = draft.get("province", "")
-        application.postal_code = draft.get("postal_code", "")
-        application.website = draft.get("website", "")
-        application.primary_contact_person = draft.get("primary_contact_person", "")
-        application.contact_person_role = draft.get("contact_person_role", "")
-        application.contact_number = draft.get("contact_number", "")
-        application.email_address = draft.get("email_address", "")
-
-    DB.session.commit()
-
-    SupplierApplicationCategory.query.filter_by(application_id=application.id).delete()
-    DB.session.commit()
-
-    for cat_value in draft.get("supplier_categories", []):
-        detail = draft.get("supplier_category_details", {}).get(cat_value, "")
-        cat_obj = SupplierApplicationCategory(
-            application_id=application.id,
-            category=cat_value,
-            category_detail=detail,
-        )
-        DB.session.add(cat_obj)
-    DB.session.commit()
-
-    SupplierDirector.query.filter_by(application_id=application.id).delete()
-    DB.session.commit()
-    for director in draft.get("directors", []):
-        director_obj = SupplierDirector(
-            application_id=application.id,
-            initials_surname=director.get("initials_surname", ""),
-            id_number=director.get("id_number", ""),
-            role=director.get("role", ""),
-            nationality=director.get("nationality", ""),
-        )
-        DB.session.add(director_obj)
-    DB.session.commit()
-
-    user = get_current_user()
-    if user:
-        SupplierDocument.query.filter_by(user_id=user.id, application_id=None).update({"application_id": application.id})
-        DB.session.commit()
-
-    for admin in Admin.query.all():
-        notification = Notification(
-            admin_id=admin.id,
-            title="New Supplier Application",
-            message=f"New application submitted by {user.company_name if user else application.company_name} ({user.contact_name if user else application.contact_name}) for {application.supplier_category}.",
-            related_application_id=application.id,
-        )
-        DB.session.add(notification)
-    DB.session.commit()
-
-    session.pop("supplier_onboarding", None)
-    flash("Supplier details submitted successfully.", "success")
-    return redirect(url_for("dashboard"))
-
-
-@app.route("/review/<int:application_id>", methods=["POST"])
-def review_application(application_id):
-    application = SupplierApplication.query.get_or_404(application_id)
-    application.status = request.form.get("status", application.status)
-    application.review_comments = request.form.get("review_comments", "")
-    application.documents_status = request.form.get("documents_status", application.documents_status)
-    DB.session.commit()
-    return redirect(url_for("home"))
-
-
-@app.route("/db-status")
-def db_status():
-    try:
-        with app.app_context():
-            DB.session.execute(text("SELECT 1"))
-        return jsonify({"status": "connected", "database": MYSQL_DB})
-    except Exception as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 500
+    return render_template("index.html", user=get_current_user())
 
 
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"})
 
-@app.route("/dashboard")
-def dashboard():
-    user = get_current_user()
-    if not user:
-        return redirect(url_for("login"))
 
-    applications = SupplierApplication.query.filter_by(email=user.email).order_by(SupplierApplication.created_at.desc()).all()
-    approved_count = sum(1 for app in applications if app.status == "approved")
-    pending_count = sum(1 for app in applications if app.status == "pending_review")
-    documents = SupplierDocument.query.filter_by(user_id=user.id).all()
-    contact_phone = applications[0].phone if applications and applications[0].phone else user.phone
-    unread_notifications = Notification.query.filter_by(user_id=user.id, is_read=False).count()
-
-    return render_template(
-        "dashboard.html",
-        user=user,
-        applications=applications,
-        approved_count=approved_count,
-        pending_count=pending_count,
-        documents=documents,
-        contact_phone=contact_phone,
-        unread_notifications=unread_notifications,
-    )
-
-
-@app.route("/settings")
-def supplier_settings():
-    user = get_current_user()
-    if not user:
-        return redirect(url_for("login"))
-
-    unread_notifications = Notification.query.filter_by(user_id=user.id, is_read=False).count()
-    two_fa = User2FA.query.filter_by(user_id=user.id, confirmed=True).first() if user else None
-
-    return render_template(
-        "supplier_settings.html",
-        user=user,
-        unread_notifications=unread_notifications,
-        two_fa=two_fa,
-    )
-
-
-@app.route("/dashboard/upload-document", methods=["POST"])
-def upload_document():
-    user = get_current_user()
-    if not user:
-        return redirect(url_for("login"))
-
-    document_type = request.form.get("document_type", "").strip()
-    file = request.files.get("document_file")
-
-    if not document_type or not file or file.filename == "":
-        flash("Please select a document type and file.", "error")
-        return redirect(url_for("dashboard"))
-
-    if not file.filename.lower().endswith(".pdf"):
-        flash("Only PDF files are allowed.", "error")
-        return redirect(url_for("dashboard"))
-
-    upload_dir = os.path.join("static", "uploads", str(user.id))
-    os.makedirs(upload_dir, exist_ok=True)
-
-    filename = f"{int(datetime.utcnow().timestamp())}_{file.filename}"
-    relative_path = os.path.join("uploads", str(user.id), filename)
-    absolute_path = os.path.join("static", relative_path)
-    file.save(absolute_path)
-
-    application = (
-        SupplierApplication.query.filter_by(email=user.email)
-        .order_by(SupplierApplication.created_at.desc())
-        .first()
-    )
-
-    document = SupplierDocument(
-        user_id=user.id,
-        application_id=application.id if application else None,
-        document_type=document_type,
-        file_path=relative_path,
-        original_filename=file.filename,
-    )
-    DB.session.add(document)
-    DB.session.commit()
-
-    flash("Document uploaded successfully.", "success")
-    return redirect(url_for("dashboard"))
-
-
-@app.route("/applications/<int:application_id>/edit", methods=["GET", "POST"])
-def edit_application(application_id):
-    user = get_current_user()
-    if not user:
-        return redirect(url_for("login"))
-
-    application = SupplierApplication.query.get_or_404(application_id)
-
-    if application.email != user.email:
-        flash("You are not authorized to edit this application.", "error")
-        return redirect(url_for("dashboard"))
-
-    documents = SupplierDocument.query.filter(
-        DB.or_(
-            SupplierDocument.application_id == application.id,
-            DB.and_(
-                SupplierDocument.user_id == user.id,
-                SupplierDocument.application_id.is_(None),
-            ),
-        )
-    ).all()
-    doc_types = [
-        "CIPC Company Registration Document",
-        "Certified ID copies of all Directors",
-        "SARS VAT Certificate",
-        "Confirmation of Bank Account Letter (not older than 3 months)",
-        "Valid B-BBEE certificate, letter from Accountant or Sworn Affidavit",
-        "Proof of Company residential address (not older than 3 months)",
-        "Declaration Form",
-    ]
-
-    if request.method == "POST":
-        application.company_name = request.form.get("company_name", "").strip()
-        application.contact_name = request.form.get("contact_name", "").strip()
-        application.email = request.form.get("email", "").strip()
-        application.phone = request.form.get("phone", "").strip()
-        application.registered_vendor_name = request.form.get("registered_vendor_name", "").strip()
-        application.trading_name = request.form.get("trading_name", "").strip()
-        application.business_registration_number = request.form.get("business_registration_number", "").strip()
-        application.vat_number = request.form.get("vat_number", "").strip()
-        application.tax_number = request.form.get("tax_number", "").strip()
-        application.physical_address = request.form.get("physical_address", "").strip()
-        application.city = request.form.get("city", "").strip()
-        application.province = request.form.get("province", "").strip()
-        application.postal_code = request.form.get("postal_code", "").strip()
-        application.website = request.form.get("website", "").strip()
-        application.primary_contact_person = request.form.get("primary_contact_person", "").strip()
-        application.contact_person_role = request.form.get("contact_person_role", "").strip()
-        application.contact_number = request.form.get("contact_number", "").strip()
-        application.email_address = request.form.get("email_address", "").strip()
-
-        required = [
-            application.company_name, application.contact_name, application.email,
-            application.phone,
-            application.registered_vendor_name,
-            application.business_registration_number, application.tax_number,
-            application.physical_address, application.city, application.province, application.postal_code,
-            application.primary_contact_person, application.contact_person_role,
-            application.contact_number, application.email_address,
-        ]
-        if not all(required):
-            flash("Please complete all required fields.", "error")
-            return redirect(url_for("edit_application", application_id=application.id))
-
-        if not application.directors:
-            flash("Please provide at least one director or shareholder.", "error")
-            return redirect(url_for("edit_application", application_id=application.id))
-
-        selected_categories = request.form.getlist("categories")
-        if not selected_categories:
-            flash("Please select at least one supplier category.", "error")
-            return redirect(url_for("edit_application", application_id=application.id))
-
-        application.supplier_category = selected_categories[0]
-
-        for i, cat in enumerate(SUPPLIER_CATEGORIES):
-            if cat.get("specify") and cat["value"] in selected_categories:
-                detail = request.form.get(f"category_detail_{i}", "").strip()
-                if not detail:
-                    flash(f"Please provide details for '{cat['label']}'.", "error")
-                    return redirect(url_for("edit_application", application_id=application.id))
-
-        existing_cats = SupplierApplicationCategory.query.filter_by(application_id=application.id).all()
-        for ec in existing_cats:
-            DB.session.delete(ec)
-
-        for cat_value in selected_categories:
-            detail = ""
-            for i, cat in enumerate(SUPPLIER_CATEGORIES):
-                if cat.get("specify") and cat["value"] == cat_value:
-                    detail = request.form.get(f"category_detail_{i}", "").strip()
-                    break
-            cat_obj = SupplierApplicationCategory(
-                application_id=application.id,
-                category=cat_value,
-                category_detail=detail,
-            )
-            DB.session.add(cat_obj)
-
-        application.documents_status = "complete"
-
-        SupplierDirector.query.filter_by(application_id=application.id).delete()
-        DB.session.commit()
-        idx = 0
-        while True:
-            initials = request.form.get(f"director_initials_{idx}", "").strip()
-            surname = request.form.get(f"director_surname_{idx}", "").strip()
-            id_number = request.form.get(f"director_id_{idx}", "").strip()
-            role = request.form.get(f"director_role_{idx}", "").strip()
-            nationality = request.form.get(f"director_nationality_{idx}", "").strip()
-            if not any([initials, surname, id_number, role, nationality]):
-                break
-            director_obj = SupplierDirector(
-                application_id=application.id,
-                initials_surname=f"{initials} {surname}".strip(),
-                id_number=id_number,
-                role=role,
-                nationality=nationality,
-            )
-            DB.session.add(director_obj)
-            idx += 1
-
-        for index, doc_type in enumerate(doc_types, start=1):
-            file = request.files.get(f"document_file_{index}")
-            if file and file.filename:
-                if not file.filename.lower().endswith(".pdf"):
-                    flash("Only PDF files are allowed.", "error")
-                    return redirect(url_for("edit_application", application_id=application.id))
-                upload_dir = os.path.join("static", "uploads", str(user.id))
-                os.makedirs(upload_dir, exist_ok=True)
-
-                filename = f"{int(datetime.utcnow().timestamp())}_{file.filename}"
-                relative_path = f"uploads/{user.id}/{filename}"
-                absolute_path = os.path.join("static", "uploads", str(user.id), filename)
-                file.save(absolute_path)
-
-                existing = SupplierDocument.query.filter_by(
-                    user_id=user.id, application_id=application.id, document_type=doc_type
-                ).first()
-                if existing:
-                    old_path = os.path.join("static", existing.file_path.replace("/", os.sep))
-                    if os.path.exists(old_path):
-                        os.remove(old_path)
-                    existing.file_path = relative_path
-                    existing.original_filename = file.filename
-                else:
-                    document = SupplierDocument(
-                        user_id=user.id,
-                        application_id=application.id,
-                        document_type=doc_type,
-                        file_path=relative_path,
-                        original_filename=file.filename,
-                    )
-                    DB.session.add(document)
-
-        other_file = request.files.get("document_file_other")
-        if other_file and other_file.filename:
-            if not other_file.filename.lower().endswith(".pdf"):
-                flash("Only PDF files are allowed.", "error")
-                return redirect(url_for("edit_application", application_id=application.id))
-            upload_dir = os.path.join("static", "uploads", str(user.id))
-            os.makedirs(upload_dir, exist_ok=True)
-
-            filename = f"{int(datetime.utcnow().timestamp())}_{other_file.filename}"
-            relative_path = f"uploads/{user.id}/{filename}"
-            absolute_path = os.path.join("static", "uploads", str(user.id), filename)
-            other_file.save(absolute_path)
-
-            existing = SupplierDocument.query.filter_by(
-                user_id=user.id, application_id=application.id, document_type="Other Supporting Documents"
-            ).first()
-            if existing:
-                old_path = os.path.join("static", existing.file_path.replace("/", os.sep))
-                if os.path.exists(old_path):
-                    os.remove(old_path)
-                existing.file_path = relative_path
-                existing.original_filename = other_file.filename
-            else:
-                document = SupplierDocument(
-                    user_id=user.id,
-                    application_id=application.id,
-                    document_type="Other Supporting Documents",
-                    file_path=relative_path,
-                    original_filename=other_file.filename,
-                )
-                DB.session.add(document)
-
-        company_profile_file = request.files.get("document_file_company_profile")
-        existing_profile_doc = SupplierDocument.query.filter_by(
-            user_id=user.id, application_id=application.id, document_type="Company Profile"
-        ).first()
-        has_company_profile = existing_profile_doc or (company_profile_file and company_profile_file.filename)
-        has_website = (application.website or "").strip()
-        if not has_company_profile and not has_website:
-            flash("Please upload your Company Profile or provide a company website.", "error")
-            return redirect(url_for("edit_application", application_id=application.id))
-
-        if company_profile_file and company_profile_file.filename:
-            if not company_profile_file.filename.lower().endswith(".pdf"):
-                flash("Only PDF files are allowed.", "error")
-                return redirect(url_for("edit_application", application_id=application.id))
-            upload_dir = os.path.join("static", "uploads", str(user.id))
-            os.makedirs(upload_dir, exist_ok=True)
-
-            filename = f"{int(datetime.utcnow().timestamp())}_{company_profile_file.filename}"
-            relative_path = f"uploads/{user.id}/{filename}"
-            absolute_path = os.path.join("static", "uploads", str(user.id), filename)
-            company_profile_file.save(absolute_path)
-
-            if existing_profile_doc:
-                old_path = os.path.join("static", existing_profile_doc.file_path.replace("/", os.sep))
-                if os.path.exists(old_path):
-                    os.remove(old_path)
-                existing_profile_doc.file_path = relative_path
-                existing_profile_doc.original_filename = company_profile_file.filename
-            else:
-                document = SupplierDocument(
-                    user_id=user.id,
-                    application_id=application.id,
-                    document_type="Company Profile",
-                    file_path=relative_path,
-                    original_filename=company_profile_file.filename,
-                )
-                DB.session.add(document)
-
-        application.documents_status = "complete"
-        DB.session.commit()
-
-        for admin in Admin.query.all():
-            notification = Notification(
-                admin_id=admin.id,
-                title="Application Updated",
-                message=f"Supplier {user.company_name} ({user.contact_name}) updated their application.",
-                related_application_id=application.id,
-            )
-            DB.session.add(notification)
-        DB.session.commit()
-
-        flash("Application updated successfully.", "success")
-        return redirect(url_for("dashboard"))
-
-    selected_categories = [normalize_category_value(ac.category) for ac in application.application_categories]
-    selected_details = {normalize_category_value(ac.category): ac.category_detail for ac in application.application_categories}
-    directors = [
-        {
-            "initials_surname": d.initials_surname,
-            "id_number": d.id_number,
-            "role": d.role,
-            "nationality": d.nationality,
-        }
-        for d in application.directors
-    ]
-    return render_template(
-        "edit_application.html",
-        user=user,
-        application=application,
-        documents=documents,
-        doc_types=doc_types,
-        selected_categories=selected_categories,
-        selected_details=selected_details,
-        directors=directors,
-        unread_notifications=Notification.query.filter_by(user_id=user.id, is_read=False).count(),
-    )
-
-
-@app.route("/applications/<int:application_id>")
-def application_detail(application_id):
-    user = get_current_user()
-    if not user:
-        return redirect(url_for("login"))
-
-    application = SupplierApplication.query.get_or_404(application_id)
-
-    if application.email != user.email:
-        flash("You are not authorized to view this application.", "error")
-        return redirect(url_for("dashboard"))
-
-    documents = SupplierDocument.query.filter(
-        DB.or_(
-            SupplierDocument.application_id == application.id,
-            DB.and_(
-                SupplierDocument.user_id == user.id,
-                SupplierDocument.application_id.is_(None),
-            ),
-        )
-    ).all() if user else SupplierDocument.query.filter_by(application_id=application.id).all()
-
-    unread_notifications = Notification.query.filter_by(user_id=user.id, is_read=False).count()
-
-    return render_template(
-        "application_detail.html",
-        user=user,
-        application=application,
-        documents=documents,
-        unread_notifications=unread_notifications,
-    )
-
-
-@app.route("/apps")
-def applications():
-    user = get_current_user()
-    if not user:
-        return redirect(url_for("login"))
-
-    search_query = request.args.get("q", "").strip()
-    current_status = request.args.get("status", "all").strip()
-
-    query = SupplierApplication.query.filter_by(email=user.email)
-
-    if search_query:
-        like_pattern = f"%{search_query}%"
-        query = query.filter(
-            DB.or_(
-                SupplierApplication.company_name.ilike(like_pattern),
-                SupplierApplication.contact_name.ilike(like_pattern),
-            )
-        )
-
-    if current_status != "all":
-        query = query.filter(SupplierApplication.status == current_status)
-
-    applications = query.order_by(SupplierApplication.created_at.desc()).all()
-    approved_count = sum(1 for app in applications if app.status == "approved")
-    under_review_count = sum(1 for app in applications if app.status == "pending_review")
-    declined_count = sum(1 for app in applications if app.status == "rejected")
-    total_count = len(applications)
-
-    if total_count > 0:
-        approved_percent = round((approved_count / total_count) * 100)
-        under_review_percent = round((under_review_count / total_count) * 100)
-        declined_percent = round((declined_count / total_count) * 100)
-    else:
-        approved_percent = 0
-        under_review_percent = 0
-        declined_percent = 0
-
-    unread_notifications = Notification.query.filter_by(user_id=user.id, is_read=False).count()
-
-    return render_template(
-        "application.html",
-        user=user,
-        applications=applications,
-        approved_count=approved_count,
-        under_review_count=under_review_count,
-        declined_count=declined_count,
-        total_count=total_count,
-        approved_percent=approved_percent,
-        under_review_percent=under_review_percent,
-        declined_percent=declined_percent,
-        current_status=current_status,
-        search_query=search_query,
-        unread_notifications=unread_notifications,
-    )
+@app.route("/db-status")
+@admin_required
+def db_status():
+    try:
+        DB.session.execute(text("SELECT 1"))
+        return jsonify({"status": "connected", "database": DB.engine.url.database})
+    except Exception as exc:  # noqa: BLE001
+        app.logger.error("Database check failed: %s", exc)
+        return jsonify({"status": "error"}), 500
 
 
 def generate_supplier_id():
-    import random
-    for _ in range(20):
-        number = random.randint(1000, 9999)
-        supplier_id = f"IGSP{number}"
-        if not User.query.filter_by(supplier_id=supplier_id).first():
-            return supplier_id
-    return f"IGSP{random.randint(1000, 9999)}"
+    for digits in (4, 4, 4, 4, 4, 6, 6, 6, 6, 6):
+        candidate = f"IGSP{secrets.randbelow(9 * 10 ** (digits - 1)) + 10 ** (digits - 1)}"
+        if not User.query.filter_by(supplier_id=candidate).first():
+            return candidate
+    return f"IGSP{secrets.token_hex(6).upper()}"
+
+
+def start_email_verification(user):
+    """Issue a code, email it, and park the user in the pending-verification state."""
+    code = user.generate_verification_code()
+    DB.session.commit()
+    session["pending_user_id"] = user.id
+    session["verify_attempts"] = 0
+    session["code_sent_at"] = time.time()
+    return send_verification_email(user.email, code)
 
 
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     if request.method == "POST":
-        email = request.form.get("email", "").strip()
+        form = read_fields(request.form, ["email", "company_name", "contact_name", "phone"])
+        email = normalize_email(form["email"])
         password = request.form.get("password", "")
         confirm_password = request.form.get("confirm_password", "")
-        company_name = request.form.get("company_name", "").strip()
-        contact_name = request.form.get("contact_name", "").strip()
-        phone = request.form.get("phone", "").strip()
 
-        if not all([email, password, confirm_password, company_name, contact_name, phone]):
+        if not all([email, password, confirm_password, form["company_name"], form["contact_name"], form["phone"]]):
             flash("All fields are required.", "error")
             return redirect(url_for("signup"))
-
-        if password != confirm_password:
-            flash("Passwords do not match.", "error")
+        if not EMAIL_RE.match(email):
+            flash("Please enter a valid email address.", "error")
             return redirect(url_for("signup"))
-
-        existing = User.query.filter_by(email=email).first()
-        if existing:
-            flash("An account with this email already exists.", "error")
+        error = validate_new_password(password, confirm_password)
+        if error:
+            flash(error, "error")
+            return redirect(url_for("signup"))
+        if find_user_by_email(email):
+            flash("An account with this email already exists. Please log in instead.", "error")
             return redirect(url_for("signup"))
 
         user = User(
             supplier_id=generate_supplier_id(),
+            name=form["contact_name"][:100],
             email=email,
-            company_name=company_name,
-            contact_name=contact_name,
-            phone=phone,
+            company_name=form["company_name"],
+            contact_name=form["contact_name"],
+            phone=form["phone"],
+            active=False,
         )
         user.set_password(password)
         DB.session.add(user)
         DB.session.commit()
-        session["user_id"] = user.id
-        flash("Account created successfully.", "success")
-        return redirect(url_for("home"))
+
+        if start_email_verification(user):
+            flash("Account created. Enter the verification code we sent to your email.", "success")
+        else:
+            flash("Account created, but we couldn't send your verification code. Use 'Resend code' to try again.", "error")
+        return redirect(url_for("verify_email"))
 
     return render_template("signup.html")
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if get_current_user():
+        return redirect(url_for("dashboard"))
+
+    if request.method == "GET" and request.args.get("next"):
+        session["login_next"] = safe_next_url(request.args.get("next"), "")
+
     if request.method == "POST":
-        email = request.form.get("email", "").strip()
+        email = normalize_email(request.form.get("email"))
         password = request.form.get("password", "")
+        limiter_key = ("login", client_ip(), email)
 
         if not email or not password:
             return render_template("login.html", login_error="Email and password are required.")
+        if login_limiter.is_blocked(limiter_key):
+            return render_template("login.html", login_error="Too many login attempts. Please wait 15 minutes and try again.")
 
-        user = User.query.filter_by(email=email).first()
+        user = find_user_by_email(email)
         if not user or not user.check_password(password):
+            login_limiter.hit(limiter_key)
             return render_template("login.html", login_error="Invalid email or password.")
 
-        two_fa = User2FA.query.filter_by(user_id=user.id).first()
-        if not two_fa or not two_fa.confirmed:
-            session["pending_user_id"] = user.id
-            return redirect(url_for("supplier_setup_2fa"))
-
-        session["pending_user_id"] = user.id
-        return redirect(url_for("supplier_verify_2fa"))
+        login_limiter.reset(limiter_key)
+        if not start_email_verification(user):
+            session.pop("pending_user_id", None)
+            return render_template("login.html", login_error="We couldn't send your verification code. Please try again shortly.")
+        return redirect(url_for("verify_email"))
 
     return render_template("login.html")
 
 
 @app.route("/logout")
 def logout():
-    session.pop("user_id", None)
-    session.pop("supplier_onboarding", None)
-    session.pop("pending_user_id", None)
-    session.pop("show_qr_for_new_device", None)
+    for key in ("user_id", "supplier_onboarding", "pending_user_id", "verify_attempts", "code_sent_at", "login_next"):
+        session.pop(key, None)
     return redirect(url_for("home"))
 
 
-@app.route("/2fa/setup", methods=["GET", "POST"])
-def supplier_setup_2fa():
+def get_pending_user():
     pending_user_id = session.get("pending_user_id")
-    user = User.query.get(pending_user_id) if pending_user_id else get_current_user()
+    user = DB.session.get(User, pending_user_id) if pending_user_id else None
+    if not user:
+        session.pop("pending_user_id", None)
+    return user
+
+
+@app.route("/verify-email", methods=["GET", "POST"])
+def verify_email():
+    user = get_pending_user()
     if not user:
         return redirect(url_for("login"))
 
-    two_fa = User2FA.query.filter_by(user_id=user.id).first()
-
     if request.method == "POST":
-        if two_fa and two_fa.confirmed:
-            action = request.form.get("action", "setup")
+        code = re.sub(r"\D", "", request.form.get("code", ""))
 
-            if action == "add_device":
-                password = request.form.get("password", "")
-                if not user.check_password(password):
-                    flash("Incorrect password. Cannot add device.", "error")
-                    return redirect(url_for("supplier_setup_2fa"))
+        if user.verify_code(code):
+            next_url = session.pop("login_next", "") or url_for("dashboard")
+            for key in ("pending_user_id", "verify_attempts", "code_sent_at"):
+                session.pop(key, None)
+            session["user_id"] = user.id
+            session.permanent = True
+            user.email_verified = True
+            user.clear_verification_code()
+            DB.session.commit()
+            flash("Login successful.", "success")
+            return redirect(next_url)
 
-                session["show_qr_for_new_device"] = True
-                flash("Scan the QR code with your new Microsoft Authenticator device.", "success")
-                return redirect(url_for("supplier_setup_2fa"))
-
-            if action == "disable":
-                password = request.form.get("password", "")
-                if not user.check_password(password):
-                    flash("Incorrect password. 2FA was not disabled.", "error")
-                    return redirect(url_for("supplier_setup_2fa"))
-
-                if two_fa:
-                    DB.session.delete(two_fa)
-                    DB.session.commit()
-                flash("Two-factor authentication has been disabled.", "success")
-                return redirect(url_for("dashboard"))
-
-            flash("Invalid action.", "error")
-            return redirect(url_for("supplier_setup_2fa"))
-
-        totp_code = request.form.get("totp_code", "").strip()
-        if not totp_code:
-            flash("Please enter the 6-digit code from your authenticator app.", "error")
-            return redirect(url_for("supplier_setup_2fa"))
-
-        temp_secret = session.pop("temp_2fa_secret", None)
-        if not temp_secret:
-            flash("Setup session expired. Please try again.", "error")
-            return redirect(url_for("supplier_setup_2fa"))
-
-        totp = pyotp.TOTP(temp_secret)
-        if not totp.verify(totp_code):
-            flash("Invalid code. Please try again.", "error")
-            session["temp_2fa_secret"] = temp_secret
-            return redirect(url_for("supplier_setup_2fa"))
-
-        if not two_fa:
-            two_fa = User2FA(user_id=user.id, totp_secret=temp_secret, confirmed=True)
-            DB.session.add(two_fa)
-        else:
-            two_fa.totp_secret = temp_secret
-            two_fa.confirmed = True
-        DB.session.commit()
-
-        session["user_id"] = user.id
-        session.pop("pending_user_id", None)
-        flash("Two-factor authentication enabled successfully.", "success")
-        return redirect(url_for("dashboard"))
-
-    if two_fa and two_fa.confirmed:
-        show_qr = session.pop("show_qr_for_new_device", False)
-        if show_qr:
-            provisioning_uri = pyotp.TOTP(two_fa.totp_secret).provisioning_uri(name=user.email, issuer_name="IGSP")
-            qr = qrcode.QRCode(version=1, box_size=6, border=2)
-            qr.add_data(provisioning_uri)
-            qr.make(fit=True)
-            img = qr.make_image(fill_color="black", back_color="white")
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            buf.seek(0)
-            qr_data = "data:image/png;base64," + base64.b64encode(buf.read()).decode()
-            return render_template("supplier_2fa_setup.html", user=user, two_fa=two_fa, qr_data=qr_data, show_qr=True, secret=two_fa.totp_secret)
-        return render_template("supplier_2fa_setup.html", user=user, two_fa=two_fa, qr_data=None, show_qr=False, secret=None)
-
-    secret = pyotp.random_base32()
-    session["temp_2fa_secret"] = secret
-    provisioning_uri = pyotp.TOTP(secret).provisioning_uri(name=user.email, issuer_name="IGSP")
-
-    qr = qrcode.QRCode(version=1, box_size=6, border=2)
-    qr.add_data(provisioning_uri)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    qr_data = "data:image/png;base64," + base64.b64encode(buf.read()).decode()
-
-    return render_template("supplier_2fa_setup.html", user=user, two_fa=None, qr_data=qr_data)
-
-
-@app.route("/2fa/verify", methods=["GET", "POST"])
-def supplier_verify_2fa():
-    pending_user_id = session.get("pending_user_id")
-    if not pending_user_id:
-        return redirect(url_for("login"))
-
-    user = User.query.get(pending_user_id)
-    if not user:
-        session.pop("pending_user_id", None)
-        return redirect(url_for("login"))
-
-    if request.method == "POST":
-        totp_code = request.form.get("totp_code", "").strip()
-        two_fa = User2FA.query.filter_by(user_id=user.id, confirmed=True).first()
-        if not two_fa:
+        attempts = session.get("verify_attempts", 0) + 1
+        session["verify_attempts"] = attempts
+        if attempts >= VERIFY_CODE_MAX_ATTEMPTS:
+            user.clear_verification_code()
+            DB.session.commit()
             session.pop("pending_user_id", None)
+            flash("Too many incorrect codes. Please log in again to get a new code.", "error")
             return redirect(url_for("login"))
 
-        totp = pyotp.TOTP(two_fa.totp_secret)
-        if totp.verify(totp_code):
-            session.pop("pending_user_id", None)
-            session["user_id"] = user.id
-            flash("Login successful.", "success")
-            return redirect(url_for("dashboard"))
+        remaining = VERIFY_CODE_MAX_ATTEMPTS - attempts
+        flash(f"Invalid or expired verification code. {remaining} attempt(s) left.", "error")
+        return redirect(url_for("verify_email"))
 
-        flash("Invalid verification code. Please try again.", "error")
-        return redirect(url_for("supplier_verify_2fa"))
-
-    return render_template("supplier_2fa_verify.html", user=user)
+    return render_template("email_verify.html", user=user)
 
 
-def get_current_user():
-    if "user_id" in session:
-        return User.query.get(session["user_id"])
-    return None
+@app.route("/resend-code", methods=["POST"])
+def resend_code():
+    user = get_pending_user()
+    if not user:
+        return redirect(url_for("login"))
+
+    elapsed = time.time() - session.get("code_sent_at", 0)
+    if elapsed < RESEND_COOLDOWN_SECONDS:
+        flash(f"Please wait {int(RESEND_COOLDOWN_SECONDS - elapsed) + 1} seconds before requesting another code.", "error")
+        return redirect(url_for("verify_email"))
+
+    if start_email_verification(user):
+        flash("A new verification code has been sent to your email.", "success")
+    else:
+        flash("We couldn't send a new code right now. Please try again shortly.", "error")
+    return redirect(url_for("verify_email"))
 
 
-@app.context_processor
-def inject_microsoft_sso():
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        email = normalize_email(request.form.get("email"))
+        limiter_key = ("reset", client_ip())
+        if reset_limiter.is_blocked(limiter_key):
+            flash("Too many reset requests. Please wait a few minutes and try again.", "error")
+            return redirect(url_for("forgot_password"))
+        reset_limiter.hit(limiter_key)
+
+        user = find_user_by_email(email) if email else None
+        if user:
+            reset_url = url_for("reset_password", token=make_password_reset_token(user), _external=True)
+            if smtp_configured():
+                send_notification_email(
+                    user.email,
+                    "Reset your IGSP password",
+                    "We received a request to reset your password. The link below is valid for one hour. "
+                    "If you didn't ask for this, you can ignore this email.",
+                    recipient_name=user.contact_name or user.company_name,
+                    action_url=reset_url,
+                    action_label="Reset password",
+                )
+            else:
+                app.logger.warning("SMTP not configured. Password reset link for %s: %s", user.email, reset_url)
+        # Same response whether or not the account exists, so emails can't be enumerated.
+        flash("If an account exists for that email, a password reset link has been sent.", "success")
+        return redirect(url_for("login"))
+
+    return render_template("forgot_password.html")
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    user = load_password_reset_token(token)
+    if not user:
+        flash("This password reset link is invalid or has expired. Please request a new one.", "error")
+        return redirect(url_for("forgot_password"))
+
+    if request.method == "POST":
+        error = validate_new_password(request.form.get("password", ""), request.form.get("confirm_password", ""))
+        if error:
+            flash(error, "error")
+            return redirect(url_for("reset_password", token=token))
+        user.set_password(request.form["password"])
+        user.clear_verification_code()
+        DB.session.commit()
+        flash("Your password has been reset. Please log in.", "success")
+        return redirect(url_for("login"))
+
+    return render_template("reset_password.html", token=token)
+
+
+# ---------------------------------------------------------------------------
+# Supplier onboarding wizard
+# ---------------------------------------------------------------------------
+
+def empty_draft(user):
+    draft = {
+        "company_name": user.company_name,
+        "contact_name": user.contact_name,
+        "email": user.email,
+        "phone": user.phone,
+        "address": user.address,
+        "supplier_category": "",
+        "supplier_categories": [],
+        "supplier_category_detail": "",
+        "supplier_category_details": {},
+        "documents_status": "pending",
+        "directors": [],
+    }
+    draft.update({field: "" for field in PROFILE_FIELDS})
+    return draft
+
+
+def registration_details(user):
+    """Application form fields that can be taken from what the supplier entered at signup."""
     return {
-        "MICROSOFT_CLIENT_ID": MICROSOFT_CLIENT_ID,
-        "SUPPLIER_CATEGORIES": SUPPLIER_CATEGORIES,
-        "CATEGORY_SECTIONS": get_category_sections(),
+        "registered_vendor_name": user.company_name or "",
+        "physical_address": user.address or "",
+        "primary_contact_person": user.contact_name or "",
+        "contact_number": user.phone or "",
+        "email_address": user.email or "",
     }
 
 
-def get_current_admin():
-    if "admin_id" in session:
-        return Admin.query.get(session["admin_id"])
+def get_onboarding_draft():
+    user = get_current_user()
+    draft = session.get("supplier_onboarding")
+    if not draft or normalize_email(draft.get("email")) != normalize_email(user.email):
+        draft = empty_draft(user)
+    # Pre-fill from the registration; anything the supplier already typed wins.
+    for field, value in registration_details(user).items():
+        if not draft.get(field):
+            draft[field] = value
+    save_draft(draft)
+    return draft
+
+
+def save_draft(draft):
+    session["supplier_onboarding"] = draft
+    session.modified = True
+
+
+def redirect_if_already_applied(user):
+    if get_user_application(user):
+        flash("You already have an application on file. You can view or update it from your dashboard.", "error")
+        return redirect(url_for("dashboard"))
     return None
 
 
-def admin_required(view_func):
-    def wrapper(*args, **kwargs):
-        if not get_current_admin():
-            return redirect(url_for("admin_login"))
-        return view_func(*args, **kwargs)
-    wrapper.__name__ = view_func.__name__
-    return wrapper
+def pending_documents(user):
+    return SupplierDocument.query.filter_by(user_id=user.id).filter(SupplierDocument.application_id.is_(None)).all()
 
+
+def pending_company_profile(user):
+    return (
+        SupplierDocument.query.filter_by(user_id=user.id, document_type=COMPANY_PROFILE_DOC)
+        .filter(SupplierDocument.application_id.is_(None))
+        .first()
+    )
+
+
+def profile_step_error(draft, user):
+    error = validate_profile_values(draft)
+    if error:
+        return error
+    if not draft.get("directors"):
+        return "Please provide at least one director or shareholder."
+    if not pending_company_profile(user) and not draft.get("website"):
+        return "Please upload your Company Profile or provide a company website."
+    return None
+
+
+@app.route("/onboarding/profile", methods=["GET", "POST"])
+@login_required
+def onboarding_profile():
+    user = get_current_user()
+    blocked = redirect_if_already_applied(user)
+    if blocked:
+        return blocked
+
+    draft = get_onboarding_draft()
+
+    if request.method == "POST":
+        draft.update(read_fields(request.form, PROFILE_FIELDS))
+        directors, director_error = parse_directors(request.form)
+        if directors:
+            draft["directors"] = directors
+        save_draft(draft)
+
+        if director_error:
+            flash(director_error, "error")
+            return redirect(url_for("onboarding_profile"))
+
+        try:
+            uploads = collect_uploads(request.files, {"document_file_company_profile": COMPANY_PROFILE_DOC})
+        except UploadError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("onboarding_profile"))
+        for doc_type, file_storage in uploads:
+            store_document(user.id, None, doc_type, file_storage)
+        DB.session.commit()
+
+        error = profile_step_error(draft, user)
+        if error:
+            flash(error, "error")
+            return redirect(url_for("onboarding_profile"))
+
+        return redirect(url_for("onboarding_category"))
+
+    return render_template(
+        "supplier_profile.html",
+        user=user,
+        draft=draft,
+        company_profile_doc=pending_company_profile(user),
+    )
+
+
+@app.route("/onboarding/category", methods=["GET", "POST"])
+@login_required
+def onboarding_category():
+    user = get_current_user()
+    blocked = redirect_if_already_applied(user)
+    if blocked:
+        return blocked
+
+    draft = get_onboarding_draft()
+    error = profile_step_error(draft, user)
+    if error:
+        flash("Please complete your company profile first.", "error")
+        return redirect(url_for("onboarding_profile"))
+
+    if request.method == "POST":
+        categories, details, error = parse_categories(request.form)
+        if error:
+            flash(error, "error")
+            return redirect(url_for("onboarding_category"))
+
+        draft["supplier_categories"] = categories
+        draft["supplier_category"] = categories[0]
+        draft["supplier_category_details"] = details
+        draft["supplier_category_detail"] = details.get(categories[0], "")
+        save_draft(draft)
+        return redirect(url_for("onboarding_documents"))
+
+    return render_template("supplier_category.html", user=user, draft=draft)
+
+
+@app.route("/onboarding/documents", methods=["GET", "POST"])
+@login_required
+def onboarding_documents():
+    user = get_current_user()
+    blocked = redirect_if_already_applied(user)
+    if blocked:
+        return blocked
+
+    draft = get_onboarding_draft()
+    if not draft.get("supplier_category"):
+        flash("Please select a supplier category first.", "error")
+        return redirect(url_for("onboarding_category"))
+
+    if request.method == "POST":
+        slots = {k: v for k, v in UPLOAD_SLOTS.items() if v != COMPANY_PROFILE_DOC}
+        try:
+            uploads = collect_uploads(request.files, slots)
+        except UploadError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("onboarding_documents"))
+
+        for doc_type, file_storage in uploads:
+            store_document(user.id, None, doc_type, file_storage)
+        DB.session.commit()
+
+        missing = missing_required_documents(pending_documents(user))
+        if missing:
+            draft["documents_status"] = "pending"
+            save_draft(draft)
+            flash("Please upload all required documents before continuing. Missing: " + ", ".join(missing), "error")
+            return redirect(url_for("onboarding_documents"))
+
+        draft["documents_status"] = "complete"
+        save_draft(draft)
+        return redirect(url_for("onboarding_review"))
+
+    return render_template("supplier_documents.html", user=user, draft=draft, documents=pending_documents(user))
+
+
+@app.route("/onboarding/review", methods=["GET", "POST"])
+@login_required
+def onboarding_review():
+    user = get_current_user()
+    blocked = redirect_if_already_applied(user)
+    if blocked:
+        return blocked
+
+    draft = get_onboarding_draft()
+    documents = pending_documents(user)
+
+    if request.method == "POST":
+        error = profile_step_error(draft, user)
+        if error:
+            flash(error, "error")
+            return redirect(url_for("onboarding_profile"))
+        if not draft.get("supplier_categories"):
+            flash("Please select a supplier category.", "error")
+            return redirect(url_for("onboarding_category"))
+        missing = missing_required_documents(documents)
+        if missing:
+            flash("Please upload all required documents. Missing: " + ", ".join(missing), "error")
+            return redirect(url_for("onboarding_documents"))
+        if not request.form.get("confirm"):
+            flash("Please confirm that the information you provided is correct.", "error")
+            return redirect(url_for("onboarding_review"))
+
+        application = SupplierApplication(
+            company_name=user.company_name,
+            contact_name=user.contact_name,
+            email=user.email,
+            phone=user.phone,
+            company_profile="",
+            documents_status="complete",
+            status="pending_review",
+            **{field: draft.get(field, "") for field in PROFILE_FIELDS},
+        )
+        replace_categories(application, draft["supplier_categories"], draft.get("supplier_category_details", {}))
+        replace_directors(application, draft["directors"])
+        DB.session.add(application)
+        DB.session.flush()
+
+        for document in documents:
+            document.application_id = application.id
+
+        log_event(application, "submitted", to_status="pending_review",
+                  summary=f"Submitted with {len(documents)} document(s)")
+        notify_admins(
+            "New Supplier Application",
+            f"New application submitted by {user.company_name} ({user.contact_name}) for {application.supplier_category}.",
+            application,
+        )
+        notify_supplier(
+            user,
+            "Application Received",
+            "Thank you — your supplier application has been received and is awaiting review. "
+            "We'll notify you when its status changes.",
+            application,
+        )
+        DB.session.commit()
+
+        session.pop("supplier_onboarding", None)
+        flash("Supplier application submitted successfully.", "success")
+        return redirect(url_for("dashboard"))
+
+    documents_by_type = {doc.document_type: doc for doc in documents}
+    return render_template(
+        "supplier_review.html",
+        user=user,
+        draft=draft,
+        documents=documents,
+        documents_by_type=documents_by_type,
+        required_documents=REQUIRED_DOCUMENTS,
+        optional_documents=[COMPANY_PROFILE_DOC, OTHER_DOCS],
+        missing_documents=missing_required_documents(documents),
+        profile_complete=profile_step_error(draft, user) is None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Supplier dashboard
+# ---------------------------------------------------------------------------
+
+def supplier_applications_query(user):
+    return SupplierApplication.query.filter(func.lower(SupplierApplication.email) == normalize_email(user.email))
+
+
+@app.route("/dashboard")
+@login_required
+def dashboard():
+    user = get_current_user()
+    page = request.args.get("page", 1, type=int)
+    base_query = supplier_applications_query(user)
+    pagination = base_query.order_by(SupplierApplication.created_at.desc()).paginate(page=page, per_page=10, error_out=False)
+    latest = pagination.items[0] if pagination.items else None
+
+    return render_template(
+        "dashboard.html",
+        user=user,
+        applications=pagination.items,
+        pagination=pagination,
+        approved_count=base_query.filter(SupplierApplication.status == "approved").count(),
+        pending_count=base_query.filter(SupplierApplication.status == "pending_review").count(),
+        documents=SupplierDocument.query.filter_by(user_id=user.id).all(),
+        contact_phone=(latest.phone if latest and latest.phone else user.phone),
+    )
+
+
+@app.route("/settings")
+@login_required
+def supplier_settings():
+    return render_template("supplier_settings.html", user=get_current_user())
+
+
+@app.route("/settings/password", methods=["POST"])
+@login_required
+def change_password():
+    user = get_current_user()
+    if not user.check_password(request.form.get("current_password", "")):
+        flash("Your current password is incorrect.", "error")
+        return redirect(url_for("supplier_settings"))
+    error = validate_new_password(request.form.get("new_password", ""), request.form.get("confirm_password", ""))
+    if error:
+        flash(error, "error")
+        return redirect(url_for("supplier_settings"))
+    user.set_password(request.form["new_password"])
+    DB.session.commit()
+    flash("Your password has been updated.", "success")
+    return redirect(url_for("supplier_settings"))
+
+
+@app.route("/settings/contact", methods=["POST"])
+@login_required
+def update_contact_details():
+    user = get_current_user()
+    values = read_fields(request.form, ["company_name", "contact_name", "phone", "address"])
+    missing = missing_field_labels(values, ["company_name", "contact_name", "phone"])
+    if missing:
+        flash("Please complete: " + ", ".join(missing) + ".", "error")
+        return redirect(url_for("supplier_settings"))
+    user.company_name = values["company_name"][:150]
+    user.contact_name = values["contact_name"][:120]
+    user.name = values["contact_name"][:100]
+    user.phone = values["phone"][:50]
+    user.address = values["address"][:255]
+    DB.session.commit()
+    session.pop("supplier_onboarding", None)
+    flash("Your account details have been updated.", "success")
+    return redirect(url_for("supplier_settings"))
+
+
+def get_owned_application(application_id):
+    user = get_current_user()
+    application = DB.get_or_404(SupplierApplication, application_id)
+    if normalize_email(application.email) != normalize_email(user.email):
+        abort(404)
+    return application
+
+
+@app.route("/applications/<int:application_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_application(application_id):
+    user = get_current_user()
+    application = get_owned_application(application_id)
+    documents = documents_for_application(application, user)
+
+    if application.status not in EDITABLE_STATUSES:
+        flash(f"This application is {status_label(application.status)} and can no longer be edited. "
+              "Contact us if your details have changed.", "error")
+        return redirect(url_for("application_detail", application_id=application.id))
+
+    if request.method == "POST":
+        edit_url = url_for("edit_application", application_id=application.id)
+        values = read_fields(request.form, ["company_name", "contact_name", "phone"] + PROFILE_FIELDS)
+
+        missing = missing_field_labels(values, ["company_name", "contact_name", "phone"],
+                                       {"company_name": "Company Name", "contact_name": "Key Contact", "phone": "Phone"})
+        error = ("Please complete the required fields: " + ", ".join(missing) + ".") if missing else validate_profile_values(values)
+        directors, director_error = parse_directors(request.form)
+        categories, details, category_error = parse_categories(request.form)
+        for problem in (error, director_error, category_error):
+            if problem:
+                flash(problem, "error")
+                return redirect(edit_url)
+
+        try:
+            uploads = collect_uploads(request.files)
+        except UploadError as exc:
+            flash(str(exc), "error")
+            return redirect(edit_url)
+
+        has_profile_doc = any(d.document_type == COMPANY_PROFILE_DOC for d in documents) or any(
+            doc_type == COMPANY_PROFILE_DOC for doc_type, _ in uploads
+        )
+        if not has_profile_doc and not values["website"]:
+            flash("Please upload your Company Profile or provide a company website.", "error")
+            return redirect(edit_url)
+
+        # Validation passed — apply everything in one transaction.
+        before = application_snapshot(application)
+        previous_files = {d.document_type: d.original_filename for d in documents}
+        old_status = application.status
+        for field, value in values.items():
+            setattr(application, field, value)
+        replace_categories(application, categories, details)
+        replace_directors(application, directors)
+        for document in documents:
+            if document.application_id is None:
+                document.application_id = application.id
+        DB.session.flush()
+        for doc_type, file_storage in uploads:
+            store_document(user.id, application.id, doc_type, file_storage)
+        DB.session.flush()
+
+        all_docs = SupplierDocument.query.filter_by(application_id=application.id).all()
+        application.documents_status = "pending" if missing_required_documents(all_docs) else "complete"
+
+        resubmitted = application.status in {"returned_for_update", "declined"}
+        if resubmitted:
+            application.status = "pending_review"
+
+        changes = diff_snapshots(before, application_snapshot(application))
+        changes += [{"field": f"Document: {doc_type}", "old": previous_files.get(doc_type, ""), "new": fs.filename}
+                    for doc_type, fs in uploads]
+        log_event(
+            application, "resubmitted" if resubmitted else "updated",
+            summary=(f"{'Resubmitted' if resubmitted else 'Updated'}: {len(changes)} change(s)" if changes
+                     else ("Resubmitted without changes" if resubmitted else "Saved without changes")),
+            from_status=old_status if resubmitted else None,
+            to_status=application.status if resubmitted else None,
+            changes=changes,
+        )
+        notify_admins(
+            "Application Resubmitted" if resubmitted else "Application Updated",
+            f"Supplier {application.company_name} ({application.contact_name}) "
+            f"{'resubmitted' if resubmitted else 'updated'} their application.",
+            application,
+        )
+        DB.session.commit()
+
+        flash("Application resubmitted for review." if resubmitted else "Application updated successfully.", "success")
+        return redirect(url_for("application_detail", application_id=application.id))
+
+    return render_template(
+        "edit_application.html",
+        user=user,
+        application=application,
+        documents=documents,
+        doc_types=REQUIRED_DOCUMENTS,
+        selected_categories=[normalize_category_value(c) for c in application.category_names],
+        selected_details={normalize_category_value(ac.category): ac.category_detail for ac in application.application_categories},
+        directors=[
+            {"initials_surname": d.initials_surname, "id_number": d.id_number, "role": d.role, "nationality": d.nationality}
+            for d in application.directors
+        ],
+    )
+
+
+@app.route("/applications/<int:application_id>")
+@login_required
+def application_detail(application_id):
+    user = get_current_user()
+    application = get_owned_application(application_id)
+    return render_template(
+        "application_detail.html",
+        user=user,
+        application=application,
+        documents=documents_for_application(application, user),
+        can_edit=application.status in EDITABLE_STATUSES,
+    )
+
+
+@app.route("/apps")
+@login_required
+def applications():
+    user = get_current_user()
+    search_query = request.args.get("q", "").strip()
+    current_status = request.args.get("status", "all").strip()
+    page = request.args.get("page", 1, type=int)
+
+    base_query = supplier_applications_query(user)
+    if search_query:
+        like_pattern = f"%{search_query}%"
+        base_query = base_query.filter(DB.or_(
+            SupplierApplication.company_name.ilike(like_pattern),
+            SupplierApplication.contact_name.ilike(like_pattern),
+        ))
+    if current_status != "all":
+        base_query = base_query.filter(SupplierApplication.status == current_status)
+
+    total_count = base_query.count()
+    approved_count = base_query.filter(SupplierApplication.status == "approved").count()
+    under_review_count = base_query.filter(SupplierApplication.status == "pending_review").count()
+    declined_count = base_query.filter(SupplierApplication.status == "declined").count()
+
+    def percent(n):
+        return round(n / total_count * 100) if total_count else 0
+
+    pagination = base_query.order_by(SupplierApplication.created_at.desc()).paginate(page=page, per_page=10, error_out=False)
+    return render_template(
+        "application.html",
+        user=user,
+        applications=pagination.items,
+        pagination=pagination,
+        approved_count=approved_count,
+        under_review_count=under_review_count,
+        declined_count=declined_count,
+        total_count=total_count,
+        approved_percent=percent(approved_count),
+        under_review_percent=percent(under_review_count),
+        declined_percent=percent(declined_count),
+        current_status=current_status,
+        search_query=search_query,
+    )
+
+
+@app.route("/notifications")
+@login_required
+def notifications():
+    user = get_current_user()
+    page = request.args.get("page", 1, type=int)
+    pagination = (
+        Notification.query.filter_by(user_id=user.id)
+        .order_by(Notification.created_at.desc())
+        .paginate(page=page, per_page=10, error_out=False)
+    )
+    new_ids = {n.id for n in pagination.items if not n.is_read}
+    unread_count = Notification.query.filter_by(user_id=user.id, is_read=False).count()
+    Notification.query.filter_by(user_id=user.id, is_read=False).update({"is_read": True})
+    DB.session.commit()
+
+    return render_template(
+        "notifications.html",
+        user=user,
+        new_ids=new_ids,
+        notifications=pagination.items,
+        pagination=pagination,
+        unread_notifications=unread_count,
+    )
+
+
+@app.route("/notifications/mark-read/<int:notification_id>", methods=["POST"])
+@login_required
+def mark_notification_read(notification_id):
+    user = get_current_user()
+    notification = Notification.query.filter_by(id=notification_id, user_id=user.id).first_or_404()
+    notification.is_read = True
+    DB.session.commit()
+    return redirect(url_for("notifications"))
+
+
+@app.route("/uploads/<path:filepath>")
+def serve_upload(filepath):
+    """Serve an uploaded document to an admin or to the supplier who owns it."""
+    user = get_current_user()
+    admin = get_current_admin()
+    if not user and not admin:
+        abort(404)
+
+    normalized = filepath.replace("\\", "/")
+    absolute_path = absolute_upload_path(normalized)
+    if not absolute_path or not os.path.isfile(absolute_path):
+        abort(404)
+
+    document = SupplierDocument.query.filter_by(file_path=normalized).first()
+    parts = normalized.split("/")
+    owns_file = user is not None and len(parts) >= 3 and parts[1] == str(user.id)
+
+    if not owns_file:
+        # Any admin may open documents attached to an application; every view is logged.
+        application = DB.session.get(SupplierApplication, document.application_id) if document and document.application_id else None
+        if not admin or not application:
+            abort(404)
+        log_event(application, "document_viewed", summary=f"Viewed {document.document_type}",
+                  changes=[{"field": document.document_type, "old": "", "new": document.original_filename}], actor=admin)
+        DB.session.commit()
+
+    download_name = document.original_filename if document else os.path.basename(absolute_path)
+    return send_file(absolute_path, mimetype="application/pdf", as_attachment=False, download_name=download_name)
+
+
+# ---------------------------------------------------------------------------
+# Admin
+# ---------------------------------------------------------------------------
 
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
+    if get_current_admin():
+        return redirect(url_for("admin_dashboard"))
+
     if request.method == "POST":
-        email = request.form.get("email", "").strip()
+        email = normalize_email(request.form.get("email"))
         password = request.form.get("password", "")
+        limiter_key = ("admin-login", client_ip(), email)
 
         if not email or not password:
             return render_template("admin_login.html", login_error="Email and password are required.")
+        if login_limiter.is_blocked(limiter_key):
+            return render_template("admin_login.html", login_error="Too many login attempts. Please wait 15 minutes and try again.")
 
-        admin = Admin.query.filter_by(email=email).first()
+        admin = find_admin_by_email(email)
         if not admin or not admin.check_password(password):
+            login_limiter.hit(limiter_key)
             return render_template("admin_login.html", login_error="Invalid email or password.")
 
+        login_limiter.reset(limiter_key)
         session["admin_id"] = admin.id
+        session.permanent = True
         return redirect(url_for("admin_dashboard"))
 
     return render_template("admin_login.html")
@@ -1523,33 +2080,34 @@ def admin_login_microsoft():
     if not MICROSOFT_CLIENT_ID or not MICROSOFT_CLIENT_SECRET:
         flash("Microsoft SSO is not configured.", "error")
         return redirect(url_for("admin_login"))
-    redirect_uri = url_for("admin_login_microsoft_callback", _external=True)
-    return oauth.microsoft.authorize_redirect(redirect_uri)
+    return oauth.microsoft.authorize_redirect(url_for("admin_login_microsoft_callback", _external=True))
 
 
 @app.route("/admin/login/microsoft/callback")
 def admin_login_microsoft_callback():
+    if not MICROSOFT_CLIENT_ID or not MICROSOFT_CLIENT_SECRET:
+        return redirect(url_for("admin_login"))
     try:
         token = oauth.microsoft.authorize_access_token()
-        user_info = oauth.microsoft.userinfo()
-    except Exception as exc:
-        flash(f"Microsoft authentication failed: {exc}", "error")
+        user_info = token.get("userinfo") or oauth.microsoft.userinfo()
+    except Exception as exc:  # noqa: BLE001
+        app.logger.error("Microsoft authentication failed: %s", exc)
+        flash("Microsoft authentication failed. Please try again.", "error")
         return redirect(url_for("admin_login"))
 
     email = user_info.get("email") or user_info.get("preferred_username")
-    name = user_info.get("name", email)
-
     if not email:
-        flash("Could not retrieve email from Microsoft account.", "error")
+        flash("Could not retrieve an email address from your Microsoft account.", "error")
         return redirect(url_for("admin_login"))
 
-    admin = Admin.query.filter_by(email=email).first()
+    admin = find_admin_by_email(email)
     if not admin:
         flash("No admin account found for this Microsoft account.", "error")
         return redirect(url_for("admin_login"))
 
     session["admin_id"] = admin.id
-    flash(f"Welcome, {admin.name}", "success")
+    session.permanent = True
+    flash(f"Welcome, {admin.name or admin.email}", "success")
     return redirect(url_for("admin_dashboard"))
 
 
@@ -1559,130 +2117,423 @@ def admin_logout():
     return redirect(url_for("home"))
 
 
+AWAITING_REVIEW_STATUSES = ["submitted", "pending_review", "under_review"]
+
+
 @app.route("/admin")
 @admin_required
 def admin_dashboard():
-    admin = get_current_admin()
-    total_suppliers = User.query.count()
-    total_applications = SupplierApplication.query.count()
-    pending_count = SupplierApplication.query.filter_by(status="pending_review").count()
-    approved_count = SupplierApplication.query.filter_by(status="approved").count()
-    rejected_count = SupplierApplication.query.filter_by(status="rejected").count()
-    recent_applications = SupplierApplication.query.order_by(SupplierApplication.created_at.desc()).limit(10).all()
-    unread_notifications = Notification.query.filter_by(admin_id=admin.id, is_read=False).count()
-
+    status_counts = {status: 0 for status in STATUSES}
+    for status, count in DB.session.query(SupplierApplication.status, func.count()).group_by(SupplierApplication.status):
+        if status in status_counts:
+            status_counts[status] = count
     return render_template(
         "admin_dashboard.html",
-        admin=admin,
-        total_suppliers=total_suppliers,
-        total_applications=total_applications,
-        pending_count=pending_count,
-        approved_count=approved_count,
-        rejected_count=rejected_count,
-        recent_applications=recent_applications,
-        unread_notifications=unread_notifications,
+        admin=get_current_admin(),
+        total_suppliers=User.query.count(),
+        active_suppliers=User.query.filter_by(active=True).count(),
+        total_applications=SupplierApplication.query.count(),
+        status_counts=status_counts,
+        awaiting_count=sum(status_counts[s] for s in AWAITING_REVIEW_STATUSES),
+        assigned_to_me_count=SupplierApplication.query.filter(
+            SupplierApplication.assigned_admin_id == get_current_admin().id,
+            SupplierApplication.status.in_(AWAITING_REVIEW_STATUSES)).count(),
+        unassigned_count=SupplierApplication.query.filter(
+            SupplierApplication.assigned_admin_id.is_(None),
+            SupplierApplication.status.in_(AWAITING_REVIEW_STATUSES)).count(),
+        pending_count=status_counts["pending_review"],
+        approved_count=status_counts["approved"],
+        rejected_count=status_counts["declined"],
+        awaiting_review=(
+            SupplierApplication.query.filter(SupplierApplication.status.in_(AWAITING_REVIEW_STATUSES))
+            .order_by(SupplierApplication.created_at.asc()).limit(6).all()
+        ),
+        recent_applications=SupplierApplication.query.order_by(SupplierApplication.created_at.desc()).limit(8).all(),
     )
 
 
 @app.route("/admin/suppliers")
 @admin_required
 def admin_suppliers():
-    admin = get_current_admin()
     search = request.args.get("search", "").strip()
+    page = request.args.get("page", 1, type=int)
     query = User.query
-
     if search:
-        query = query.filter(
-            DB.or_(
-                User.company_name.ilike(f"%{search}%"),
-                User.contact_name.ilike(f"%{search}%"),
-                User.email.ilike(f"%{search}%"),
-            )
-        )
+        like = f"%{search}%"
+        query = query.filter(DB.or_(
+            User.company_name.ilike(like),
+            User.contact_name.ilike(like),
+            User.email.ilike(like),
+            User.supplier_id.ilike(like),
+        ))
+    pagination = query.order_by(User.created_at.desc()).paginate(page=page, per_page=10, error_out=False)
+    emails = [normalize_email(u.email) for u in pagination.items]
+    applications_by_email = {}
+    if emails:
+        for application in SupplierApplication.query.filter(func.lower(SupplierApplication.email).in_(emails)):
+            applications_by_email[normalize_email(application.email)] = application
+    return render_template(
+        "admin_suppliers.html",
+        admin=get_current_admin(),
+        suppliers=pagination.items,
+        pagination=pagination,
+        search=search,
+        applications_by_email=applications_by_email,
+        normalize_email=normalize_email,
+    )
 
-    suppliers = query.order_by(User.created_at.desc()).all()
-    return render_template("admin_suppliers.html", admin=admin, suppliers=suppliers, search=search, unread_notifications=Notification.query.filter_by(admin_id=admin.id, is_read=False).count())
+
+@app.route("/admin/suppliers/<int:supplier_id>/toggle", methods=["POST"])
+@admin_required
+def toggle_supplier(supplier_id):
+    supplier = DB.get_or_404(User, supplier_id)
+    supplier.active = not supplier.active
+    state = "activated" if supplier.active else "deactivated"
+    supplier_application = get_user_application(supplier)
+    if supplier_application:
+        log_event(supplier_application, f"account_{state}", summary=f"Supplier account {state}",
+                  changes=[{"field": "Account", "old": "Inactive" if supplier.active else "Active",
+                            "new": "Active" if supplier.active else "Inactive"}])
+    notify_supplier(supplier, "Account Status Updated", f"Your supplier account has been {state} by the administrator.")
+    DB.session.commit()
+    flash(f"Supplier {state} successfully.", "success")
+    return redirect(safe_next_url(request.form.get("next"), url_for("admin_suppliers")))
 
 
 @app.route("/admin/applications")
 @admin_required
 def admin_applications():
-    admin = get_current_admin()
     search = request.args.get("search", "").strip()
     status_filter = request.args.get("status", "").strip()
+    assigned_filter = request.args.get("assigned", "").strip()
+    page = request.args.get("page", 1, type=int)
+    admin = get_current_admin()
 
     query = SupplierApplication.query
-
     if search:
-        query = query.filter(
-            DB.or_(
-                SupplierApplication.company_name.ilike(f"%{search}%"),
-                SupplierApplication.contact_name.ilike(f"%{search}%"),
-            )
-        )
-
+        like = f"%{search}%"
+        query = query.filter(DB.or_(
+            SupplierApplication.company_name.ilike(like),
+            SupplierApplication.contact_name.ilike(like),
+            SupplierApplication.email.ilike(like),
+        ))
     if status_filter:
         query = query.filter(SupplierApplication.status == status_filter)
+    if assigned_filter == "me":
+        query = query.filter(SupplierApplication.assigned_admin_id == admin.id)
+    elif assigned_filter == "unassigned":
+        query = query.filter(SupplierApplication.assigned_admin_id.is_(None))
+    else:
+        assigned_filter = ""
 
-    applications = query.order_by(SupplierApplication.created_at.desc()).all()
-    statuses = ["submitted", "pending_review", "approved", "rejected"]
+    pagination = query.order_by(SupplierApplication.created_at.desc()).paginate(page=page, per_page=10, error_out=False)
     return render_template(
         "admin_applications.html",
-        admin=admin,
-        applications=applications,
+        admin=get_current_admin(),
+        applications=pagination.items,
+        pagination=pagination,
         search=search,
         status_filter=status_filter,
-        statuses=statuses,
-        unread_notifications=Notification.query.filter_by(admin_id=admin.id, is_read=False).count(),
+        assigned_filter=assigned_filter,
+        statuses=STATUSES,
     )
 
 
-@app.route("/notifications")
-def notifications():
-    user = get_current_user()
-    if not user:
-        return redirect(url_for("login"))
+def is_assigned_to_me(application):
+    admin = get_current_admin()
+    return bool(admin and application.assigned_admin_id == admin.id)
 
-    notifications_list = Notification.query.filter_by(user_id=user.id).order_by(Notification.created_at.desc()).all()
-    unread_count = Notification.query.filter_by(user_id=user.id, is_read=False).count()
 
-    Notification.query.filter_by(user_id=user.id, is_read=False).update({"is_read": True})
+def assigned_application_or_redirect(application_id):
+    """Load an application for an action that only its assigned admin may take."""
+    application = DB.get_or_404(SupplierApplication, application_id)
+    if not is_assigned_to_me(application):
+        owner = application.assigned_admin
+        if owner:
+            flash(f"Only {owner.name or owner.email} can work on this application because it's assigned to them.", "error")
+        else:
+            flash("Assign this application to yourself before working on it.", "error")
+        return application, redirect(url_for("admin_application_detail", application_id=application.id))
+    return application, None
+
+
+@app.route("/admin/applications/<int:application_id>/assign", methods=["POST"])
+@admin_required
+def assign_application(application_id):
+    admin = get_current_admin()
+    application = DB.get_or_404(SupplierApplication, application_id)
+    detail_url = url_for("admin_application_detail", application_id=application.id)
+    owner = application.assigned_admin
+
+    if owner:
+        if owner.id != admin.id:
+            flash(f"This application is already assigned to {owner.name or owner.email}. "
+                  "They need to unassign themselves before anyone else can take it.", "error")
+        return redirect(detail_url)
+
+    me = admin.name or admin.email
+    application.assigned_admin_id = admin.id
+    application.assigned_at = utcnow()
+    log_event(application, "assigned", summary=f"Assigned to {me}",
+              changes=[{"field": "Assigned to", "old": "", "new": me}])
     DB.session.commit()
+    flash(f"{application.company_name} is now assigned to you.", "success")
+    return redirect(detail_url)
 
+
+@app.route("/admin/applications/<int:application_id>/release", methods=["POST"])
+@admin_required
+def release_application(application_id):
+    application, blocked = assigned_application_or_redirect(application_id)
+    if blocked:
+        return blocked
+    me = get_current_admin()
+    application.assigned_admin_id = None
+    application.assigned_at = None
+    log_event(application, "unassigned", summary=f"{me.name or me.email} unassigned themselves",
+              changes=[{"field": "Assigned to", "old": me.name or me.email, "new": ""}])
+    DB.session.commit()
+    flash("You've been unassigned. Another admin can now assign this application to themselves.", "success")
+    return redirect(url_for("admin_application_detail", application_id=application.id))
+
+
+@app.route("/admin/applications/<int:application_id>")
+@admin_required
+def admin_application_detail(application_id):
+    application = DB.get_or_404(SupplierApplication, application_id)
+    supplier = get_application_supplier(application)
+    documents = documents_for_application(application, supplier)
     return render_template(
-        "notifications.html",
-        user=user,
-        notifications=notifications_list,
-        unread_notifications=unread_count,
+        "admin_application_detail.html",
+        admin=get_current_admin(),
+        application=application,
+        supplier=supplier,
+        documents=documents,
+        company_profile_doc=[d for d in documents if d.document_type == COMPANY_PROFILE_DOC],
+        missing_documents=missing_required_documents(documents),
+        statuses=STATUSES,
+        is_mine=is_assigned_to_me(application),
+        history_count=len(application_history(application)),
     )
 
 
-@app.route("/notifications/mark-read/<int:notification_id>", methods=["POST"])
-def mark_notification_read(notification_id):
-    user = get_current_user()
-    if not user:
-        return redirect(url_for("login"))
+@app.route("/admin/applications/<int:application_id>/history")
+@admin_required
+def admin_application_history(application_id):
+    application = DB.get_or_404(SupplierApplication, application_id)
+    return render_template(
+        "admin_application_history.html",
+        admin=get_current_admin(),
+        application=application,
+        supplier=get_application_supplier(application),
+        history=application_history(application),
+        event_labels=EVENT_LABELS,
+    )
 
-    notification = Notification.query.filter_by(id=notification_id, user_id=user.id).first_or_404()
-    notification.is_read = True
+
+def application_history(application):
+    """Newest-first audit trail. Applications created before auditing existed get a placeholder entry."""
+    events = (ApplicationEvent.query.filter_by(application_id=application.id)
+              .order_by(ApplicationEvent.created_at.desc(), ApplicationEvent.id.desc()).all())
+    if not any(e.action == "submitted" for e in events) and application.created_at:
+        events.append(ApplicationEvent(
+            application_id=application.id, created_at=application.created_at, actor_type="system",
+            actor_name=application.contact_name or "", action="submitted",
+            summary="Submitted (recorded before the audit trail was enabled)", to_status=None,
+        ))
+    return events
+
+
+@app.route("/admin/applications/<int:application_id>/history.csv")
+@admin_required
+def admin_application_history_export(application_id):
+    application = DB.get_or_404(SupplierApplication, application_id)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date & time (UTC)", "Actor type", "Actor", "Actor email", "Action", "Summary",
+                     "From status", "To status", "Field", "Old value", "New value", "IP address"])
+    for event in reversed(application_history(application)):
+        base = [
+            event.created_at.strftime("%Y-%m-%d %H:%M:%S") if event.created_at else "",
+            event.actor_type, event.actor_name, event.actor_email,
+            EVENT_LABELS.get(event.action, event.action), event.summary,
+            status_label(event.from_status) if event.from_status else "",
+            status_label(event.to_status) if event.to_status else "",
+        ]
+        for change in event.changes or [{}]:
+            writer.writerow(base + [change.get("field", ""), change.get("old", ""), change.get("new", ""), event.ip_address])
+    safe_name = secure_filename(application.company_name or "application") or "application"
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={safe_name}_audit_trail.csv"},
+    )
+
+
+@app.route("/admin/applications/<int:application_id>/update", methods=["POST"])
+@admin_required
+def update_application(application_id):
+    application, blocked = assigned_application_or_redirect(application_id)
+    if blocked:
+        return blocked
+    old_status = application.status
+    old_comments = (application.review_comments or "").strip()
+
+    new_status = request.form.get("status", application.status)
+    new_doc_status = request.form.get("documents_status", application.documents_status)
+    if new_status not in STATUSES or new_doc_status not in DOCUMENT_STATUSES:
+        flash("Invalid status selected.", "error")
+        return redirect(url_for("admin_application_detail", application_id=application.id))
+    if new_status in {"declined", "returned_for_update"} and not request.form.get("review_comments", "").strip():
+        flash("Please add a comment explaining to the supplier why the application is "
+              f"{'declined' if new_status == 'declined' else 'being returned'}.", "error")
+        return redirect(url_for("admin_application_detail", application_id=application.id))
+
+    old_doc_status = application.documents_status
+    application.status = new_status
+    application.documents_status = new_doc_status
+    application.review_comments = request.form.get("review_comments", "").strip()
+
+    changes = []
+    if old_doc_status != new_doc_status:
+        changes.append({"field": "Documents status", "old": (old_doc_status or "").title(), "new": new_doc_status.title()})
+    if application.review_comments != old_comments:
+        changes.append({"field": "Review comments", "old": old_comments, "new": application.review_comments})
+    if old_status != new_status:
+        log_event(application, "status_changed", summary=f"{status_label(old_status)} → {status_label(new_status)}",
+                  from_status=old_status, to_status=new_status, changes=changes)
+    elif changes:
+        log_event(application, "review_updated", summary=", ".join(c["field"] for c in changes) + " updated",
+                  changes=changes)
+
+    supplier = get_application_supplier(application)
+    if supplier:
+        if old_status != application.status:
+            notify_supplier(
+                supplier,
+                "Application Status Updated",
+                f"Your application for {application.company_name} has been updated to: {status_label(application.status)}.",
+                application,
+            )
+            if application.status == "approved" and not supplier.active:
+                supplier.active = True
+                log_event(application, "account_activated", summary="Supplier account activated automatically on approval",
+                          changes=[{"field": "Account", "old": "Inactive", "new": "Active"}])
+                notify_supplier(
+                    supplier, "Account Activated",
+                    "Congratulations! Your supplier account has been activated following the approval of your application.",
+                    application,
+                )
+            elif application.status == "declined" and supplier.active:
+                supplier.active = False
+                log_event(application, "account_deactivated", summary="Supplier account deactivated automatically on decline",
+                          changes=[{"field": "Account", "old": "Active", "new": "Inactive"}])
+                notify_supplier(
+                    supplier, "Account Deactivated",
+                    "Your supplier account has been deactivated because your application was declined.",
+                    application,
+                )
+        if application.review_comments and application.review_comments != old_comments:
+            notify_supplier(
+                supplier, "Review Comments Added",
+                f"An administrator added review comments to your application: {application.review_comments}",
+                application,
+            )
+
     DB.session.commit()
-    return redirect(url_for("notifications"))
+    flash("Application updated successfully.", "success")
+    return redirect(url_for("admin_application_detail", application_id=application.id))
+
+
+@app.route("/admin/applications/<int:application_id>/documents/<int:document_id>/replace", methods=["POST"])
+@admin_required
+def replace_admin_document(application_id, document_id):
+    application, blocked = assigned_application_or_redirect(application_id)
+    if blocked:
+        return blocked
+    document = DB.get_or_404(SupplierDocument, document_id)
+    detail_url = url_for("admin_application_detail", application_id=application_id)
+
+    if document not in documents_for_application(application, get_application_supplier(application)):
+        flash("Document does not belong to this application.", "error")
+        return redirect(detail_url)
+
+    file_storage = request.files.get("document_file")
+    if not file_storage or not file_storage.filename:
+        flash("Please select a file to replace the document.", "error")
+        return redirect(detail_url)
+    try:
+        validate_pdf(file_storage)
+    except UploadError as exc:
+        flash(str(exc), "error")
+        return redirect(detail_url)
+
+    log_event(application, "document_replaced", summary=f"Replaced {document.document_type}",
+              changes=[{"field": document.document_type, "old": document.original_filename, "new": file_storage.filename}])
+    new_path = save_upload(file_storage, document.user_id)
+    remove_upload(document.file_path)
+    document.file_path = new_path
+    document.original_filename = file_storage.filename
+    document.uploaded_at = utcnow()
+    DB.session.commit()
+
+    flash("Document replaced successfully.", "success")
+    return redirect(detail_url)
+
+
+@app.route("/admin/applications/<int:application_id>/download-all")
+@admin_required
+def download_all_documents(application_id):
+    application = DB.get_or_404(SupplierApplication, application_id)
+    supplier = get_application_supplier(application)
+    documents = documents_for_application(application, supplier)
+
+    zip_buffer = io.BytesIO()
+    used_names = set()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for doc in documents:
+            path = absolute_upload_path(doc.file_path)
+            if not path or not os.path.isfile(path):
+                continue
+            base = secure_filename(f"{doc.document_type} - {doc.original_filename}") or f"document_{doc.id}.pdf"
+            name, n = base, 1
+            while name in used_names:
+                n += 1
+                stem, ext = os.path.splitext(base)
+                name = f"{stem}_{n}{ext}"
+            used_names.add(name)
+            zipf.write(path, name)
+
+    zip_buffer.seek(0)
+    log_event(application, "documents_downloaded", summary=f"Downloaded {len(used_names)} document(s) as ZIP")
+    DB.session.commit()
+    company_name = (supplier.company_name if supplier and supplier.company_name else application.company_name) or "supplier"
+    safe_name = secure_filename(company_name) or "supplier"
+    return send_file(zip_buffer, mimetype="application/zip", as_attachment=True,
+                     download_name=f"{safe_name}_documents.zip")
 
 
 @app.route("/admin/notifications")
 @admin_required
 def admin_notifications():
     admin = get_current_admin()
-    notifications_list = Notification.query.filter_by(admin_id=admin.id).order_by(Notification.created_at.desc()).all()
+    page = request.args.get("page", 1, type=int)
+    pagination = (
+        Notification.query.filter_by(admin_id=admin.id)
+        .order_by(Notification.created_at.desc())
+        .paginate(page=page, per_page=10, error_out=False)
+    )
+    new_ids = {n.id for n in pagination.items if not n.is_read}
     unread_count = Notification.query.filter_by(admin_id=admin.id, is_read=False).count()
-
     Notification.query.filter_by(admin_id=admin.id, is_read=False).update({"is_read": True})
     DB.session.commit()
 
     return render_template(
         "admin_notifications.html",
         admin=admin,
-        notifications=notifications_list,
+        notifications=pagination.items,
+        new_ids=new_ids,
+        pagination=pagination,
         unread_notifications=unread_count,
     )
 
@@ -1697,669 +2548,1462 @@ def admin_mark_notification_read(notification_id):
     return redirect(url_for("admin_notifications"))
 
 
-@app.route("/admin/suppliers/<int:supplier_id>/toggle", methods=["POST"])
-@admin_required
-def toggle_supplier(supplier_id):
-    supplier = User.query.get_or_404(supplier_id)
-    supplier.active = not supplier.active
-    DB.session.commit()
-
-    notification = Notification(
-        user_id=supplier.id,
-        title="Account Status Updated",
-        message=f"Your account has been {'activated' if supplier.active else 'deactivated'} by the administrator.",
-    )
-    DB.session.add(notification)
-    DB.session.commit()
-
-    flash(f"Supplier {'activated' if supplier.active else 'deactivated'} successfully.", "success")
-    return redirect(url_for("admin_suppliers"))
-
-
-def ensure_notification_schema():
-    with app.app_context():
+def report_filters(args):
+    filters = {
+        "search": args.get("search", "").strip(),
+        "status_filter": args.get("status", "").strip(),
+        "category_filter": args.get("category", "").strip(),
+        "date_from": args.get("date_from", "").strip(),
+        "date_to": args.get("date_to", "").strip(),
+    }
+    if filters["status_filter"] not in STATUSES:
+        filters["status_filter"] = ""
+    for key in ("date_from", "date_to"):
         try:
-            columns = DB.session.execute(text("SHOW COLUMNS FROM notifications")).fetchall()
-            existing = {column[0].lower() for column in columns}
-
-            if not columns:
-                DB.session.execute(text("""
-                    CREATE TABLE notifications (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        user_id INT NULL,
-                        admin_id INT NULL,
-                        title VARCHAR(150) NOT NULL,
-                        message TEXT NOT NULL,
-                        is_read BOOLEAN NOT NULL DEFAULT FALSE,
-                        related_application_id INT NULL,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (user_id) REFERENCES users(id),
-                        FOREIGN KEY (admin_id) REFERENCES admins(id),
-                        FOREIGN KEY (related_application_id) REFERENCES supplier_applications(id)
-                    )
-                """))
-                DB.session.commit()
-                app.logger.info("Notifications table created.")
-            else:
-                if "admin_id" not in existing:
-                    DB.session.execute(text("ALTER TABLE notifications ADD COLUMN admin_id INT NULL"))
-                    DB.session.execute(text("ALTER TABLE notifications ADD FOREIGN KEY (admin_id) REFERENCES admins(id)"))
-                    DB.session.commit()
-                    app.logger.info("Added admin_id to notifications table.")
-                
-                user_col = [c for c in columns if c[0].lower() == "user_id"]
-                if user_col and user_col[0][2] == "NO":
-                    DB.session.execute(text("ALTER TABLE notifications MODIFY COLUMN user_id INT NULL"))
-                    DB.session.commit()
-                    app.logger.info("Made user_id nullable in notifications table.")
-        except Exception as exc:
-            app.logger.warning("Notification schema check skipped: %s", exc)
+            datetime.strptime(filters[key], "%Y-%m-%d")
+        except ValueError:
+            filters[key] = ""
+    # ISO dates compare correctly as strings; accept a reversed range instead of returning nothing.
+    if filters["date_from"] and filters["date_to"] and filters["date_from"] > filters["date_to"]:
+        filters["date_from"], filters["date_to"] = filters["date_to"], filters["date_from"]
+    return filters
 
 
-@app.route("/admin/convert-documents")
-@admin_required
-def convert_existing_documents():
-    documents = SupplierDocument.query.all()
-    converted = 0
-    failed = 0
-    skipped = 0
+def month_range(first, last):
+    """Every YYYY-MM from first to last inclusive, so gaps show as zero instead of disappearing."""
+    year, month = map(int, first.split("-"))
+    end_year, end_month = map(int, last.split("-"))
+    months = []
+    while (year, month) <= (end_year, end_month):
+        months.append(f"{year:04d}-{month:02d}")
+        month += 1
+        if month > 12:
+            year, month = year + 1, 1
+    return months
 
-    for doc in documents:
-        if not doc.file_path:
-            skipped += 1
-            continue
 
-        absolute_path = os.path.join("static", doc.file_path.replace("/", os.sep))
-        if not os.path.exists(absolute_path):
-            skipped += 1
-            continue
+def report_filter_options():
+    """Statuses and categories that actually occur, so the dropdowns never offer empty choices."""
+    used_statuses = {s for (s,) in DB.session.query(SupplierApplication.status).distinct() if s}
+    categories = {c for (c,) in DB.session.query(SupplierApplicationCategory.category).distinct() if c}
+    categories |= {c for (c,) in DB.session.query(SupplierApplication.supplier_category).distinct() if c}
+    return [s for s in STATUSES if s in used_statuses], sorted(categories)
 
-        mime_type, _ = mimetypes.guess_type(absolute_path)
-        if mime_type == "application/pdf":
-            skipped += 1
-            continue
 
-        pdf_path = convert_to_pdf(absolute_path)
-        if pdf_path and pdf_path != absolute_path:
-            try:
-                os.remove(absolute_path)
-                doc.file_path = os.path.relpath(pdf_path, "static").replace(os.sep, "/")
-                converted += 1
-            except OSError:
-                failed += 1
-        else:
-            failed += 1
+def filtered_applications_query(filters):
+    query = SupplierApplication.query
+    if filters["search"]:
+        like = f"%{filters['search']}%"
+        query = query.filter(DB.or_(
+            SupplierApplication.company_name.ilike(like),
+            SupplierApplication.contact_name.ilike(like),
+        ))
+    if filters["status_filter"]:
+        query = query.filter(SupplierApplication.status == filters["status_filter"])
+    if filters["category_filter"]:
+        category = filters["category_filter"]
+        query = query.filter(DB.or_(
+            SupplierApplication.supplier_category == category,
+            SupplierApplication.application_categories.any(SupplierApplicationCategory.category == category),
+        ))
+    try:
+        if filters["date_from"]:
+            query = query.filter(SupplierApplication.created_at >= datetime.strptime(filters["date_from"], "%Y-%m-%d"))
+    except ValueError:
+        pass
+    try:
+        if filters["date_to"]:
+            # Inclusive: everything up to the end of the selected day.
+            end = datetime.strptime(filters["date_to"], "%Y-%m-%d") + timedelta(days=1)
+            query = query.filter(SupplierApplication.created_at < end)
+    except ValueError:
+        pass
+    return query
 
-    DB.session.commit()
-    flash(f"Conversion complete: {converted} converted, {failed} failed, {skipped} skipped.", "success")
-    return redirect(url_for("admin_dashboard"))
+
+def users_by_email(applications):
+    emails = {normalize_email(a.email) for a in applications if a.email}
+    if not emails:
+        return {}
+    users = User.query.filter(func.lower(User.email).in_(emails)).all()
+    return {normalize_email(u.email): u for u in users}
 
 
 @app.route("/admin/reports")
 @admin_required
 def admin_reports():
-    admin = get_current_admin()
-    search = request.args.get("search", "").strip()
-    status_filter = request.args.get("status", "").strip()
-    category_filter = request.args.get("category", "").strip()
-    date_from = request.args.get("date_from", "").strip()
-    date_to = request.args.get("date_to", "").strip()
-
-    base_query = SupplierApplication.query
-
-    if search:
-        like_pattern = f"%{search}%"
-        base_query = base_query.filter(
-            DB.or_(
-                SupplierApplication.company_name.ilike(like_pattern),
-                SupplierApplication.contact_name.ilike(like_pattern),
-            )
-        )
-
-    if status_filter:
-        base_query = base_query.filter(SupplierApplication.status == status_filter)
-
-    if category_filter:
-        base_query = base_query.filter(SupplierApplication.supplier_category == category_filter)
-
-    if date_from:
-        try:
-            from_date = datetime.strptime(date_from, "%Y-%m-%d")
-            base_query = base_query.filter(SupplierApplication.created_at >= from_date)
-        except ValueError:
-            pass
-
-    if date_to:
-        try:
-            to_date = datetime.strptime(date_to, "%Y-%m-%d")
-            base_query = base_query.filter(SupplierApplication.created_at <= to_date)
-        except ValueError:
-            pass
-
+    filters = report_filters(request.args)
+    base_query = filtered_applications_query(filters)
     filtered_applications = base_query.order_by(SupplierApplication.created_at.asc()).all()
-    total_suppliers = User.query.count()
-    active_suppliers = User.query.filter_by(active=True).count()
-    inactive_suppliers = User.query.filter_by(active=False).count()
-    total_applications = SupplierApplication.query.count()
-    pending_count = SupplierApplication.query.filter_by(status="pending_review").count()
-    approved_count = SupplierApplication.query.filter_by(status="approved").count()
-    rejected_count = SupplierApplication.query.filter_by(status="rejected").count()
-    submitted_count = SupplierApplication.query.filter_by(status="submitted").count()
+    suppliers = users_by_email(filtered_applications)
 
-    monthly_trends = {}
+    status_breakdown = {status: 0 for status in STATUSES}
+    doc_status_breakdown = {"complete": 0, "pending": 0}
     category_breakdown = {}
-    status_breakdown = {
-        "submitted": 0,
-        "pending_review": 0,
-        "approved": 0,
-        "rejected": 0,
-    }
-    doc_status_breakdown = {
-        "complete": 0,
-        "pending": 0,
-    }
-    monthly_suppliers = {}
-
-    for app in filtered_applications:
-        month_key = app.created_at.strftime("%Y-%m") if app.created_at else "Unknown"
+    monthly_trends = {}
+    for application in filtered_applications:
+        month_key = application.created_at.strftime("%Y-%m") if application.created_at else "Unknown"
         monthly_trends[month_key] = monthly_trends.get(month_key, 0) + 1
-        cat = app.supplier_category or "Uncategorized"
-        category_breakdown[cat] = category_breakdown.get(cat, 0) + 1
-        for app_cat in app.application_categories:
-            c = app_cat.category or "Uncategorized"
-            category_breakdown[c] = category_breakdown.get(c, 0) + 1
-        if app.status in status_breakdown:
-            status_breakdown[app.status] += 1
-        if app.documents_status == "complete":
-            doc_status_breakdown["complete"] += 1
-        else:
-            doc_status_breakdown["pending"] += 1
+        for category in application.category_names or ["Uncategorized"]:
+            category_breakdown[category] = category_breakdown.get(category, 0) + 1
+        if application.status in status_breakdown:
+            status_breakdown[application.status] += 1
+        doc_status_breakdown["complete" if application.documents_status == "complete" else "pending"] += 1
 
-    for user in User.query.order_by(User.created_at.asc()).all():
-        if user.created_at:
-            month_key = user.created_at.strftime("%Y-%m")
-            monthly_suppliers[month_key] = monthly_suppliers.get(month_key, 0) + 1
+    monthly_active, monthly_inactive = {}, {}
+    for supplier in suppliers.values():
+        if supplier.created_at:
+            bucket = monthly_active if supplier.active else monthly_inactive
+            key = supplier.created_at.strftime("%Y-%m")
+            bucket[key] = bucket.get(key, 0) + 1
 
-    all_months = sorted(set(list(monthly_trends.keys()) + list(monthly_suppliers.keys())))
-    if not all_months:
-        all_months = [datetime.utcnow().strftime("%Y-%m")]
+    application_months = sorted(m for m in monthly_trends if m != "Unknown")
+    all_months = month_range(application_months[0], application_months[-1]) if application_months else []
 
-    chart_labels = all_months
-    chart_app_trend = [monthly_trends.get(m, 0) for m in all_months]
-    chart_supplier_trend = [monthly_suppliers.get(m, 0) for m in all_months]
+    page = request.args.get("page", 1, type=int)
+    pagination = base_query.order_by(SupplierApplication.created_at.desc()).paginate(page=page, per_page=10, error_out=False)
 
-    recent_applications = base_query.order_by(SupplierApplication.created_at.desc()).limit(20).all()
-    unread_notifications = Notification.query.filter_by(admin_id=admin.id, is_read=False).count()
+    available_statuses, all_categories = report_filter_options()
+    # Keep the current selection visible even if it no longer matches anything.
+    if filters["status_filter"] and filters["status_filter"] not in available_statuses:
+        available_statuses = [s for s in STATUSES if s in set(available_statuses) | {filters["status_filter"]}]
+    if filters["category_filter"] and filters["category_filter"] not in all_categories:
+        all_categories = sorted(set(all_categories) | {filters["category_filter"]})
 
-    all_statuses = ["submitted", "pending_review", "approved", "rejected"]
-    all_categories = sorted({
-        cat for app in SupplierApplication.query.all()
-        for cat in (
-            [app.supplier_category] + [ac.category for ac in app.application_categories]
-        ) if cat
-    })
-
-    all_applications_payload = []
-    for app in filtered_applications:
-        all_applications_payload.append({
-            "id": app.id,
-            "company_name": app.company_name,
-            "contact_name": app.contact_name,
-            "categories": [ac.category for ac in app.application_categories],
-            "category_details": {ac.category: ac.category_detail for ac in app.application_categories},
-            "status": app.status,
-            "documents_status": app.documents_status,
-            "created_at": app.created_at.strftime("%Y-%m-%d") if app.created_at else "N/A",
+    payload = []
+    for application in filtered_applications:
+        supplier = suppliers.get(normalize_email(application.email))
+        payload.append({
+            "id": application.id,
+            "company_name": application.company_name,
+            "contact_name": application.contact_name,
+            "categories": application.category_names,
+            "category_details": {ac.category: ac.category_detail for ac in application.application_categories},
+            "status": application.status,
+            "documents_status": application.documents_status,
+            "created_at": application.created_at.strftime("%Y-%m-%d") if application.created_at else "N/A",
+            "user_active": supplier.active if supplier else False,
+            "user_created_at": supplier.created_at.strftime("%Y-%m-%d") if supplier and supplier.created_at else None,
         })
 
+    active_suppliers = sum(1 for s in suppliers.values() if s.active)
     return render_template(
         "admin_reports.html",
-        admin=admin,
-        total_suppliers=total_suppliers,
+        report_kinds=REPORT_KINDS,
+        admin=get_current_admin(),
+        total_suppliers=len(suppliers),
         active_suppliers=active_suppliers,
-        inactive_suppliers=inactive_suppliers,
-        total_applications=total_applications,
-        pending_count=pending_count,
-        approved_count=approved_count,
-        rejected_count=rejected_count,
-        submitted_count=submitted_count,
+        inactive_suppliers=len(suppliers) - active_suppliers,
+        total_applications=len(filtered_applications),
+        pending_count=status_breakdown["pending_review"],
+        approved_count=status_breakdown["approved"],
+        rejected_count=status_breakdown["declined"],
+        submitted_count=status_breakdown["submitted"],
         status_breakdown=status_breakdown,
         category_breakdown=category_breakdown,
         doc_status_breakdown=doc_status_breakdown,
-        chart_labels=chart_labels,
-        chart_app_trend=chart_app_trend,
-        chart_supplier_trend=chart_supplier_trend,
-        recent_applications=recent_applications,
-        unread_notifications=unread_notifications,
-        all_applications_json=all_applications_payload,
-        search=search,
-        status_filter=status_filter,
-        category_filter=category_filter,
-        date_from=date_from,
-        date_to=date_to,
-        all_statuses=all_statuses,
+        chart_labels=all_months,
+        chart_app_trend=[monthly_trends.get(m, 0) for m in all_months],
+        chart_supplier_trend=[monthly_active.get(m, 0) for m in all_months],
+        chart_inactive_supplier_trend=[monthly_inactive.get(m, 0) for m in all_months],
+        recent_applications=pagination.items,
+        pagination=pagination,
+        all_applications_json=payload,
+        category_breakdown_sorted=sorted(category_breakdown.items(), key=lambda kv: (-kv[1], kv[0])),
+        page_args={k: v for k, v in {
+            "search": filters["search"], "status": filters["status_filter"], "category": filters["category_filter"],
+            "date_from": filters["date_from"], "date_to": filters["date_to"],
+        }.items() if v},
+        all_statuses=available_statuses,
         all_categories=all_categories,
+        **filters,
     )
 
 
-@app.route("/admin/applications/<int:application_id>/update", methods=["POST"])
+# ---- Additional reports (one template, one shape: KPIs + charts + table) ----
+
+REPORT_KINDS = [
+    ("applications", "Applications"),
+    ("requests", "Product requests"),
+    ("suppliers", "Suppliers"),
+    ("inventory", "Inventory"),
+    ("activity", "Admin activity"),
+]
+REPORT_PERIODS = [("30d", "Last 30 days"), ("90d", "Last 90 days"), ("12m", "Last 12 months"),
+                  ("ytd", "This year"), ("all", "All time")]
+COMMITTED_REQUEST_STATUSES = {"accepted", "delivered", "completed"}
+
+
+def report_period(args):
+    period = args.get("period", "12m")
+    if period not in dict(REPORT_PERIODS):
+        period = "12m"
+    now = utcnow()
+    start = {
+        "30d": now - timedelta(days=30),
+        "90d": now - timedelta(days=90),
+        "12m": now - timedelta(days=365),
+        "ytd": datetime(now.year, 1, 1),
+        "all": None,
+    }[period]
+    return period, start
+
+
+def monthly_series(pairs, start):
+    """pairs: iterable of (datetime, value). Returns (labels, values) with every month in range, gaps as 0."""
+    totals = defaultdict(lambda: Decimal("0"))
+    for when, value in pairs:
+        if when:
+            totals[when.strftime("%Y-%m")] += Decimal(value)
+    if not totals:
+        return [], []
+    first = start.strftime("%Y-%m") if start else min(totals)
+    months = month_range(min(first, min(totals)), utcnow().strftime("%Y-%m"))
+    return months, [float(totals.get(m, 0)) for m in months]
+
+
+def top_n(counter, n=10):
+    items = sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[:n]
+    return [k for k, _ in items], [float(v) for _, v in items]
+
+
+def cell(text, href=None, badge=None, num=False, mono=False, money=None):
+    return {"text": text, "href": href, "badge": badge, "num": num or money is not None, "mono": mono,
+            "money": money}
+
+
+def requests_report(start):
+    query = ProductRequest.query
+    if start:
+        query = query.filter(ProductRequest.created_at >= start)
+    reqs = query.order_by(ProductRequest.created_at.desc()).all()
+    committed = [r for r in reqs if r.status in COMMITTED_REQUEST_STATUSES]
+    committed_value = sum((r.total for r in committed), Decimal("0"))
+    completed_value = sum((r.total for r in reqs if r.status == "completed"), Decimal("0"))
+    open_count = sum(1 for r in reqs if r.status in OPEN_REQUEST_STATUSES)
+    lost = sum(1 for r in reqs if r.status in {"declined", "cancelled"})
+
+    by_supplier, by_product = defaultdict(Decimal), defaultdict(Decimal)
+    for r in committed:
+        by_supplier[r.supplier.company_name] += r.total
+        by_product[r.product_name] += r.total
+    months, monthly = monthly_series(((r.created_at, r.total) for r in committed), start)
+    status_counts = [(s, sum(1 for r in reqs if r.status == s)) for s in REQUEST_STATUSES]
+    status_counts = [(s, c) for s, c in status_counts if c]
+
+    return {
+        "kpis": [
+            ("Requests", len(reqs), f"{open_count} open"),
+            ("Committed value", format_zar(committed_value), "accepted, delivered or completed"),
+            ("Completed value", format_zar(completed_value), "received and confirmed"),
+            ("Average order", format_zar(committed_value / len(committed)) if committed else "—", "committed requests"),
+            ("Declined / cancelled", lost, f"{round(lost / len(reqs) * 100) if reqs else 0}% of requests"),
+        ],
+        "charts": [
+            {"id": "c1", "title": "Committed value per month", "subtitle": "Accepted, delivered and completed requests",
+             "labels": months, "values": monthly, "money": True, "months": True},
+            {"id": "c2", "title": "Requests by status", "subtitle": "Only statuses in use",
+             "labels": [status_label(s) for s, _ in status_counts], "values": [c for _, c in status_counts], "horizontal": True},
+            {"id": "c3", "title": "Top suppliers", "subtitle": "By committed value", "horizontal": True, "money": True,
+             **dict(zip(("labels", "values"), top_n(by_supplier)))},
+            {"id": "c4", "title": "Top products", "subtitle": "By committed value", "horizontal": True, "money": True,
+             **dict(zip(("labels", "values"), top_n(by_product)))},
+        ],
+        "columns": ["Reference", "Date", "Product", "Supplier", "Qty", "Total", "Status", "Requested by"],
+        "rows": [[
+            cell(r.reference, href=url_for("admin_request_detail", request_id=r.id), mono=True),
+            cell(r.created_at.strftime("%d %b %Y") if r.created_at else ""),
+            cell(r.product_name), cell(r.supplier.company_name), cell(str(r.quantity), num=True),
+            cell(format_zar(r.total), money=r.total), cell(status_label(r.status), badge=r.status),
+            cell(r.admin.name or r.admin.email),
+        ] for r in reqs],
+    }
+
+
+def suppliers_report(start):
+    query = User.query
+    if start:
+        query = query.filter(User.created_at >= start)
+    suppliers = query.order_by(User.created_at.desc()).all()
+    apps = users_by_email_applications(suppliers)
+    ids = [u.id for u in suppliers]
+    product_counts = dict(DB.session.query(Product.user_id, func.count()).filter(
+        Product.user_id.in_(ids), Product.is_archived.is_(False)).group_by(Product.user_id).all()) if ids else {}
+    request_rows = ProductRequest.query.filter(ProductRequest.supplier_id.in_(ids)).all() if ids else []
+    request_counts, committed = defaultdict(int), defaultdict(Decimal)
+    for r in request_rows:
+        request_counts[r.supplier_id] += 1
+        if r.status in COMMITTED_REQUEST_STATUSES:
+            committed[r.supplier_id] += r.total
+
+    by_category, by_province = defaultdict(int), defaultdict(int)
+    for u in suppliers:
+        application = apps.get(normalize_email(u.email))
+        if application:
+            for c in application.category_names:
+                by_category[c] += 1
+            by_province[application.province or "Not given"] += 1
+    months, monthly = monthly_series(((u.created_at, 1) for u in suppliers), start)
+    active = sum(1 for u in suppliers if u.active)
+    applied = sum(1 for u in suppliers if normalize_email(u.email) in apps)
+
+    return {
+        "kpis": [
+            ("Registered", len(suppliers), "in this period"),
+            ("Active", active, "approved and trading"),
+            ("Inactive", len(suppliers) - active, "not yet approved or deactivated"),
+            ("Applied", applied, f"{len(suppliers) - applied} registered without applying"),
+            ("With inventory", sum(1 for i in ids if product_counts.get(i)), "have products listed"),
+        ],
+        "charts": [
+            {"id": "c1", "title": "Registrations per month", "subtitle": "New supplier accounts",
+             "labels": months, "values": monthly, "months": True},
+            {"id": "c2", "title": "Account status", "subtitle": "Active vs inactive",
+             "labels": [l for l, v in (("Active", active), ("Inactive", len(suppliers) - active)) if v],
+             "values": [v for v in (active, len(suppliers) - active) if v], "horizontal": True},
+            {"id": "c3", "title": "By category", "subtitle": "From supplier applications", "horizontal": True,
+             **dict(zip(("labels", "values"), top_n(by_category, 15)))},
+            {"id": "c4", "title": "By province", "subtitle": "From supplier applications", "horizontal": True,
+             **dict(zip(("labels", "values"), top_n(by_province, 10)))},
+        ],
+        "columns": ["Supplier", "Supplier ID", "Registered", "Application", "Account", "Products", "Requests", "Committed value"],
+        "rows": [[
+            cell(u.company_name, href=(url_for("admin_application_detail", application_id=apps[normalize_email(u.email)].id)
+                                       if normalize_email(u.email) in apps else None)),
+            cell(u.supplier_id or "—", mono=True),
+            cell(u.created_at.strftime("%d %b %Y") if u.created_at else ""),
+            (cell(status_label(apps[normalize_email(u.email)].status), badge=apps[normalize_email(u.email)].status)
+             if normalize_email(u.email) in apps else cell("Not submitted")),
+            cell("Active" if u.active else "Inactive", badge="active" if u.active else "inactive"),
+            cell(str(product_counts.get(u.id, 0)), num=True),
+            cell(str(request_counts.get(u.id, 0)), num=True),
+            cell(format_zar(committed.get(u.id, 0)), money=committed.get(u.id, Decimal("0"))),
+        ] for u in suppliers],
+    }
+
+
+def users_by_email_applications(users):
+    emails = [normalize_email(u.email) for u in users]
+    if not emails:
+        return {}
+    return {normalize_email(a.email): a for a in SupplierApplication.query.filter(func.lower(SupplierApplication.email).in_(emails))}
+
+
+def inventory_report(_start):
+    products = (Product.query.join(User, Product.user_id == User.id)
+                .filter(Product.is_archived.is_(False)).order_by(Product.category, Product.name).all())
+    live = [p for p in products if p.supplier.active]
+    listed = [p for p in live if p.is_listed]
+    out_of_stock = [p for p in listed if not p.in_stock]
+    low_stock = [p for p in listed if p.quantity_available is not None and 0 < p.quantity_available <= 2]
+    by_category, by_supplier = defaultdict(int), defaultdict(int)
+    for p in listed:
+        by_category[p.category] += 1
+        by_supplier[p.supplier.company_name] += 1
+
+    def stock_text(p):
+        if p.quantity_available is None:
+            return "Not tracked"
+        return "Out of stock" if p.quantity_available == 0 else str(p.quantity_available)
+
+    return {
+        "snapshot": True,
+        "kpis": [
+            ("Listed products", len(listed), "requestable in the catalogue"),
+            ("Hidden", len(live) - len(listed), "in inventory, not listed"),
+            ("Out of stock", len(out_of_stock), "listed but can't be requested"),
+            ("Low stock", len(low_stock), "2 or fewer left"),
+            ("Suppliers with products", len({p.user_id for p in listed}), f"{len(by_category)} categories covered"),
+        ],
+        "charts": [
+            {"id": "c1", "title": "Listed products by category", "subtitle": "Active suppliers only", "horizontal": True,
+             **dict(zip(("labels", "values"), top_n(by_category, 15)))},
+            {"id": "c2", "title": "Suppliers by listed products", "subtitle": "Top 10", "horizontal": True,
+             **dict(zip(("labels", "values"), top_n(by_supplier)))},
+        ],
+        "columns": ["Product", "Category", "Supplier", "Price", "Unit", "In stock", "Listed"],
+        "rows": [[
+            cell(p.name), cell(p.category), cell(p.supplier.company_name + ("" if p.supplier.active else " (inactive)")),
+            cell(format_zar(p.price), money=p.price), cell(p.unit), cell(stock_text(p), num=True),
+            cell("Listed" if p.is_listed and p.supplier.active else "Hidden",
+                 badge="listed" if p.is_listed and p.supplier.active else "hidden"),
+        ] for p in products],
+    }
+
+
+ACTIVITY_LABELS = {**EVENT_LABELS, "requested": "Product requested", "complete": "Request completed",
+                   "cancel": "Request cancelled", "quotation": "Quotation generated"}
+
+
+def activity_report(start):
+    app_events = ApplicationEvent.query.filter(ApplicationEvent.actor_type == "admin")
+    req_events = ProductRequestEvent.query.filter(ProductRequestEvent.actor_type == "admin")
+    if start:
+        app_events = app_events.filter(ApplicationEvent.created_at >= start)
+        req_events = req_events.filter(ProductRequestEvent.created_at >= start)
+    events = [("application", e) for e in app_events.all()] + [("request", e) for e in req_events.all()]
+    events.sort(key=lambda pair: pair[1].created_at or datetime.min, reverse=True)
+
+    def count(*actions):
+        return sum(1 for _, e in events if e.action in actions)
+
+    per_admin, per_action = defaultdict(int), defaultdict(int)
+    for _, e in events:
+        per_admin[e.actor_name or "Unknown"] += 1
+        per_action[ACTIVITY_LABELS.get(e.action, e.action.replace("_", " ").capitalize())] += 1
+    months, monthly = monthly_series(((e.created_at, 1) for _, e in events), start)
+    applications = {a.id: a for a in SupplierApplication.query.filter(
+        SupplierApplication.id.in_({e.application_id for kind, e in events if kind == "application"})).all()} if events else {}
+    requests_by_id = {r.id: r for r in ProductRequest.query.filter(
+        ProductRequest.id.in_({e.request_id for kind, e in events if kind == "request"})).all()} if events else {}
+
+    def subject(kind, e):
+        if kind == "application":
+            a = applications.get(e.application_id)
+            return cell(a.company_name if a else f"Application {e.application_id}",
+                        href=url_for("admin_application_history", application_id=e.application_id))
+        r = requests_by_id.get(e.request_id)
+        return cell(r.reference if r else f"Request {e.request_id}",
+                    href=url_for("admin_request_detail", request_id=e.request_id), mono=True)
+
+    return {
+        "kpis": [
+            ("Admin actions", len(events), "recorded in the audit trail"),
+            ("Decisions", count("status_changed"), "application status changes"),
+            ("Assignments", count("assigned", "unassigned"), "assigned or unassigned"),
+            ("Documents opened", count("document_viewed", "documents_downloaded"), "views and ZIP downloads"),
+            ("Product requests", count("requested"), f"{count('quotation')} quotations generated"),
+        ],
+        "charts": [
+            {"id": "c1", "title": "Actions per admin", "subtitle": "All recorded actions", "horizontal": True,
+             **dict(zip(("labels", "values"), top_n(per_admin, 15)))},
+            {"id": "c2", "title": "Actions by type", "subtitle": "What admins did", "horizontal": True,
+             **dict(zip(("labels", "values"), top_n(per_action, 12)))},
+            {"id": "c3", "title": "Activity per month", "subtitle": "All admin actions",
+             "labels": months, "values": monthly, "months": True},
+        ],
+        "columns": ["When (UTC)", "Admin", "Action", "Subject", "Details"],
+        "rows": [[
+            cell(e.created_at.strftime("%d %b %Y, %H:%M") if e.created_at else ""),
+            cell(e.actor_name),
+            cell(ACTIVITY_LABELS.get(e.action, e.action.replace("_", " ").capitalize())),
+            subject(kind, e),
+            cell((getattr(e, "summary", None) or getattr(e, "note", "") or "")[:140]),
+        ] for kind, e in events[:500]],
+    }
+
+
+REPORT_BUILDERS = {"requests": requests_report, "suppliers": suppliers_report,
+                   "inventory": inventory_report, "activity": activity_report}
+REPORT_DESCRIPTIONS = {
+    "requests": "Spend and fulfilment of product requests to suppliers",
+    "suppliers": "Supplier registrations, status and activity",
+    "inventory": "What approved suppliers currently offer — a live snapshot",
+    "activity": "What each admin has done, from the audit trail",
+}
+
+
+@app.route("/admin/reports/<kind>")
 @admin_required
-def update_application(application_id):
-    application = SupplierApplication.query.get_or_404(application_id)
-    old_status = application.status
-    application.status = request.form.get("status", application.status)
-    application.review_comments = request.form.get("review_comments", "")
-    application.documents_status = request.form.get("documents_status", application.documents_status)
-    DB.session.commit()
-
-    supplier = User.query.filter_by(email=application.email).first()
-    if supplier:
-        status_changed = old_status != application.status
-        comments_changed = request.form.get("review_comments", "").strip()
-
-        if status_changed:
-            notification = Notification(
-                user_id=supplier.id,
-                title="Application Status Updated",
-                message=f"Your application for {application.company_name} has been updated to: {application.status.replace('_', ' ').title()}.",
-                related_application_id=application.id,
-            )
-            DB.session.add(notification)
-
-            if application.status == "approved" and not supplier.active:
-                supplier.active = True
-                activation_notification = Notification(
-                    user_id=supplier.id,
-                    title="Account Activated",
-                    message=f"Congratulations! Your supplier account has been activated following the approval of your application.",
-                    related_application_id=application.id,
-                )
-                DB.session.add(activation_notification)
-
-            if application.status == "rejected" and supplier.active:
-                supplier.active = False
-                deactivation_notification = Notification(
-                    user_id=supplier.id,
-                    title="Account Deactivated",
-                    message=f"Your supplier account has been deactivated because your application was rejected.",
-                    related_application_id=application.id,
-                )
-                DB.session.add(deactivation_notification)
-
-        if comments_changed:
-            notification = Notification(
-                user_id=supplier.id,
-                title="Review Comments Added",
-                    message=f"Admin has added review comments to your application: {application.review_comments}",
-                related_application_id=application.id,
-            )
-            DB.session.add(notification)
-
-        DB.session.commit()
-
-    flash("Application updated successfully.", "success")
-    return redirect(url_for("admin_applications"))
-
-
-@app.route("/admin/applications/<int:application_id>")
-@admin_required
-def admin_application_detail(application_id):
-    admin = get_current_admin()
-    application = SupplierApplication.query.get_or_404(application_id)
-    supplier = User.query.filter_by(email=application.email).first()
-    documents = SupplierDocument.query.filter(
-        DB.or_(
-            SupplierDocument.application_id == application.id,
-            DB.and_(
-                SupplierDocument.user_id == supplier.id if supplier else False,
-                SupplierDocument.application_id.is_(None),
-            ),
-        )
-    ).all() if supplier else SupplierDocument.query.filter_by(application_id=application.id).all()
+def admin_report(kind):
+    if kind == "applications":
+        return redirect(url_for("admin_reports", **request.args))
+    if kind not in REPORT_BUILDERS:
+        abort(404)
+    period, start = report_period(request.args)
+    report = REPORT_BUILDERS[kind](start)
     return render_template(
-        "admin_application_detail.html",
-        admin=admin,
-        application=application,
-        supplier=supplier,
-        documents=documents,
-        unread_notifications=Notification.query.filter_by(admin_id=admin.id, is_read=False).count(),
+        "admin_report.html", admin=get_current_admin(), kind=kind, report=report,
+        title=dict(REPORT_KINDS)[kind], description=REPORT_DESCRIPTIONS[kind],
+        period=period, periods=REPORT_PERIODS, report_kinds=REPORT_KINDS,
     )
 
 
-@app.route("/admin/applications/<int:application_id>/documents/<int:document_id>/replace", methods=["POST"])
+@app.route("/admin/reports/<kind>/export")
 @admin_required
-def replace_admin_document(application_id, document_id):
-    application = SupplierApplication.query.get_or_404(application_id)
-    document = SupplierDocument.query.get_or_404(document_id)
+def admin_report_export(kind):
+    if kind not in REPORT_BUILDERS:
+        abort(404)
+    period, start = report_period(request.args)
+    report = REPORT_BUILDERS[kind](start)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(report["columns"])
+    for row in report["rows"]:
+        writer.writerow([f"{c['money']:.2f}" if c.get("money") is not None else c["text"] for c in row])
+    filename = f"{kind}_report_{period}_{datetime.now().strftime('%Y%m%d')}.csv"
+    return Response("﻿" + output.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={filename}"})
 
-    if document.application_id != application.id:
-        flash("Document does not belong to this application.", "error")
-        return redirect(url_for("admin_application_detail", application_id=application_id))
 
-    file = request.files.get("document_file")
-    if not file or file.filename == "":
-        flash("Please select a file to replace the document.", "error")
-        return redirect(url_for("admin_application_detail", application_id=application_id))
+@app.route("/admin/reports/export")
+@admin_required
+def admin_reports_export():
+    applications = filtered_applications_query(report_filters(request.args)).order_by(SupplierApplication.created_at.asc()).all()
+    suppliers = users_by_email(applications)
 
-    if not file.filename.lower().endswith(".pdf"):
-        flash("Only PDF files are allowed.", "error")
-        return redirect(url_for("admin_application_detail", application_id=application_id))
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "ID", "Supplier ID", "Company", "Contact Name", "Email", "Phone", "Categories", "Province", "City",
+        "Status", "Documents Status", "Supplier Active", "Created At", "Review Comments",
+    ])
+    for application in applications:
+        supplier = suppliers.get(normalize_email(application.email))
+        writer.writerow([
+            application.id,
+            supplier.supplier_id if supplier else "",
+            application.company_name,
+            application.contact_name,
+            application.email,
+            application.phone,
+            "; ".join(application.category_names) or "Uncategorized",
+            application.province,
+            application.city,
+            status_label(application.status),
+            application.documents_status,
+            "Yes" if supplier and supplier.active else "No",
+            application.created_at.strftime("%Y-%m-%d %H:%M") if application.created_at else "",
+            application.review_comments or "",
+        ])
 
-    upload_dir = os.path.join("static", "uploads", str(document.user_id))
-    os.makedirs(upload_dir, exist_ok=True)
+    filename = f"admin_reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    # BOM so Excel opens UTF-8 (e.g. "Décor") correctly.
+    return Response(
+        "﻿" + output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
-    filename = f"{int(datetime.utcnow().timestamp())}_{file.filename}"
-    relative_path = f"uploads/{document.user_id}/{filename}"
-    absolute_path = os.path.join("static", "uploads", str(document.user_id), filename)
-    file.save(absolute_path)
 
-    old_path = os.path.join("static", document.file_path.replace("/", os.sep))
-    if os.path.exists(old_path):
-        os.remove(old_path)
+# ---------------------------------------------------------------------------
+# Inventory (approved suppliers) and product requests (admins)
+# ---------------------------------------------------------------------------
 
-    document.file_path = relative_path
-    document.original_filename = file.filename
+def active_supplier_required(view_func):
+    """Inventory and requests are only for suppliers whose account is active (application approved)."""
+    @wraps(view_func)
+    @login_required
+    def wrapper(*args, **kwargs):
+        if not get_current_user().active:
+            flash("Your inventory becomes available once your supplier application is approved and your account is active.", "error")
+            return redirect(url_for("dashboard"))
+        return view_func(*args, **kwargs)
+    return wrapper
+
+
+def parse_product_form(form):
+    values = read_fields(form, ["name", "category", "description", "unit", "price", "quantity_available", "lead_time_days"])
+    if not values["name"]:
+        return None, "Please enter a product or service name."
+    if values["category"] not in CATEGORY_VALUES:
+        return None, "Please choose a category."
+    if values["unit"] not in PRODUCT_UNITS:
+        return None, "Please choose a unit."
+    try:
+        price = Decimal(values["price"].replace(" ", "").replace(",", ".").lstrip("Rr") or "x").quantize(Decimal("0.01"))
+        if price < 0 or price > Decimal("9999999999"):
+            raise InvalidOperation
+    except InvalidOperation:
+        return None, "Please enter a valid price, e.g. 1500.00."
+    numbers = {}
+    for field, label in (("quantity_available", "Quantity in stock"), ("lead_time_days", "Lead time")):
+        raw = values[field]
+        if raw == "":
+            numbers[field] = None
+            continue
+        if not raw.isdigit() or int(raw) > 1_000_000:
+            return None, f"{label} must be a whole number of 0 or more (leave it blank if not applicable)."
+        numbers[field] = int(raw)
+    return {
+        "name": values["name"][:150], "category": values["category"], "description": values["description"][:5000],
+        "unit": values["unit"], "price": price, **numbers,
+    }, None
+
+
+def log_request_event(product_request, action, note="", from_status=None, to_status=None, actor=None):
+    actor = actor or (get_current_admin() if g.get("is_admin_view") else get_current_user())
+    if isinstance(actor, Admin):
+        actor_type, name = "admin", actor.name or actor.email
+    elif isinstance(actor, User):
+        actor_type, name = "supplier", actor.contact_name or actor.company_name
+    else:
+        actor_type, name = "system", "System"
+    DB.session.add(ProductRequestEvent(
+        request_id=product_request.id, actor_type=actor_type, actor_name=(name or "")[:150],
+        action=action, from_status=from_status, to_status=to_status, note=(note or "")[:2000],
+    ))
+
+
+def notify_request_admin(product_request, title, message):
+    admin = product_request.admin
+    if not admin:
+        return
+    DB.session.add(Notification(admin_id=admin.id, title=title, message=message))
+    send_notification_email(admin.email, title, message, recipient_name=admin.name or "Admin",
+                            action_url=url_for("admin_request_detail", request_id=product_request.id, _external=True),
+                            action_label="View request")
+
+
+# ---- Supplier: inventory ----
+
+@app.route("/inventory")
+@active_supplier_required
+def inventory():
+    user = get_current_user()
+    search = request.args.get("search", "").strip()
+    show = request.args.get("show", "").strip()
+    query = Product.query.filter_by(user_id=user.id, is_archived=False)
+    if search:
+        query = query.filter(Product.name.ilike(f"%{search}%"))
+    if show == "listed":
+        query = query.filter(Product.is_listed.is_(True))
+    elif show == "hidden":
+        query = query.filter(Product.is_listed.is_(False))
+    products = query.order_by(Product.name).all()
+    all_products = Product.query.filter_by(user_id=user.id, is_archived=False).all()
+    return render_template(
+        "inventory.html", user=user, products=products, search=search, show=show,
+        listed_count=sum(1 for p in all_products if p.is_listed), total_count=len(all_products),
+        out_of_stock_count=sum(1 for p in all_products if not p.in_stock),
+    )
+
+
+def default_product_category(user):
+    application = get_user_application(user)
+    return application.supplier_category if application else ""
+
+
+@app.route("/inventory/new", methods=["GET", "POST"])
+@app.route("/inventory/<int:product_id>/edit", methods=["GET", "POST"])
+@active_supplier_required
+def product_form(product_id=None):
+    user = get_current_user()
+    product = None
+    if product_id is not None:
+        product = Product.query.filter_by(id=product_id, user_id=user.id, is_archived=False).first_or_404()
+
+    if request.method == "POST":
+        values, error = parse_product_form(request.form)
+        if error:
+            flash(error, "error")
+            return render_template("product_form.html", user=user, product=product, form=request.form), 400
+        if product is None:
+            product = Product(user_id=user.id, is_listed=bool(request.form.get("is_listed")))
+            DB.session.add(product)
+        else:
+            product.is_listed = bool(request.form.get("is_listed"))
+        for field, value in values.items():
+            setattr(product, field, value)
+        DB.session.commit()
+        flash(f"“{product.name}” saved.", "success")
+        return redirect(url_for("inventory"))
+
+    form = {} if product is None else {
+        "name": product.name, "category": product.category, "description": product.description, "unit": product.unit,
+        "price": f"{product.price:.2f}", "quantity_available": "" if product.quantity_available is None else product.quantity_available,
+        "lead_time_days": "" if product.lead_time_days is None else product.lead_time_days, "is_listed": product.is_listed,
+    }
+    if product is None:
+        form = {"category": default_product_category(user), "unit": "each", "is_listed": True}
+    return render_template("product_form.html", user=user, product=product, form=form)
+
+
+@app.route("/inventory/<int:product_id>/toggle", methods=["POST"])
+@active_supplier_required
+def toggle_product(product_id):
+    product = Product.query.filter_by(id=product_id, user_id=get_current_user().id, is_archived=False).first_or_404()
+    product.is_listed = not product.is_listed
+    DB.session.commit()
+    flash(f"“{product.name}” is now {'listed in the catalogue' if product.is_listed else 'hidden from the catalogue'}.", "success")
+    return redirect(url_for("inventory"))
+
+
+@app.route("/inventory/<int:product_id>/delete", methods=["POST"])
+@active_supplier_required
+def delete_product(product_id):
+    product = Product.query.filter_by(id=product_id, user_id=get_current_user().id, is_archived=False).first_or_404()
+    if ProductRequest.query.filter_by(product_id=product.id).first():
+        # Keep it for the request history, but remove it from the inventory and catalogue.
+        product.is_archived = True
+        product.is_listed = False
+    else:
+        DB.session.delete(product)
+    DB.session.commit()
+    flash(f"“{product.name}” removed from your inventory.", "success")
+    return redirect(url_for("inventory"))
+
+
+# ---- Supplier: requests received ----
+
+@app.route("/requests")
+@active_supplier_required
+def supplier_requests():
+    user = get_current_user()
+    status = request.args.get("status", "").strip()
+    query = ProductRequest.query.filter_by(supplier_id=user.id)
+    if status in REQUEST_STATUSES:
+        query = query.filter(ProductRequest.status == status)
+    else:
+        status = ""
+    page = request.args.get("page", 1, type=int)
+    pagination = query.order_by(ProductRequest.created_at.desc()).paginate(page=page, per_page=15, error_out=False)
+    return render_template("supplier_requests.html", user=user, requests=pagination.items, pagination=pagination, status_filter=status)
+
+
+@app.route("/requests/<int:request_id>")
+@active_supplier_required
+def supplier_request_detail(request_id):
+    user = get_current_user()
+    product_request = ProductRequest.query.filter_by(id=request_id, supplier_id=user.id).first_or_404()
+    return render_template("supplier_request_detail.html", user=user, req=product_request)
+
+
+SUPPLIER_TRANSITIONS = {"accept": ("requested", "accepted"), "decline": ("requested", "declined"), "deliver": ("accepted", "delivered")}
+
+
+@app.route("/requests/<int:request_id>/respond", methods=["POST"])
+@active_supplier_required
+def respond_to_request(request_id):
+    user = get_current_user()
+    product_request = ProductRequest.query.filter_by(id=request_id, supplier_id=user.id).first_or_404()
+    detail_url = url_for("supplier_request_detail", request_id=product_request.id)
+    action = request.form.get("action", "")
+    note = request.form.get("note", "").strip()
+
+    if action not in SUPPLIER_TRANSITIONS or product_request.status != SUPPLIER_TRANSITIONS[action][0]:
+        flash("That action isn't available for this request any more.", "error")
+        return redirect(detail_url)
+    if action == "decline" and not note:
+        flash("Please tell Icebolethu Group why you're declining this request.", "error")
+        return redirect(detail_url)
+
+    product = product_request.product
+    if action == "accept" and product.quantity_available is not None:
+        if product.quantity_available < product_request.quantity:
+            flash(f"You only have {product.quantity_available} in stock. Update your inventory before accepting.", "error")
+            return redirect(detail_url)
+        product.quantity_available -= product_request.quantity
+
+    old, new = SUPPLIER_TRANSITIONS[action]
+    product_request.status = new
+    if note:
+        product_request.supplier_note = note
+    log_request_event(product_request, action, note=note, from_status=old, to_status=new)
+    verb = {"accept": "accepted", "decline": "declined", "deliver": "marked as delivered"}[action]
+    notify_request_admin(product_request, f"Request {product_request.reference} {verb}",
+                         f"{user.company_name} {verb} your request for {product_request.quantity} × {product_request.product_name}."
+                         + (f" Note: {note}" if note else ""))
+    DB.session.commit()
+    flash(f"Request {product_request.reference} {verb}.", "success")
+    return redirect(detail_url)
+
+
+# ---- Admin: catalogue and requests ----
+
+def catalogue_query():
+    return (Product.query.join(User, Product.user_id == User.id)
+            .filter(Product.is_listed.is_(True), Product.is_archived.is_(False), User.active.is_(True)))
+
+
+@app.route("/admin/catalogue")
+@admin_required
+def admin_catalogue():
+    search = request.args.get("search", "").strip()
+    category = request.args.get("category", "").strip()
+    supplier_id = request.args.get("supplier", type=int)
+    query = catalogue_query()
+    if search:
+        like = f"%{search}%"
+        query = query.filter(DB.or_(Product.name.ilike(like), Product.description.ilike(like), User.company_name.ilike(like)))
+    if category:
+        query = query.filter(Product.category == category)
+    if supplier_id:
+        query = query.filter(Product.user_id == supplier_id)
+    page = request.args.get("page", 1, type=int)
+    pagination = query.order_by(Product.name).paginate(page=page, per_page=24, error_out=False)
+
+    base = catalogue_query()
+    categories = sorted({c for (c,) in base.with_entities(Product.category).distinct() if c})
+    suppliers = (User.query.filter(User.id.in_(base.with_entities(Product.user_id).distinct()))
+                 .order_by(User.company_name).all())
+    page_args = {k: v for k, v in {"search": search, "category": category, "supplier": supplier_id}.items() if v}
+    return render_template(
+        "admin_catalogue.html", admin=get_current_admin(), products=pagination.items, pagination=pagination,
+        search=search, category_filter=category, supplier_filter=supplier_id, categories=categories,
+        suppliers=suppliers, page_args=page_args,
+    )
+
+
+@app.route("/admin/catalogue/<int:product_id>/request", methods=["GET", "POST"])
+@admin_required
+def admin_request_product(product_id):
+    admin = get_current_admin()
+    product = catalogue_query().filter(Product.id == product_id).first()
+    if not product:
+        flash("That product is no longer available in the catalogue.", "error")
+        return redirect(url_for("admin_catalogue"))
+
+    if request.method == "POST":
+        form = read_fields(request.form, ["quantity", "required_by", "delivery_location", "notes"])
+        error = None
+        quantity = int(form["quantity"]) if form["quantity"].isdigit() else 0
+        if quantity < 1:
+            error = "Please enter a quantity of at least 1."
+        elif product.quantity_available is not None and quantity > product.quantity_available:
+            error = f"{product.supplier.company_name} only has {product.quantity_available} available."
+        required_by = None
+        if not error and form["required_by"]:
+            try:
+                required_by = datetime.strptime(form["required_by"], "%Y-%m-%d").date()
+                if required_by < date.today():
+                    error = "The required-by date can't be in the past."
+            except ValueError:
+                error = "Please enter a valid required-by date."
+        if not error and not form["delivery_location"]:
+            error = "Please enter a delivery location."
+        if error:
+            flash(error, "error")
+            return render_template("admin_request_new.html", admin=admin, product=product, form=request.form), 400
+
+        product_request = ProductRequest(
+            product_id=product.id, supplier_id=product.user_id, admin_id=admin.id,
+            product_name=product.name, unit=product.unit, unit_price=product.price, quantity=quantity,
+            required_by=required_by, delivery_location=form["delivery_location"][:255], notes=form["notes"][:5000],
+        )
+        DB.session.add(product_request)
+        DB.session.flush()
+        log_request_event(product_request, "requested", note=form["notes"], to_status="requested")
+        supplier = product.supplier
+        DB.session.add(Notification(
+            user_id=supplier.id, title=f"New product request {product_request.reference}",
+            message=f"Icebolethu Group requested {quantity} × {product.name}"
+                    + (f", needed by {required_by.strftime('%d %b %Y')}" if required_by else "") + ".",
+        ))
+        send_notification_email(
+            supplier.email, f"New product request {product_request.reference}",
+            f"Icebolethu Group has requested {quantity} × {product.name} ({format_zar(product_request.total)}). "
+            "Please accept or decline it in the supplier portal.",
+            recipient_name=supplier.contact_name or supplier.company_name,
+            action_url=url_for("supplier_request_detail", request_id=product_request.id, _external=True),
+            action_label="Respond to request",
+        )
+        DB.session.commit()
+        flash(f"Request {product_request.reference} sent to {supplier.company_name}.", "success")
+        return redirect(url_for("admin_request_detail", request_id=product_request.id))
+
+    return render_template("admin_request_new.html", admin=admin, product=product, form={"quantity": 1})
+
+
+@app.route("/admin/requests")
+@admin_required
+def admin_requests():
+    admin = get_current_admin()
+    status = request.args.get("status", "").strip()
+    mine = request.args.get("mine") == "1"
+    query = ProductRequest.query
+    if status in REQUEST_STATUSES:
+        query = query.filter(ProductRequest.status == status)
+    else:
+        status = ""
+    if mine:
+        query = query.filter(ProductRequest.admin_id == admin.id)
+    page = request.args.get("page", 1, type=int)
+    pagination = query.order_by(ProductRequest.created_at.desc()).paginate(page=page, per_page=15, error_out=False)
+    page_args = {k: v for k, v in {"status": status, "mine": "1" if mine else ""}.items() if v}
+    return render_template("admin_requests.html", admin=admin, requests=pagination.items, pagination=pagination,
+                           status_filter=status, mine=mine, page_args=page_args)
+
+
+@app.route("/admin/requests/<int:request_id>")
+@admin_required
+def admin_request_detail(request_id):
+    return render_template("admin_request_detail.html", admin=get_current_admin(),
+                           req=DB.get_or_404(ProductRequest, request_id))
+
+
+# A quotation is only issued once the supplier has accepted (and so confirmed price and availability).
+QUOTATION_READY_STATUSES = {"accepted", "delivered", "completed"}
+
+
+def quotation_context(product_request):
+    """Everything the printable page and the PDF need, computed once so both always agree."""
+    supplier = product_request.supplier
+    application = get_user_application(supplier) if supplier else None
+    total = product_request.total
+    vat_registered = bool(application and (application.vat_number or "").strip())
+    # Supplier prices are treated as VAT-inclusive; show the VAT portion when the supplier is VAT registered.
+    vat_amount = (total * VAT_RATE / (100 + VAT_RATE)).quantize(Decimal("0.01")) if vat_registered else Decimal("0.00")
+    return {
+        "req": product_request,
+        "supplier": supplier,
+        "application": application,
+        "company": COMPANY_DETAILS,
+        "quote_number": f"QT-{product_request.id:05d}",
+        "issued_on": utcnow(),
+        "total": total,
+        "vat_registered": vat_registered,
+        "vat_rate": VAT_RATE,
+        "vat_amount": vat_amount,
+        "total_excl_vat": total - vat_amount,
+        "accepted_on": next((e.created_at for e in product_request.events if e.action == "accept"), None),
+    }
+
+
+def quotation_request_or_redirect(request_id):
+    product_request = DB.get_or_404(ProductRequest, request_id)
+    if product_request.status not in QUOTATION_READY_STATUSES:
+        flash("The quotation becomes available once the supplier has accepted the request.", "error")
+        return product_request, redirect(url_for("admin_request_detail", request_id=product_request.id))
+    return product_request, None
+
+
+@app.route("/admin/requests/<int:request_id>/quotation")
+@admin_required
+def admin_request_quotation(request_id):
+    product_request, blocked = quotation_request_or_redirect(request_id)
+    if blocked:
+        return blocked
+    context = quotation_context(product_request)
+    log_request_event(product_request, "quotation", note="Quotation opened for printing")
+    DB.session.commit()
+    return render_template("admin_quotation.html", admin=get_current_admin(), **context)
+
+
+@app.route("/admin/requests/<int:request_id>/quotation.pdf")
+@admin_required
+def admin_request_quotation_pdf(request_id):
+    from quotation_pdf import build_quotation_pdf  # imported lazily so the app still runs without reportlab
+
+    product_request, blocked = quotation_request_or_redirect(request_id)
+    if blocked:
+        return blocked
+    admin = get_current_admin()
+    context = quotation_context(product_request)
+    pdf_bytes = build_quotation_pdf(context, generated_by=admin.name or admin.email,
+                                    logo_path=os.path.join(STATIC_DIR, "images", "logo.png"))
+    log_request_event(product_request, "quotation", note="Quotation downloaded as PDF")
+    DB.session.commit()
+    supplier_part = secure_filename(product_request.supplier.company_name or "supplier") or "supplier"
+    return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf", as_attachment=True,
+                     download_name=f"{context['quote_number']}_{supplier_part}.pdf")
+
+
+ADMIN_TRANSITIONS = {"complete": ({"delivered"}, "completed"), "cancel": ({"requested", "accepted"}, "cancelled")}
+
+
+@app.route("/admin/requests/<int:request_id>/update", methods=["POST"])
+@admin_required
+def admin_update_request(request_id):
+    product_request = DB.get_or_404(ProductRequest, request_id)
+    detail_url = url_for("admin_request_detail", request_id=product_request.id)
+    action = request.form.get("action", "")
+    note = request.form.get("note", "").strip()
+    if action not in ADMIN_TRANSITIONS or product_request.status not in ADMIN_TRANSITIONS[action][0]:
+        flash("That action isn't available for this request any more.", "error")
+        return redirect(detail_url)
+    if action == "cancel" and not note:
+        flash("Please give the supplier a reason for cancelling.", "error")
+        return redirect(detail_url)
+
+    old, new = product_request.status, ADMIN_TRANSITIONS[action][1]
+    if action == "cancel" and old == "accepted" and product_request.product.quantity_available is not None:
+        product_request.product.quantity_available += product_request.quantity  # return reserved stock
+    product_request.status = new
+    log_request_event(product_request, action, note=note, from_status=old, to_status=new)
+    verb = "completed" if action == "complete" else "cancelled"
+    supplier = product_request.supplier
+    message = f"Icebolethu Group {verb} request {product_request.reference} ({product_request.quantity} × {product_request.product_name})." + (f" Note: {note}" if note else "")
+    DB.session.add(Notification(user_id=supplier.id, title=f"Request {product_request.reference} {verb}", message=message))
+    send_notification_email(supplier.email, f"Request {product_request.reference} {verb}", message,
+                            recipient_name=supplier.contact_name or supplier.company_name,
+                            action_url=url_for("supplier_request_detail", request_id=product_request.id, _external=True),
+                            action_label="View request")
+    DB.session.commit()
+    flash(f"Request {product_request.reference} {verb}.", "success")
+    return redirect(detail_url)
+
+
+# ---------------------------------------------------------------------------
+# Errors
+# ---------------------------------------------------------------------------
+
+@app.errorhandler(413)
+def file_too_large(_error):
+    flash(f"That upload is too large. The maximum size is {app.config['MAX_CONTENT_LENGTH'] // (1024 * 1024)} MB.", "error")
+    return redirect(safe_next_url(urlparse(request.referrer or "").path, url_for("home")))
+
+
+@app.errorhandler(HTTPException)
+def http_error(error):
+    if request.path.startswith(("/health", "/db-status")):
+        return jsonify({"error": error.name}), error.code
+    return render_template("error.html", code=error.code, title=error.name, description=error.description), error.code
+
+
+@app.errorhandler(OperationalError)
+def database_unavailable(error):
+    DB.session.rollback()
+    app.logger.error("Database unavailable: %s", error.orig if getattr(error, "orig", None) else error)
+    return render_template(
+        "error.html", code=503, title="Service temporarily unavailable",
+        description="We can't reach the database right now. Please try again in a few minutes.",
+    ), 503
+
+
+@app.errorhandler(Exception)
+def unhandled_error(error):
+    DB.session.rollback()
+    app.logger.exception("Unhandled error: %s", error)
+    return render_template(
+        "error.html", code=500, title="Something went wrong",
+        description="An unexpected error occurred. Please try again, and contact us if it keeps happening.",
+    ), 500
+
+
+# ---------------------------------------------------------------------------
+# Database setup / lightweight migrations (MySQL)
+# ---------------------------------------------------------------------------
+
+def _columns(table):
+    return {row[0].lower(): row for row in DB.session.execute(text(f"SHOW COLUMNS FROM {table}")).fetchall()}
+
+
+def _add_missing_columns(table, definitions):
+    existing = _columns(table)
+    for column, ddl in definitions.items():
+        if column not in existing:
+            DB.session.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+            app.logger.info("Added %s.%s", table, column)
+
+
+def migrate_mysql_schema():
+    """Bring databases created by older versions of the app up to the current model."""
+    users = _columns("users")
+    if "active" in users and "email_verified" not in users:
+        # Very old schema used `active` to mean "email verified".
+        DB.session.execute(text("ALTER TABLE users CHANGE COLUMN active email_verified BOOLEAN NOT NULL DEFAULT FALSE"))
+    _add_missing_columns("users", {
+        "name": "VARCHAR(100) NOT NULL DEFAULT ''",
+        "password_hash": "VARCHAR(256) NOT NULL DEFAULT ''",
+        "company_name": "VARCHAR(150) NOT NULL DEFAULT ''",
+        "contact_name": "VARCHAR(120) NOT NULL DEFAULT ''",
+        "phone": "VARCHAR(50) NOT NULL DEFAULT ''",
+        "address": "VARCHAR(255) NOT NULL DEFAULT ''",
+        "created_at": "DATETIME NULL",
+        "email_verified": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "active": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "supplier_id": "VARCHAR(20) NULL UNIQUE",
+        "verification_code_hash": "VARCHAR(256) NULL",
+        "verification_code_expires": "DATETIME NULL",
+    })
+    name_col = _columns("users").get("name")
+    if name_col is not None and name_col[4] is None:
+        DB.session.execute(text("ALTER TABLE users MODIFY COLUMN name VARCHAR(100) NOT NULL DEFAULT ''"))
+
+    _add_missing_columns("supplier_applications", {
+        "assigned_admin_id": "INT NULL",
+        "assigned_at": "DATETIME NULL",
+        "supplier_category_detail": "VARCHAR(255) NOT NULL DEFAULT ''",
+        **{field: f"VARCHAR({SupplierApplication.__table__.c[field].type.length}) DEFAULT ''" for field in PROFILE_FIELDS},
+    })
+
+    notifications = _columns("notifications")
+    if "admin_id" not in notifications:
+        DB.session.execute(text("ALTER TABLE notifications ADD COLUMN admin_id INT NULL"))
+        DB.session.execute(text("ALTER TABLE notifications ADD FOREIGN KEY (admin_id) REFERENCES admins(id)"))
+    if "user_id" in notifications and notifications["user_id"][2] == "NO":
+        DB.session.execute(text("ALTER TABLE notifications MODIFY COLUMN user_id INT NULL"))
+
     DB.session.commit()
 
-    flash("Document replaced successfully.", "success")
-    return redirect(url_for("admin_application_detail", application_id=application_id))
 
-
-@app.route("/admin/applications/<int:application_id>/download-all")
-@admin_required
-def download_all_documents(application_id):
-    admin = get_current_admin()
-    application = SupplierApplication.query.get_or_404(application_id)
-    supplier = User.query.filter_by(email=application.email).first()
-    documents = SupplierDocument.query.filter(
-        DB.or_(
-            SupplierDocument.application_id == application.id,
-            DB.and_(
-                SupplierDocument.user_id == supplier.id if supplier else False,
-                SupplierDocument.application_id.is_(None),
-            ),
-        )
-    ).all() if supplier else SupplierDocument.query.filter_by(application_id=application.id).all()
-
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for doc in documents:
-            absolute_path = os.path.join("static", doc.file_path.replace("/", os.sep))
-            if os.path.exists(absolute_path):
-                arcname = doc.original_filename or os.path.basename(absolute_path)
-                zipf.write(absolute_path, arcname)
-
-    zip_buffer.seek(0)
-    company_name = (supplier.company_name if supplier and supplier.company_name else application.company_name or "supplier").strip()
-    safe_name = re.sub(r'[^A-Za-z0-9 _-]', '', company_name).strip().replace(' ', '_')
-    filename = f"{safe_name}_combined documents.zip"
-
-    return send_file(
-        zip_buffer,
-        mimetype="application/zip",
-        as_attachment=True,
-        download_name=filename,
+def migrate_legacy_categories():
+    """Move applications from old category names onto the merged categories. Safe to re-run."""
+    legacy = list(LEGACY_CATEGORY_MAP)
+    changed = SupplierApplication.query.filter(SupplierApplication.supplier_category.in_(legacy)).update(
+        {SupplierApplication.supplier_category: case(LEGACY_CATEGORY_MAP, value=SupplierApplication.supplier_category)},
+        synchronize_session=False,
     )
-
-
-@app.route("/uploads/<path:filepath>")
-def serve_upload(filepath):
-    absolute_path = os.path.join("static", filepath)
-    if not os.path.exists(absolute_path):
-        return "File not found", 404
-
-    mime_type, _ = mimetypes.guess_type(absolute_path)
-    if mime_type is None:
-        mime_type = "application/octet-stream"
-
-    response = send_file(
-        absolute_path,
-        mimetype=mime_type,
-        as_attachment=False,
-        download_name=os.path.basename(absolute_path),
-    )
-    response.headers["Content-Disposition"] = f"inline; filename={os.path.basename(absolute_path)}"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    return response
-
-
-def _libreoffice_paths():
-    candidates = [
-        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-        "/usr/bin/libreoffice",
-        "/usr/bin/soffice",
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    return "libreoffice"
-
-
-def convert_to_pdf(absolute_path):
-    if not os.path.exists(absolute_path):
-        return None
-
-    mime_type, _ = mimetypes.guess_type(absolute_path)
-    if mime_type == "application/pdf":
-        return absolute_path
-
-    output_dir = os.path.dirname(absolute_path)
-    libreoffice = _libreoffice_paths()
-    try:
-        subprocess.run(
-            [
-                libreoffice,
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                output_dir,
-                absolute_path,
-            ],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
-
-    base_name = os.path.splitext(os.path.basename(absolute_path))[0]
-    pdf_path = os.path.join(output_dir, f"{base_name}.pdf")
-    if os.path.exists(pdf_path):
-        return pdf_path
-    return None
-
-
-def ensure_supplier_category_detail():
-    with app.app_context():
-        try:
-            DB.create_all()
-            columns = DB.session.execute(text("SHOW COLUMNS FROM supplier_applications")).fetchall()
-            existing = {column[0].lower() for column in columns}
-
-            if "supplier_category_detail" not in existing:
-                DB.session.execute(text("ALTER TABLE supplier_applications ADD COLUMN supplier_category_detail VARCHAR(255) NOT NULL DEFAULT ''"))
-                DB.session.commit()
-                app.logger.info("Added supplier_category_detail column to supplier_applications table.")
-        except Exception as exc:
-            app.logger.warning("Supplier category detail schema check skipped: %s", exc)
-
-
-def ensure_supplier_application_categories_table():
-    with app.app_context():
-        try:
-            columns = DB.session.execute(text("SHOW COLUMNS FROM supplier_application_categories")).fetchall()
-            if not columns:
-                DB.session.execute(text("""
-                    CREATE TABLE supplier_application_categories (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        application_id INT NOT NULL,
-                        category VARCHAR(120) NOT NULL,
-                        category_detail VARCHAR(255) NOT NULL DEFAULT '',
-                        FOREIGN KEY (application_id) REFERENCES supplier_applications(id) ON DELETE CASCADE
-                    )
-                """))
-                DB.session.commit()
-                app.logger.info("Created supplier_application_categories table.")
-        except Exception as exc:
-            app.logger.warning("Supplier application categories table check skipped: %s", exc)
-
-
-def ensure_user_2fa_table():
-    with app.app_context():
-        try:
-            DB.create_all()
-            columns = DB.session.execute(text("SHOW COLUMNS FROM user_2fa")).fetchall()
-            if not columns:
-                DB.session.execute(text("""
-                    CREATE TABLE user_2fa (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        user_id INT NOT NULL,
-                        totp_secret VARCHAR(64) NOT NULL,
-                        confirmed BOOLEAN NOT NULL DEFAULT FALSE,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-                        UNIQUE KEY uk_user_2fa_user (user_id)
-                    )
-                """))
-                DB.session.commit()
-                app.logger.info("Created user_2fa table.")
-        except Exception as exc:
-            app.logger.warning("User 2FA table check skipped: %s", exc)
-
-
-def ensure_admin_schema():
-    with app.app_context():
-        try:
-            columns = DB.session.execute(text("SHOW COLUMNS FROM admins")).fetchall()
-            if not columns:
-                DB.session.execute(text("""
-                    CREATE TABLE admins (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        email VARCHAR(120) UNIQUE NOT NULL,
-                        password_hash VARCHAR(256) NOT NULL,
-                        name VARCHAR(100) NOT NULL DEFAULT '',
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """))
-                DB.session.commit()
-                app.logger.info("Admins table created.")
-        except Exception as exc:
-            app.logger.warning("Admin schema check skipped: %s", exc)
-
-
-def ensure_user_schema():
-    with app.app_context():
-        try:
-            columns = DB.session.execute(text("SHOW COLUMNS FROM users")).fetchall()
-            existing = {column[0].lower() for column in columns}
-
-            if "name" in existing:
-                DB.session.execute(text("ALTER TABLE users MODIFY COLUMN name VARCHAR(100) NOT NULL DEFAULT ''"))
-            if "password_hash" not in existing:
-                DB.session.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(256) NOT NULL DEFAULT ''"))
-            if "company_name" not in existing:
-                DB.session.execute(text("ALTER TABLE users ADD COLUMN company_name VARCHAR(150) NOT NULL DEFAULT ''"))
-            if "contact_name" not in existing:
-                DB.session.execute(text("ALTER TABLE users ADD COLUMN contact_name VARCHAR(120) NOT NULL DEFAULT ''"))
-            if "phone" not in existing:
-                DB.session.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(50) NOT NULL DEFAULT ''"))
-            if "created_at" not in existing:
-                DB.session.execute(text("ALTER TABLE users ADD COLUMN created_at DATETIME NULL"))
-            if "active" not in existing:
-                DB.session.execute(text("ALTER TABLE users ADD COLUMN active BOOLEAN NOT NULL DEFAULT FALSE"))
-            if "address" not in existing:
-                DB.session.execute(text("ALTER TABLE users ADD COLUMN address VARCHAR(255) NOT NULL DEFAULT ''"))
-            if "supplier_id" not in existing:
-                DB.session.execute(text("ALTER TABLE users ADD COLUMN supplier_id VARCHAR(20) NULL"))
-                DB.session.execute(text("CREATE UNIQUE INDEX idx_users_supplier_id ON users(supplier_id)"))
-
-            DB.session.commit()
-            app.logger.info("User schema compatibility check completed.")
-        except Exception as exc:
-            app.logger.warning("User schema migration skipped: %s", exc)
-
-
-def ensure_supplier_application_extra_fields():
-    with app.app_context():
-        try:
-            DB.create_all()
-            columns = DB.session.execute(text("SHOW COLUMNS FROM supplier_applications")).fetchall()
-            existing = {column[0].lower() for column in columns}
-
-            extras = {
-                "registered_vendor_name": "VARCHAR(150) DEFAULT ''",
-                "trading_name": "VARCHAR(150) DEFAULT ''",
-                "business_registration_number": "VARCHAR(120) DEFAULT ''",
-                "vat_number": "VARCHAR(50) DEFAULT ''",
-                "tax_number": "VARCHAR(50) DEFAULT ''",
-                "physical_address": "VARCHAR(255) DEFAULT ''",
-                "city": "VARCHAR(100) DEFAULT ''",
-                "province": "VARCHAR(100) DEFAULT ''",
-                "postal_code": "VARCHAR(20) DEFAULT ''",
-                "website": "VARCHAR(255) DEFAULT ''",
-                "primary_contact_person": "VARCHAR(120) DEFAULT ''",
-                "contact_person_role": "VARCHAR(120) DEFAULT ''",
-                "contact_number": "VARCHAR(50) DEFAULT ''",
-                "email_address": "VARCHAR(120) DEFAULT ''",
-            }
-            for col, col_type in extras.items():
-                if col not in existing:
-                    DB.session.execute(text(f"ALTER TABLE supplier_applications ADD COLUMN {col} {col_type}"))
-            DB.session.commit()
-            app.logger.info("Supplier application extra fields ensured.")
-        except Exception as exc:
-            app.logger.warning("Supplier application extra fields migration skipped: %s", exc)
-
-
-def ensure_supplier_directors_table():
-    with app.app_context():
-        try:
-            DB.create_all()
-            columns = DB.session.execute(text("SHOW COLUMNS FROM supplier_directors")).fetchall()
-            if not columns:
-                DB.session.execute(text("""
-                    CREATE TABLE supplier_directors (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        application_id INT NOT NULL,
-                        initials_surname VARCHAR(120) NOT NULL,
-                        id_number VARCHAR(50) NULL,
-                        role VARCHAR(120) NOT NULL,
-                        nationality VARCHAR(80) NOT NULL,
-                        FOREIGN KEY (application_id) REFERENCES supplier_applications(id) ON DELETE CASCADE
-                    )
-                """))
-                DB.session.commit()
-                app.logger.info("Supplier directors table created.")
-            id_number_col = [c for c in columns if c[0].lower() == "id_number"]
-            if id_number_col and id_number_col[0][2] == "NO":
-                DB.session.execute(text("ALTER TABLE supplier_directors MODIFY COLUMN id_number VARCHAR(50) NULL"))
-                DB.session.commit()
-                app.logger.info("Made id_number nullable in supplier_directors table.")
-        except Exception as exc:
-            app.logger.warning("Supplier directors table check skipped: %s", exc)
+    rows = SupplierApplicationCategory.query.filter(SupplierApplicationCategory.category.in_(legacy)).all()
+    for row in rows:
+        merged = LEGACY_CATEGORY_MAP[row.category]
+        duplicate = SupplierApplicationCategory.query.filter(
+            SupplierApplicationCategory.application_id == row.application_id,
+            SupplierApplicationCategory.category == merged,
+            SupplierApplicationCategory.id != row.id,
+        ).first()
+        if duplicate:
+            # e.g. an application that had both Hearse and Family Car: keep one row, combine details.
+            details = [d for d in (duplicate.category_detail, row.category_detail) if d]
+            duplicate.category_detail = "; ".join(dict.fromkeys(details))[:255]
+            DB.session.delete(row)
+        else:
+            row.category = merged
+    if changed or rows:
+        DB.session.commit()
+        app.logger.info("Moved %s application(s) and %s category row(s) to merged categories.", changed, len(rows))
 
 
 def init_database():
     with app.app_context():
         try:
             DB.create_all()
-            ensure_user_schema()
-            ensure_admin_schema()
-            ensure_notification_schema()
-            ensure_supplier_category_detail()
-            ensure_supplier_application_categories_table()
-            ensure_supplier_application_extra_fields()
-            ensure_supplier_directors_table()
-            ensure_user_2fa_table()
-            app.logger.info("Database tables initialized successfully.")
-        except Exception as exc:
+            if DB.engine.dialect.name == "mysql":
+                migrate_mysql_schema()
+            migrate_legacy_categories()
+        except Exception as exc:  # noqa: BLE001 — let the app boot so /health still answers
+            DB.session.rollback()
             app.logger.warning("Database initialization skipped: %s", exc)
-   
+
+
+# ---------------------------------------------------------------------------
+# CLI commands:  flask --app app <command>
+# ---------------------------------------------------------------------------
+
+@app.cli.command("init-db")
+def init_db_command():
+    """Create tables and apply schema upgrades."""
+    init_database()
+    click.echo("Database initialised.")
+
+
+@app.cli.command("create-admin")
+@click.option("--email", prompt=True)
+@click.option("--name", prompt=True, default="")
+@click.password_option()
+def create_admin_command(email, name, password):
+    """Create an admin account, or reset the password of an existing one."""
+    email = normalize_email(email)
+    admin = find_admin_by_email(email)
+    if admin:
+        admin.set_password(password)
+        if name:
+            admin.name = name
+        click.echo(f"Updated admin {email}.")
+    else:
+        admin = Admin(email=email, name=name)
+        admin.set_password(password)
+        DB.session.add(admin)
+        click.echo(f"Created admin {email}.")
+    DB.session.commit()
+
+
+@app.cli.command("release-application")
+@click.argument("application_id", type=int)
+@click.option("--reason", prompt=True, help="Why the assignment is being released (recorded in the audit trail).")
+def release_application_command(application_id, reason):
+    """Release an application's assignment, e.g. when the assigned admin has left. Recorded as a system event."""
+    application = DB.session.get(SupplierApplication, application_id)
+    if not application:
+        raise click.ClickException(f"No application with id {application_id}.")
+    owner = application.assigned_admin
+    if not owner:
+        click.echo("That application isn't assigned to anyone.")
+        return
+    application.assigned_admin_id = None
+    application.assigned_at = None
+    with app.test_request_context():
+        log_event(application, "unassigned", summary=f"Released from {owner.name or owner.email} by system administrator",
+                  changes=[{"field": "Assigned to", "old": owner.name or owner.email, "new": ""},
+                           {"field": "Reason", "old": "", "new": reason}], actor=False)
+    DB.session.commit()
+    click.echo(f"Released application {application_id} from {owner.email}.")
+
+
+DEMO_EMAIL_DOMAIN = "demo-supplier.example"  # reserved .example TLD: can never receive real email
+
+DEMO_COMPANIES = [
+    ("Ubuntu Caskets", "Caskets"), ("Sizwe Funeral Catering", "Catering"), ("Eternal Rest Cold Rooms", "Body Storage, Cold-Room and other Burial Services"),
+    ("Masakhane Tents & Décor", "Tents, Draping and Décor"), ("Thembeka Floral Tributes", "Flowers, crosses and plaques"), ("Khanyisa Hearse Hire", "Funeral Vehicles (Hearse / Family Car)"),
+    ("Imbali Tombstones", "Tombstones"), ("Siyabonga Livestock", "Livestock"), ("Clean-Go Mobile Toilets", "Mobile toilet"),
+    ("Dignity Lowering Systems", "Lowering Device"), ("Zenzele Consulting", "Consulting"), ("Lethabo AV & Media", "ICT Equipment, Media and Electronic Devices"),
+    ("Royal Oak Coffins", "Caskets"), ("Mama Thandi's Kitchen", "Catering"), ("Peaceful Journey Transport", "Funeral Vehicles (Hearse / Family Car)"),
+    ("Marquee Masters SA", "Tents, Draping and Décor"), ("Granite & Memorial Works", "Tombstones"), ("Golden Petals Florists", "Flowers, crosses and plaques"),
+    ("Nkosi Cattle Traders", "Livestock"), ("Sanitech Event Hire", "Mobile toilet"), ("Heritage Draping Co", "Tents, Draping and Décor"),
+    ("Amandla Catering Services", "Catering"), ("Serenity Body Storage", "Body Storage, Cold-Room and other Burial Services"), ("Vukani Funeral Consultants", "Consulting"),
+    ("Kwanele Casket Makers", "Caskets"), ("Phila Sound & Screens", "ICT Equipment, Media and Electronic Devices"), ("Bayede Luxury Cars", "Funeral Vehicles (Hearse / Family Car)"),
+    ("Ithemba Memorial Stones", "Tombstones"), ("Siphesihle Event Tents", "Tents, Draping and Décor"), ("Mzansi Lowering Devices", "Lowering Device"),
+]
+DEMO_PEOPLE = ["Thandiwe Mkhize", "Sipho Ndlovu", "Lerato Mokoena", "Bongani Zulu", "Nomvula Dlamini", "Kagiso Molefe",
+               "Zanele Khumalo", "Themba Nkosi", "Palesa Mahlangu", "Mandla Sithole", "Ayanda Cele", "Refilwe Masilo",
+               "Lindiwe Ngcobo", "Tshepo Mabaso", "Nokuthula Shabalala", "Sibusiso Mthembu", "Precious Baloyi", "Vusi Mathebula",
+               "Busisiwe Nxumalo", "Karabo Letsoalo", "Mpho Radebe", "Ntombi Gumede", "Andile Hadebe", "Kgomotso Moloi",
+               "Siyabonga Buthelezi", "Naledi Phiri", "Lwazi Mkhabela", "Dineo Sebola", "Xolani Zwane", "Hlengiwe Mbatha"]
+DEMO_CITIES = {"KwaZulu-Natal": ["Durban", "Pietermaritzburg", "Richards Bay"], "Gauteng": ["Johannesburg", "Pretoria", "Soweto"],
+               "Eastern Cape": ["Gqeberha", "East London", "Mthatha"], "Western Cape": ["Cape Town", "Paarl"],
+               "Limpopo": ["Polokwane", "Thohoyandou"], "Mpumalanga": ["Mbombela", "eMalahleni"], "Free State": ["Bloemfontein"],
+               "North West": ["Rustenburg", "Mahikeng"], "Northern Cape": ["Kimberley"]}
+DEMO_PRODUCTS = {
+    "Caskets": [("Pine casket, standard", 4500, "each"), ("Oak casket, premium", 12800, "each"), ("Child casket, white", 2900, "each"), ("Casket with viewing glass", 7600, "each")],
+    "Catering": [("Funeral catering, 100 guests", 18500, "per event"), ("Funeral catering, 250 guests", 39000, "per event"), ("Tea & refreshments, 50 guests", 3200, "per event")],
+    "Body Storage, Cold-Room and other Burial Services": [("Cold-room storage", 450, "per day"), ("Body transport (local)", 1800, "per service"), ("Mortuary preparation", 2500, "per service")],
+    "Tents, Draping and Décor": [("Marquee tent 10x20m", 6200, "per event"), ("Stretch tent 15x20m", 8900, "per event"), ("White draping & décor set", 2400, "per event"), ("Chairs with covers (100)", 1500, "per event")],
+    "Flowers, crosses and plaques": [("Casket spray, roses", 1450, "each"), ("Wreath, mixed flowers", 850, "each"), ("Engraved brass plaque", 650, "each"), ("Wooden cross", 480, "each")],
+    "Funeral Vehicles (Hearse / Family Car)": [("Hearse with driver", 3500, "per day"), ("Family car (7-seater)", 2200, "per day"), ("Luxury family car", 3800, "per day")],
+    "Tombstones": [("Granite headstone, single", 9800, "each"), ("Granite headstone, double", 16500, "each"), ("Marble book memorial", 7200, "each")],
+    "Livestock": [("Cow (ceremonial)", 14000, "each"), ("Goat", 2200, "each"), ("Sheep", 2600, "each")],
+    "Mobile toilet": [("VIP mobile toilet", 950, "per day"), ("Standard mobile toilet", 550, "per day"), ("Hand-wash station", 350, "per day")],
+    "Lowering Device": [("Lowering device hire", 1200, "per service"), ("Grave dressing set", 900, "per service")],
+    "Consulting": [("Funeral planning consult", 1500, "per hour"), ("Cultural ceremony advisory", 2800, "per service")],
+    "ICT Equipment, Media and Electronic Devices": [("PA sound system", 2500, "per event"), ("LED screen & live stream", 6500, "per event"), ("Photography & video", 4200, "per event")],
+}
+DEMO_COMMENTS = {
+    "approved": ["All documents verified. Welcome to the Icebolethu supplier panel.", "Approved: compliance documents in order."],
+    "declined": ["B-BBEE certificate has expired and the bank letter is older than 3 months.", "Company registration details do not match CIPC records."],
+    "returned_for_update": ["Please upload a bank confirmation letter that is not older than 3 months.", "Tax number does not match the SARS certificate. Please correct and resubmit."],
+}
+
+
+def demo_sa_id(rng, birth_year):
+    """A syntactically valid (but fictitious) South African ID number."""
+    base = f"{birth_year % 100:02d}{rng.randint(1, 12):02d}{rng.randint(1, 28):02d}{rng.randint(0, 9999):04d}08"
+    return next(base + str(d) for d in range(10) if luhn_valid(base + str(d)))
+
+
+DEMO_PDF = (b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+            b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n"
+            b"4 0 obj<</Length 66>>stream\nBT /F1 20 Tf 72 760 Td (DEMO DOCUMENT - not a real record) Tj ET\nendstream endobj\n"
+            b"5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n")
+
+
+def remove_demo_data():
+    demo_users = User.query.filter(User.email.like(f"%@{DEMO_EMAIL_DOMAIN}")).all()
+    user_ids = [u.id for u in demo_users]
+    if not user_ids:
+        return 0
+    app_ids = [a.id for a in SupplierApplication.query.filter(SupplierApplication.email.like(f"%@{DEMO_EMAIL_DOMAIN}"))]
+    request_ids = [r.id for r in ProductRequest.query.filter(ProductRequest.supplier_id.in_(user_ids))]
+    if request_ids:
+        ProductRequestEvent.query.filter(ProductRequestEvent.request_id.in_(request_ids)).delete(synchronize_session=False)
+        ProductRequest.query.filter(ProductRequest.id.in_(request_ids)).delete(synchronize_session=False)
+    Product.query.filter(Product.user_id.in_(user_ids)).delete(synchronize_session=False)
+    if app_ids:
+        Notification.query.filter(Notification.related_application_id.in_(app_ids)).delete(synchronize_session=False)
+        ApplicationEvent.query.filter(ApplicationEvent.application_id.in_(app_ids)).delete(synchronize_session=False)
+        SupplierApplicationCategory.query.filter(SupplierApplicationCategory.application_id.in_(app_ids)).delete(synchronize_session=False)
+        SupplierDirector.query.filter(SupplierDirector.application_id.in_(app_ids)).delete(synchronize_session=False)
+    for doc in SupplierDocument.query.filter(SupplierDocument.user_id.in_(user_ids)):
+        remove_upload(doc.file_path)
+    SupplierDocument.query.filter(SupplierDocument.user_id.in_(user_ids)).delete(synchronize_session=False)
+    if app_ids:
+        SupplierApplication.query.filter(SupplierApplication.id.in_(app_ids)).delete(synchronize_session=False)
+    Notification.query.filter(Notification.user_id.in_(user_ids)).delete(synchronize_session=False)
+    User.query.filter(User.id.in_(user_ids)).delete(synchronize_session=False)
+    DB.session.commit()
+    for uid in user_ids:
+        folder = os.path.join(UPLOAD_ROOT, str(uid))
+        if os.path.isdir(folder) and not os.listdir(folder):
+            os.rmdir(folder)
+    return len(user_ids)
+
+
+@app.cli.command("seed-demo")
+@click.option("--suppliers", "count", default=30, show_default=True, help="Number of demo suppliers.")
+@click.option("--months", default=6, show_default=True, help="Spread registrations and requests over this many months.")
+@click.option("--requests", "request_count", default=60, show_default=True, help="Number of demo product requests.")
+@click.option("--remove", is_flag=True, help="Delete all demo data instead of creating it.")
+@click.option("--seed", default=2026, show_default=True, help="Random seed, for repeatable demo data.")
+def seed_demo_command(count, months, request_count, remove, seed):
+    """Create (or --remove) realistic demo suppliers, applications, inventory and requests.
+
+    Demo suppliers use @demo-supplier.example addresses (undeliverable), password Password123!
+    """
+    import random
+
+    if remove:
+        click.echo(f"Removed {remove_demo_data()} demo suppliers and everything linked to them.")
+        return
+    if User.query.filter(User.email.like(f"%@{DEMO_EMAIL_DOMAIN}")).first():
+        raise click.ClickException("Demo data already exists. Run `flask --app app seed-demo --remove` first to replace it.")
+    admins = Admin.query.order_by(Admin.id).all()
+    if not admins:
+        raise click.ClickException("Create an admin first: flask --app app create-admin")
+
+    rng = random.Random(seed)
+    now = utcnow()
+    period_start = now - timedelta(days=30 * months)
+    status_pool = (["approved"] * 14 + ["pending_review"] * 5 + ["under_review"] * 4 + ["submitted"] * 2
+                   + ["returned_for_update"] * 3 + ["declined"] * 2)
+    rng.shuffle(status_pool)
+    password_hash = generate_password_hash("Password123!")
+
+    def event(application, when, actor, action, summary="", from_status=None, to_status=None, changes=None):
+        DB.session.add(ApplicationEvent(
+            application_id=application.id, created_at=when,
+            actor_type="admin" if isinstance(actor, Admin) else "supplier", actor_id=actor.id,
+            actor_name=(actor.name if isinstance(actor, Admin) else actor.contact_name) or actor.email, actor_email=actor.email,
+            action=action, summary=summary or EVENT_LABELS.get(action, action), from_status=from_status, to_status=to_status,
+            changes_json=json.dumps(changes) if changes else None, ip_address="192.0.2.10",
+        ))
+
+    created_users, approved = [], []
+    for i in range(min(count, len(DEMO_COMPANIES))):
+        company, category = DEMO_COMPANIES[i]
+        person = DEMO_PEOPLE[i % len(DEMO_PEOPLE)]
+        slug = re.sub(r"[^a-z0-9]+", "", company.lower())
+        email = f"{slug}@{DEMO_EMAIL_DOMAIN}"
+        province = rng.choice(list(DEMO_CITIES))
+        city = rng.choice(DEMO_CITIES[province])
+        registered = period_start + timedelta(days=int(i * (30 * months - 7) / max(count, 1)), hours=rng.randint(7, 18), minutes=rng.randint(0, 59))
+        phone = f"0{rng.choice([6, 7, 8])}{rng.randint(10000000, 99999999)}"
+        status = status_pool[i % len(status_pool)]
+
+        user = User(supplier_id=generate_supplier_id(), name=person, email=email, password_hash=password_hash,
+                    company_name=company, contact_name=person, phone=phone, address=f"{rng.randint(1, 250)} Main Road, {city}",
+                    email_verified=True, active=(status == "approved"), created_at=registered)
+        DB.session.add(user)
+        DB.session.flush()
+        created_users.append(user)
+
+        submitted_at = registered + timedelta(days=rng.randint(0, 3), hours=rng.randint(1, 6))
+        vat = f"4{rng.randint(100000000, 999999999)}" if rng.random() < 0.6 else ""
+        application = SupplierApplication(
+            company_name=company, contact_name=person, email=email, phone=phone, company_profile="",
+            documents_status="complete", status="pending_review", created_at=submitted_at, updated_at=submitted_at,
+            registered_vendor_name=f"{company} (Pty) Ltd", trading_name=company if rng.random() < 0.3 else "",
+            business_registration_number=f"20{rng.randint(10, 25)}/{rng.randint(100000, 999999)}/07",
+            vat_number=vat, tax_number=f"9{rng.randint(100000000, 999999999)}",
+            physical_address=user.address.split(",")[0], city=city, province=province, postal_code=f"{rng.randint(1000, 9999)}",
+            website=f"www.{slug}.example" if rng.random() < 0.5 else "",
+            primary_contact_person=person, contact_person_role=rng.choice(["Director", "Owner", "Managing Director", "Operations Manager"]),
+            contact_number=phone, email_address=email,
+        )
+        details = {category: rng.choice(["Fleet of 3 vehicles", "Mercedes-Benz fleet", "Full AV crew"])} if category in get_specify_categories() else {}
+        replace_categories(application, [category], details)
+        owner_surname = person.split()[-1]
+        replace_directors(application, [
+            {"initials_surname": f"{person[0]}. {owner_surname}", "id_number": demo_sa_id(rng, rng.randint(1965, 1995)), "role": "Director", "nationality": SOUTH_AFRICA},
+            *([{"initials_surname": f"{rng.choice('ABKLMNPST')}. {owner_surname}", "id_number": demo_sa_id(rng, rng.randint(1970, 1998)),
+                "role": "Shareholder", "nationality": SOUTH_AFRICA}] if rng.random() < 0.5 else []),
+        ])
+        DB.session.add(application)
+        DB.session.flush()
+
+        # Documents: tiny placeholder PDFs; incomplete applications miss one or two.
+        doc_types = [COMPANY_PROFILE_DOC] + REQUIRED_DOCUMENTS
+        missing = set(rng.sample(REQUIRED_DOCUMENTS, rng.randint(1, 2))) if status in {"returned_for_update", "declined"} and rng.random() < 0.7 else set()
+        folder = os.path.join(UPLOAD_ROOT, str(user.id))
+        os.makedirs(folder, exist_ok=True)
+        for doc_type in doc_types:
+            if doc_type in missing:
+                continue
+            filename = f"{int(submitted_at.timestamp())}_{secrets.token_hex(3)}_{secure_filename(doc_type)[:40]}.pdf"
+            with open(os.path.join(folder, filename), "wb") as fh:
+                fh.write(DEMO_PDF)
+            DB.session.add(SupplierDocument(user_id=user.id, application_id=application.id, document_type=doc_type,
+                                            file_path=f"uploads/{user.id}/{filename}", original_filename=f"{doc_type}.pdf",
+                                            uploaded_at=submitted_at))
+        application.documents_status = "pending" if missing else "complete"
+
+        event(application, submitted_at, user, "submitted", summary=f"Submitted with {len(doc_types) - len(missing)} document(s)", to_status="pending_review")
+        when = submitted_at
+        if status != "submitted" and not (status == "pending_review" and rng.random() < 0.5):
+            admin = rng.choice(admins)
+            when = submitted_at + timedelta(days=rng.randint(1, 4), hours=rng.randint(1, 5))
+            application.assigned_admin_id, application.assigned_at = admin.id, when
+            event(application, when, admin, "assigned", summary=f"Assigned to {admin.name or admin.email}",
+                  changes=[{"field": "Assigned to", "old": "", "new": admin.name or admin.email}])
+            for doc_type in rng.sample(doc_types, 3):
+                when += timedelta(minutes=rng.randint(2, 20))
+                event(application, when, admin, "document_viewed", summary=f"Viewed {doc_type}")
+            previous = "pending_review"
+            path = {"under_review": ["under_review"], "approved": ["under_review", "approved"], "declined": ["under_review", "declined"],
+                    "returned_for_update": ["under_review", "returned_for_update"]}.get(status, [])
+            for step in path:
+                when += timedelta(days=rng.randint(1, 5), hours=rng.randint(1, 6))
+                comment = rng.choice(DEMO_COMMENTS[step]) if step in DEMO_COMMENTS else ""
+                event(application, when, admin, "status_changed", summary=f"{status_label(previous)} → {status_label(step)}",
+                      from_status=previous, to_status=step,
+                      changes=[{"field": "Review comments", "old": "", "new": comment}] if comment else None)
+                if comment:
+                    application.review_comments = comment
+                DB.session.add(Notification(user_id=user.id, title="Application Status Updated", created_at=when, is_read=rng.random() < 0.6,
+                                            message=f"Your application for {company} has been updated to: {status_label(step)}.",
+                                            related_application_id=application.id))
+                previous = step
+            if status == "approved":
+                event(application, when, admin, "account_activated", summary="Supplier account activated automatically on approval",
+                      changes=[{"field": "Account", "old": "Inactive", "new": "Active"}])
+                approved.append((user, category, when))
+        application.status = status
+        application.updated_at = min(when, now)
+
+    # Inventory for approved suppliers.
+    products = []
+    for user, category, approved_at in approved:
+        for name, price, unit in rng.sample(DEMO_PRODUCTS[category], min(len(DEMO_PRODUCTS[category]), rng.randint(2, 4))):
+            product = Product(user_id=user.id, name=name, category=category, unit=unit,
+                              description=f"{name} supplied by {user.company_name}, {rng.choice(['delivered', 'available'])} across {rng.choice(['the metro', 'the province', 'KZN', 'Gauteng'])}.",
+                              price=Decimal(price) * Decimal(rng.choice(["0.9", "1", "1", "1.1", "1.15"])),
+                              quantity_available=rng.choice([None, None, 0, 2, 5, 10, 25]) if unit == "each" else None,
+                              lead_time_days=rng.randint(1, 7), is_listed=rng.random() < 0.9,
+                              created_at=approved_at + timedelta(days=rng.randint(0, 5)))
+            product.price = product.price.quantize(Decimal("1"))
+            DB.session.add(product)
+            products.append((product, approved_at))
+    DB.session.flush()
+
+    # Product requests spread over the period after each supplier was approved.
+    request_status_pool = ["completed"] * 8 + ["delivered"] * 3 + ["accepted"] * 3 + ["requested"] * 3 + ["declined", "cancelled"]
+    locations = ["Icebolethu Durban branch, 12 Smith St", "Icebolethu Pietermaritzburg branch", "Icebolethu Johannesburg office",
+                 "Family home, Umlazi", "Community hall, KwaMashu", "Gravesite, Chesterville cemetery"]
+    created_requests = 0
+    for _ in range(request_count if products else 0):
+        product, approved_at = rng.choice(products)
+        start_at = max(approved_at + timedelta(days=1), period_start)
+        if start_at >= now:
+            continue
+        created = start_at + timedelta(seconds=rng.randint(0, int((now - start_at).total_seconds())))
+        admin = rng.choice(admins)
+        status = rng.choice(request_status_pool)
+        product_request = ProductRequest(
+            product_id=product.id, supplier_id=product.user_id, admin_id=admin.id, product_name=product.name, unit=product.unit,
+            unit_price=product.price, quantity=rng.randint(1, 3 if product.unit == "each" else 2),
+            required_by=(created + timedelta(days=rng.randint(3, 14))).date(), delivery_location=rng.choice(locations),
+            notes=rng.choice(["", "Service on Saturday morning.", "Please confirm delivery time with the family.", "Urgent: needed by Friday."]),
+            status=status, created_at=created, updated_at=created,
+        )
+        DB.session.add(product_request)
+        DB.session.flush()
+        supplier = product_request.supplier
+
+        def req_event(when, actor, action, note="", frm=None, to=None):
+            DB.session.add(ProductRequestEvent(
+                request_id=product_request.id, created_at=when, actor_type="admin" if isinstance(actor, Admin) else "supplier",
+                actor_name=(actor.name if isinstance(actor, Admin) else actor.contact_name) or actor.email,
+                action=action, note=note, from_status=frm, to_status=to))
+
+        req_event(created, admin, "requested", product_request.notes, to="requested")
+        when = created
+        steps = {"accepted": [("accept", "requested", "accepted")], "declined": [("decline", "requested", "declined")],
+                 "delivered": [("accept", "requested", "accepted"), ("deliver", "accepted", "delivered")],
+                 "completed": [("accept", "requested", "accepted"), ("deliver", "accepted", "delivered"), ("complete", "delivered", "completed")],
+                 "cancelled": [("accept", "requested", "accepted"), ("cancel", "accepted", "cancelled")]}.get(status, [])
+        for action, frm, to in steps:
+            when = min(when + timedelta(hours=rng.randint(2, 48)), now)
+            actor = admin if action in {"complete", "cancel"} else supplier
+            note = {"accept": rng.choice(["", "Confirmed, will deliver on time.", "Available, delivery Friday morning."]),
+                    "decline": "Fully booked on that date, sorry.", "deliver": rng.choice(["Delivered and signed for.", "Set up on site."]),
+                    "cancel": "Family changed the service date.", "complete": ""}[action]
+            if action == "decline":
+                product_request.supplier_note = note
+            elif note and action in {"accept", "deliver"}:
+                product_request.supplier_note = note
+            req_event(when, actor, action, note, frm, to)
+        if status in {"completed", "delivered", "accepted"} and rng.random() < 0.6:
+            req_event(min(when + timedelta(hours=1), now), admin, "quotation", "Quotation downloaded as PDF")
+        product_request.updated_at = when
+        created_requests += 1
+
+    DB.session.commit()
+    click.echo(f"Created {len(created_users)} demo suppliers ({len(approved)} approved, {len(products)} products) "
+               f"and {created_requests} product requests over the last {months} months.")
+    click.echo(f"Demo supplier logins: <company>@{DEMO_EMAIL_DOMAIN} / Password123!   Remove with: flask --app app seed-demo --remove")
 
 
 init_database()
 
 
 if __name__ == "__main__":
-    app.run(debug=True) 
+    app.run(debug=env_flag("FLASK_DEBUG"), host=os.getenv("HOST", "127.0.0.1"), port=int(os.getenv("PORT", "5000")))

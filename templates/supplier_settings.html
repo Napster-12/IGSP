@@ -1,91 +1,79 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Settings | IGSP</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
-</head>
-<body class="dashboard-body">
-    <div class="dashboard-shell">
-        <aside class="dashboard-sidebar">
-            <div class="sidebar-brand">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
-            </div>
+{% extends "supplier_base.html" %}
 
-            <div class="sidebar-menu-block">
-                <div class="sidebar-menu-label">Supplier Dashboard</div>
-                <a href="{{ url_for('dashboard') }}" class="sidebar-btn">Dashboard</a>
-                <a href="{{ url_for('supplier_settings') }}" class="sidebar-btn">Settings</a>
-            </div>
-        </aside>
+{% block title %}Settings{% endblock %}
+{% block page_title %}Settings{% endblock %}
+{% block page_subtitle %}Manage your account details and password{% endblock %}
 
-        <main class="dashboard-main">
-            <header class="dashboard-header">
-                <div class="dashboard-profile-summary">
-                    <div class="dashboard-profile-name">{{ user.contact_name or user.company_name }}</div>
-                    <div class="dashboard-profile-role">Supplier</div>
-                    <div class="dashboard-status">
-                        {% if user.active %}
-                            <span class="status-badge active">Active</span>
-                        {% else %}
-                            <span class="status-badge inactive">Inactive</span>
-                        {% endif %}
+{% block content %}
+    <div class="ad-grid ad-grid--2">
+        <section class="ad-card">
+            <div class="ad-card-head">
+                <div><h2>Account details</h2><p>Used to pre-fill your application</p></div>
+            </div>
+            <form class="ad-form" method="post" action="{{ url_for('update_contact_details') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="ad-form-grid ad-form-grid--2">
+                    <div class="ad-field-row">
+                        <label>Supplier ID</label>
+                        <input type="text" value="{{ user.supplier_id or '—' }}" readonly>
+                    </div>
+                    <div class="ad-field-row">
+                        <label>Login email</label>
+                        <input type="email" value="{{ user.email }}" readonly>
+                    </div>
+                    <div class="ad-field-row ad-field-row--wide">
+                        <label for="company_name">Company name <span class="req">*</span></label>
+                        <input id="company_name" name="company_name" type="text" value="{{ user.company_name }}" required>
+                    </div>
+                    <div class="ad-field-row">
+                        <label for="contact_name">Contact person <span class="req">*</span></label>
+                        <input id="contact_name" name="contact_name" type="text" value="{{ user.contact_name }}" required>
+                    </div>
+                    <div class="ad-field-row">
+                        <label for="phone">Phone number <span class="req">*</span></label>
+                        <input id="phone" name="phone" type="tel" value="{{ user.phone }}" required>
+                    </div>
+                    <div class="ad-field-row ad-field-row--wide">
+                        <label for="address">Address</label>
+                        <input id="address" name="address" type="text" value="{{ user.address }}">
                     </div>
                 </div>
+                <div class="ad-form-actions"><button type="submit" class="ad-btn ad-btn--primary">Save details</button></div>
+            </form>
+        </section>
 
-                <div class="dashboard-actions">
-                    <a href="{{ url_for('notifications') }}" class="dashboard-notification" aria-label="Notifications">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
-                        </svg>
-                        {% if unread_notifications > 0 %}
-                            <span class="notification-badge">{{ unread_notifications }}</span>
-                        {% endif %}
-                    </a>
-                    <a class="dashboard-logout" href="{{ url_for('logout') }}">Logout</a>
+        <div class="ad-stack">
+            <section class="ad-card">
+                <div class="ad-card-head">
+                    <div><h2>Change password</h2><p>At least 8 characters, including a number and a special character</p></div>
                 </div>
-            </header>
-
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-
-            <section class="dashboard-panel">
-                <div class="panel-head">
-                    <h3>Settings</h3>
-                </div>
-
-                <div class="settings-grid">
-                    <div class="settings-card">
-                        <div class="settings-card-header">
-                            <div>
-                                <h4>Two-Factor Authentication</h4>
-                                {% if two_fa %}
-                                    <span class="status-badge active" style="margin-top:6px; display:inline-block;">Enabled</span>
-                                    <p style="margin-top:8px; color:var(--text-light);">Your account is protected with 2FA.</p>
-                                {% else %}
-                                    <span class="status-badge inactive" style="margin-top:6px; display:inline-block;">Not Enabled</span>
-                                    <p style="margin-top:8px; color:var(--text-light);">Add an extra layer of security to your account.</p>
-                                {% endif %}
-                            </div>
+                <form class="ad-form" method="post" action="{{ url_for('change_password') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="ad-field-row">
+                        <label for="current_password">Current password</label>
+                        <input id="current_password" name="current_password" type="password" autocomplete="current-password" required>
+                    </div>
+                    <div class="ad-form-grid ad-form-grid--2">
+                        <div class="ad-field-row">
+                            <label for="new_password">New password</label>
+                            <input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="8" required>
                         </div>
-                        <a href="{{ url_for('supplier_setup_2fa') }}" class="dashboard-cta" style="display:inline-flex; margin-top:12px;">
-                            {{ 'Manage 2FA' if two_fa else 'Enable 2FA' }}
-                        </a>
+                        <div class="ad-field-row">
+                            <label for="confirm_password">Confirm new password</label>
+                            <input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="8" required>
+                        </div>
                     </div>
-                </div>
+                    <div class="ad-form-actions"><button type="submit" class="ad-btn ad-btn--primary">Update password</button></div>
+                </form>
             </section>
-        </main>
-    </div>
 
-    <footer class="footer">
-        <p>NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
-    </footer>
-</body>
-</html>
+            <section class="ad-card">
+                <div class="ad-card-head"><h2>Account status</h2></div>
+                <dl class="ad-fields ad-fields--1">
+                    <div class="ad-field"><dt>Email</dt><dd>{% if user.email_verified %}<span class="ad-badge ad-badge--active">Verified</span>{% else %}<span class="ad-badge ad-badge--inactive">Not verified</span>{% endif %}</dd></div>
+                    <div class="ad-field"><dt>Supplier account</dt><dd>{% if user.active %}<span class="ad-badge ad-badge--active">Active</span>{% else %}<span class="ad-badge ad-badge--inactive">Inactive</span> <span class="ad-muted">· activated when your application is approved</span>{% endif %}</dd></div>
+                </dl>
+            </section>
+        </div>
+    </div>
+{% endblock %}

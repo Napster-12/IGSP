@@ -24,7 +24,7 @@
                 {% endif %}
             {% endwith %}
 
-            <form class="igsp-form auth-form" method="post" action="{{ url_for('signup') }}">
+            <form class="igsp-form auth-form" method="post" action="{{ url_for('signup') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <label for="company_name">Company Name</label>
                 <input id="company_name" name="company_name" type="text" placeholder="Enter your company name" required>
 
@@ -47,6 +47,7 @@
                         </svg>
                     </button>
                 </div>
+                <small class="password-requirements">Must be 8+ characters, include a number and a special character</small>
 
                 <label for="confirm_password">Verify Password</label>
                 <div class="password-field">

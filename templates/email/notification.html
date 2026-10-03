@@ -1,0 +1,25 @@
+{% extends "email/base.html" %}
+{% block content %}
+    <h2>Hello {{ recipient_name }},</h2>
+    <p>{{ message }}</p>
+    {% if application %}
+    <div class="content-box">
+        <p><strong>Company:</strong> {{ application.company_name }}</p>
+        <p><strong>Contact:</strong> {{ application.contact_name }}</p>
+        <p><strong>Status:</strong> <span class="badge badge-{{ application.status }}">{{ application.status|replace('_', ' ')|title }}</span></p>
+        <p><strong>Submitted:</strong> {{ application.created_at.strftime('%Y-%m-%d') if application.created_at else 'N/A' }}</p>
+        {% if application.review_comments %}
+        <p><strong>Review Comments:</strong> {{ application.review_comments }}</p>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% if action_url %}
+    <p style="margin:24px 0;">
+        <a href="{{ action_url }}" style="display:inline-block; background:#F26522; color:#ffffff; text-decoration:none; padding:12px 22px; border-radius:6px; font-weight:bold;">{{ action_label or 'Open IGSP' }}</a>
+    </p>
+    <p style="font-size:12px; color:#6E696A;">If the button doesn't work, copy this link into your browser:<br>{{ action_url }}</p>
+    {% endif %}
+    <div class="meta">
+        <p>Thank you,<br>IGSP Team</p>
+    </div>
+{% endblock %}

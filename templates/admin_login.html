@@ -2,589 +2,71 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>Sign in | IGSP</title>
-
-    <style>
-        * {
-            box-sizing: border-box;
-        }
-
-        html,
-        body {
-            margin: 0;
-            min-height: 100%;
-            font-family: Arial, Helvetica, sans-serif;
-        }
-
-        body {
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            color: #202936;
-
-            background:
-                radial-gradient(
-                    ellipse at 88% 4%,
-                    rgba(255, 246, 174, 0.95) 0%,
-                    rgba(255, 246, 174, 0.65) 12%,
-                    transparent 35%
-                ),
-                radial-gradient(
-                    ellipse at 76% 2%,
-                    rgba(214, 191, 239, 0.9) 0%,
-                    rgba(214, 191, 239, 0.55) 28%,
-                    transparent 48%
-                ),
-                linear-gradient(
-                    36deg,
-                    #cfd6ea 0%,
-                    #e2e2e2 36%,
-                    #e8e8e8 65%,
-                    #eeeeee 100%
-                );
-        }
-
-        /* Decorative background shapes */
-
-        body::before {
-            content: "";
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 48%;
-            height: 100%;
-            background: linear-gradient(
-                135deg,
-                rgba(255,255,255,0.8) 0%,
-                rgba(255,255,255,0.7) 42%,
-                rgba(214,207,235,0.7) 42%,
-                rgba(214,207,235,0.5) 100%
-            );
-            clip-path: polygon(
-                0 0,
-                100% 0,
-                100% 55%,
-                0 15%
-            );
-            z-index: -1;
-        }
-
-        body::after {
-            content: "";
-            position: fixed;
-            right: -8%;
-            bottom: -5%;
-            width: 38%;
-            height: 35%;
-            border-radius: 30px 0 0 0;
-            background: rgba(210, 202, 241, 0.45);
-            z-index: -1;
-        }
-
-        .login-wrapper {
-            width: 100%;
-            min-height: 100vh;
-
-            display: flex;
-            justify-content: center;
-            align-items: center;
-
-            padding: 30px;
-        }
-
-        .login-card {
-            width: 450px;
-            max-width: 100%;
-
-            padding: 34px 26px 30px;
-
-            background: rgba(255, 255, 255, 0.93);
-
-            border: 1px solid #c4c8ce;
-            border-radius: 10px;
-
-            box-shadow:
-                0 4px 14px rgba(0, 0, 0, 0.08);
-        }
-
-        .login-card h1 {
-            margin: 0 0 30px;
-
-            font-size: 29px;
-            font-weight: 700;
-            color: #202936;
-        }
-
-        .login-section h2 {
-            margin: 0 0 16px;
-
-            font-size: 18px;
-            font-weight: 700;
-
-            color: #252e3b;
-        }
-
-        /* Azure AD Button */
-
-        .azure-login-btn {
-            width: 100%;
-            height: 44px;
-
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 9px;
-
-            border: 2px solid #59616b;
-            border-radius: 9px;
-
-            background: #ffffff;
-
-            color: #56606c;
-
-            text-decoration: none;
-
-            font-size: 16px;
-            font-weight: 600;
-
-            cursor: pointer;
-
-            transition: 0.2s ease;
-        }
-
-        .azure-login-btn:hover {
-            background: #f5f7f9;
-            border-color: #303841;
-        }
-
-        .azure-icon {
-            width: 20px;
-            height: 20px;
-
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .azure-icon svg {
-            width: 20px;
-            height: 20px;
-        }
-
-        /* Divider */
-
-        .login-divider {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-
-            margin: 30px 0;
-        }
-
-        .login-divider .line {
-            flex: 1;
-            height: 1px;
-
-            background: #d7dbe0;
-        }
-
-        .login-divider span:not(.line) {
-            font-size: 16px;
-            color: #56606c;
-        }
-
-        /* Form */
-
-        .login-form {
-            width: 100%;
-        }
-
-        .input-group {
-            margin-bottom: 18px;
-        }
-
-        .input-group label {
-            display: block;
-
-            margin-bottom: 8px;
-
-            font-size: 16px;
-            font-weight: 700;
-
-            color: #303946;
-        }
-
-        .input-group input {
-            width: 100%;
-            height: 43px;
-
-            padding: 0 14px;
-
-            border: 1.8px solid #aeb5bd;
-            border-radius: 9px;
-
-            background: #ffffff;
-
-            color: #202936;
-
-            font-size: 16px;
-
-            outline: none;
-
-            transition: 0.2s ease;
-        }
-
-        .input-group input::placeholder {
-            color: #737d89;
-            font-style: italic;
-        }
-
-        .input-group input:focus {
-            border: 2px solid #2a6eae;
-
-            box-shadow:
-                0 0 0 2px rgba(42, 110, 174, 0.10);
-        }
-
-        /* Password Field */
-
-        .password-wrapper {
-            position: relative;
-        }
-
-        .password-wrapper input {
-            padding-right: 48px;
-        }
-
-        .password-toggle {
-            position: absolute;
-
-            top: 50%;
-            right: 12px;
-
-            transform: translateY(-50%);
-
-            width: 32px;
-            height: 32px;
-
-            display: flex;
-            align-items: center;
-            justify-content: center;
-
-            border: none;
-            background: transparent;
-
-            color: #66707c;
-
-            cursor: pointer;
-        }
-
-        .password-toggle:hover {
-            color: #2367a8;
-        }
-
-        /* Login Button */
-
-        .next-btn {
-            width: 100%;
-            height: 46px;
-
-            margin-top: 4px;
-
-            border: none;
-            border-radius: 8px;
-
-            background: #2468aa;
-
-            color: #ffffff;
-
-            font-size: 17px;
-            font-weight: 700;
-
-            cursor: pointer;
-
-            transition: 0.2s ease;
-        }
-
-        .next-btn:hover {
-            background: #1b578f;
-        }
-
-        .next-btn:active {
-            transform: translateY(1px);
-        }
-
-        /* Footer */
-
-        .create-account {
-            margin-top: 16px;
-
-            text-align: center;
-
-            font-size: 16px;
-
-            color: #65707c;
-        }
-
-        .create-account a {
-            margin-left: 4px;
-
-            color: #275f99;
-
-            text-decoration: none;
-
-            font-weight: 500;
-        }
-
-        .create-account a:hover {
-            text-decoration: underline;
-        }
-
-        /* Mobile */
-
-        @media (max-width: 600px) {
-
-            body {
-                overflow-y: auto;
-            }
-
-            .login-wrapper {
-                padding: 20px;
-            }
-
-            .login-card {
-                width: 100%;
-                padding: 28px 20px;
-            }
-
-            .login-card h1 {
-                font-size: 26px;
-            }
-        }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin Sign In | IGSP</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
 </head>
-
-<body>
-
-    <main class="login-wrapper">
-
-        <section class="login-card">
-
-            <h1>Sign in</h1>
-
-
-            <!-- WITH OTHER ACCOUNTS -->
-
-            <div class="login-section">
-
-                <h2>With other accounts</h2>
-
-                <a href="#" class="azure-login-btn">
-
-                    <span class="azure-icon">
-
-                        <svg viewBox="0 0 24 24"
-                             xmlns="http://www.w3.org/2000/svg">
-
-                            <path d="M1 1h10v10H1z"
-                                  fill="#f35325"/>
-
-                            <path d="M13 1h10v10H13z"
-                                  fill="#81bc06"/>
-
-                            <path d="M1 13h10v10H1z"
-                                  fill="#05a6f0"/>
-
-                            <path d="M13 13h10v10H13z"
-                                  fill="#ffba08"/>
-
-                        </svg>
-
-                    </span>
-
-                    Continue with AzureAD
-
-                </a>
-
+<body class="ad-login-body">
+    <main class="ad-login">
+        <section class="ad-login-brand" aria-hidden="true">
+            <img src="{{ url_for('static', filename='images/logo.png') }}" alt="">
+            <div>
+                <h2>Supplier Portal</h2>
+                <p>Review supplier applications, manage supplier accounts and track onboarding across Icebolethu Group.</p>
             </div>
-
-
-            <!-- DIVIDER -->
-
-            <div class="login-divider">
-
-                <span class="line"></span>
-
-                <span>Or</span>
-
-                <span class="line"></span>
-
-            </div>
-
-
-            <!-- EXISTING ACCOUNT -->
-
-            <div class="login-section">
-
-                <h2></h2>
-
-                {% if login_error %}
-                    <div class="flash-message flash-error">{{ login_error }}</div>
-                {% endif %}
-
-                {% with messages = get_flashed_messages(with_categories=true) %}
-                    {% if messages %}
-                        {% for category, message in messages %}
-                            <div class="flash-message flash-{{ category }}">{{ message }}</div>
-                        {% endfor %}
-                    {% endif %}
-                {% endwith %}
-
-                <form class="login-form" action="{{ url_for('admin_login') }}" method="post">
-
-
-                    <!-- USERNAME -->
-
-                    <div class="input-group">
-
-                    <label for="email">
-                        Email Address
-                    </label>
-
-                    <input
-                        type="email"
-                        id="email"
-                        name="email"
-                        placeholder=""
-                        required
-                    >
-
-                    </div>
-
-
-                    <!-- PASSWORD -->
-
-                    <div class="input-group">
-
-                        <label for="password">
-                            Password
-                        </label>
-
-                        <div class="password-wrapper">
-
-                            <input
-                                type="password"
-                                id="password"
-                                name="password"
-                                placeholder=""
-                                required
-                            >
-
-                            <button
-                                type="button"
-                                class="password-toggle"
-                                id="togglePassword"
-                                aria-label="Show password"
-                            >
-
-                                <svg
-                                    id="eyeIcon"
-                                    width="19"
-                                    height="19"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                >
-
-                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"></path>
-
-                                    <circle cx="12"
-                                            cy="12"
-                                            r="3"></circle>
-
-                                </svg>
-
-                            </button>
-
-                        </div>
-
-                    </div>
-
-
-                    <!-- LOGIN BUTTON -->
-
-                    <button
-                        type="submit"
-                        class="next-btn"
-                    >
-                        Login
-                    </button>
-
-
-                </form>
-
-            </div>
-
-
-            <!-- CREATE ACCOUNT -->
-
-            <div class="create-account">
-
-                <span>New user?</span>
-
-                <a href="#">
-                    Create an account
-                </a>
-
-            </div>
-
-
+            <span class="ad-login-foot">Icebolethu Group · Administration</span>
         </section>
 
+        <section class="ad-login-panel">
+            <img class="ad-login-logo" src="{{ url_for('static', filename='images/logo.png') }}" alt="Icebolethu Group">
+            <h1>Admin sign in</h1>
+            <p class="ad-login-lead">For Icebolethu Group staff only.</p>
+
+            {% if login_error %}
+                <div class="ad-flash ad-flash--error" role="alert">{{ login_error }}</div>
+            {% endif %}
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                    <div class="ad-flash ad-flash--{{ category }}" role="status">{{ message }}</div>
+                {% endfor %}
+            {% endwith %}
+
+            {% if MICROSOFT_CLIENT_ID %}
+                <a href="{{ url_for('admin_login_microsoft') }}" class="ad-btn ad-btn--ghost ad-btn--block ad-btn--lg">
+                    <svg width="18" height="18" viewBox="0 0 23 23" aria-hidden="true"><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
+                    Sign in with Microsoft
+                </a>
+                <div class="ad-divider"><span>or use your password</span></div>
+            {% endif %}
+
+            <form class="ad-form" action="{{ url_for('admin_login') }}" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                <label for="email">Work email</label>
+                <input id="email" name="email" type="email" placeholder="name@icebolethu.co.za" autocomplete="username" required autofocus>
+
+                <label for="password">Password</label>
+                <div class="ad-password">
+                    <input id="password" name="password" type="password" autocomplete="current-password" required>
+                    <button type="button" class="ad-password-toggle" aria-label="Show password" aria-pressed="false">Show</button>
+                </div>
+
+                <button type="submit" class="ad-btn ad-btn--primary ad-btn--block ad-btn--lg">Sign in</button>
+            </form>
+
+            <p class="ad-login-alt">Are you a supplier? <a href="{{ url_for('login') }}">Supplier login</a></p>
+        </section>
     </main>
 
-
     <script>
-
-        const passwordInput =
-            document.getElementById("password");
-
-        const togglePassword =
-            document.getElementById("togglePassword");
-
-
-        togglePassword.addEventListener("click", function () {
-
-            if (passwordInput.type === "password") {
-
-                passwordInput.type = "text";
-
-                this.setAttribute(
-                    "aria-label",
-                    "Hide password"
-                );
-
-            } else {
-
-                passwordInput.type = "password";
-
-                this.setAttribute(
-                    "aria-label",
-                    "Show password"
-                );
-
-            }
-
+        document.querySelector('.ad-password-toggle').addEventListener('click', function () {
+            var input = document.getElementById('password');
+            var show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+            this.textContent = show ? 'Hide' : 'Show';
+            this.setAttribute('aria-pressed', show ? 'true' : 'false');
+            this.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
         });
-
     </script>
-
 </body>
 </html>

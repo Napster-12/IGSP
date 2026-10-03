@@ -1,184 +1,54 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Supplier Documents | IGSP</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
-</head>
-<body class="dashboard-body">
-    <div class="dashboard-shell">
-        <aside class="dashboard-sidebar">
-            <div class="sidebar-brand">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
+{% extends "supplier_base.html" %}
+{% import "form_macros.html" as f with context %}
+
+{% block title %}Apply — Documents{% endblock %}
+{% block page_title %}Supplier application{% endblock %}
+{% block page_subtitle %}Step 3 of 4 · Upload your compliance documents (PDF only){% endblock %}
+
+{% block content %}
+    {{ f.steps(3) }}
+    {% set by_type = {} %}
+    {% for doc in documents %}{% set _ = by_type.update({doc.document_type: doc}) %}{% endfor %}
+    {% set required_docs = [
+        'CIPC Company Registration Document',
+        'Certified ID copies of all Directors',
+        'SARS VAT Certificate',
+        'Confirmation of Bank Account Letter (not older than 3 months)',
+        'Valid B-BBEE certificate, letter from Accountant or Sworn Affidavit',
+        'Proof of Company residential address (not older than 3 months)',
+        'Declaration Form',
+    ] %}
+    {% set uploaded_count = required_docs|select('in', by_type)|list|length %}
+
+    <form class="ad-form ad-stack" method="post" action="{{ url_for('onboarding_documents') }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <section class="ad-card">
+            <div class="ad-card-head">
+                <div><h2>Required documents</h2><p>{{ uploaded_count }} of {{ required_docs|length }} uploaded</p></div>
             </div>
-
-            <div class="sidebar-menu-block">
-                <div class="sidebar-menu-label">Supplier Dashboard</div>
-                <a href="{{ url_for('onboarding_profile') }}" class="sidebar-btn">Apply</a>
-                <a href="{{ url_for('dashboard') }}" class="sidebar-btn">View Applications</a>
+            <div class="ad-meter ad-meter--sm" aria-hidden="true"><span style="width: {{ (uploaded_count / required_docs|length * 100)|round }}%"></span></div>
+            <div class="ad-slots ad-mt">
+                {% for doc_type in required_docs %}
+                    {% if doc_type == 'Declaration Form' %}
+                        {% set help %}Download the <a href="{{ url_for('static', filename='Declaration.pdf') }}" target="_blank" rel="noopener" class="ad-link">declaration form</a>, print, sign and upload it.{% endset %}
+                    {% else %}
+                        {% set help = '' %}
+                    {% endif %}
+                    {{ f.document_slot('document_file_' ~ loop.index, doc_type, by_type.get(doc_type), number=loop.index, help=help) }}
+                {% endfor %}
             </div>
-        </aside>
+        </section>
 
-        <main class="dashboard-main">
-            <header class="dashboard-header">
-                <div class="dashboard-profile-summary">
-                    <div class="dashboard-profile-name">{{ user.contact_name or user.company_name }}</div>
-                    <div class="dashboard-profile-role">Supplier</div>
-                </div>
+        <section class="ad-card">
+            <div class="ad-card-head">
+                <div><h2>Other supporting documents</h2><p>Optional — e.g. public liability insurance, industry licence or accreditation, COIDA letter of good standing</p></div>
+            </div>
+            {{ f.document_slot('document_file_other', 'Other supporting documents', by_type.get('Other Supporting Documents'), number='+', required=false) }}
+        </section>
 
-                <div class="dashboard-actions">
-                    <a href="{{ url_for('notifications') }}" class="dashboard-notification" aria-label="Notifications">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
-                        </svg>
-                        {% if unread_notifications > 0 %}
-                            <span class="notification-badge">{{ unread_notifications }}</span>
-                        {% endif %}
-                    </a>
-                    <a class="dashboard-logout" href="{{ url_for('logout') }}">Logout</a>
-                </div>
-            </header>
-
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-
-            <section class="dashboard-form-panel">
-                <div class="panel-head">
-                    <h3>Step 4: Upload Required Compliance Documents</h3>
-                    <span>Attach the following documents to complete your application</span>
-                </div>
-
-                <div class="wizard-progress">
-                    <div class="wizard-progress-track"></div>
-                    <div class="wizard-pill done">1. Profile</div>
-                    <div class="wizard-pill done">2. Category</div>
-                    <div class="wizard-pill active">3. Documents</div>
-                    <div class="wizard-pill">4. Review</div>
-                </div>
-
-                <form class="igsp-form dashboard-form" method="post" action="{{ url_for('onboarding_documents') }}" enctype="multipart/form-data">
-                    <div class="documents-grid">
-                    {% set doc_types = [
-                        'CIPC Company Registration Document',
-                        'Certified ID copies of all Directors',
-                        'SARS VAT Certificate',
-                        'Confirmation of Bank Account Letter (not older than 3 months)',
-                        'Valid B-BBEE certificate, letter from Accountant or Sworn Affidavit',
-                        'Proof of Company residential address (not older than 3 months)'
-                    ] %}
-                        {% for doc_type in doc_types %}
-                            {% set uploaded = documents | selectattr('document_type', 'equalto', doc_type) | list %}
-                            <div class="document-card">
-                                <div class="document-card-header">
-                                    <span class="document-number">{{ loop.index }}</span>
-                                    <h4>{{ doc_type }}</h4>
-                                </div>
-                                {% if uploaded %}
-                                    <div class="document-uploaded">
-                                        <span class="document-status-badge">Uploaded</span>
-                                        <a href="javascript:void(0);" class="document-view-link" onclick="togglePdf(this); return false;">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                                    </a>
-                                    <iframe src="/uploads/{{ uploaded[0].file_path|replace('\\', '/') }}#toolbar=0&navpanes=0" class="pdf-viewer"></iframe>
-                                    </div>
-                                {% endif %}
-                                <div class="document-file-input">
-                                    <input type="file" name="document_file_{{ loop.index }}" id="doc-{{ loop.index }}">
-                                    <label for="doc-{{ loop.index }}" class="document-file-label">{{ 'Replace File' if uploaded else 'Choose File' }}</label>
-                                    <span class="document-selected-name">{{ uploaded[0].original_filename if uploaded else 'No file chosen' }}</span>
-                                </div>
-                            </div>
-                        {% endfor %}
-                    </div>
-
-                    <div class="document-card" style="margin-top:18px; border-left:4px solid var(--primary);">
-                        <div class="document-card-header">
-                            <span class="document-number">7</span>
-                            <h4>Declaration Form</h4>
-                        </div>
-                        <p style="color:var(--text-light); font-size:14px; margin-bottom:12px;">
-                            Download, print, sign, and upload the completed declaration form.
-                            <a href="/static/Declaration.pdf" target="_blank" rel="noopener" style="color:var(--primary); font-weight:700; text-decoration:underline;">Download Declaration Form</a>
-                        </p>
-                        {% set uploaded_declaration = documents | selectattr('document_type', 'equalto', 'Declaration Form') | list %}
-                        {% if uploaded_declaration %}
-                            <div class="document-uploaded">
-                                <span class="document-status-badge">Uploaded</span>
-                                <a href="javascript:void(0);" class="document-view-link" onclick="togglePdf(this); return false;">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                            </a>
-                            <iframe src="/uploads/{{ uploaded_declaration[0].file_path|replace('\\', '/') }}#toolbar=0&navpanes=0" class="pdf-viewer"></iframe>
-                            </div>
-                        {% endif %}
-                        <div class="document-file-input">
-                            <input type="file" name="document_file_7" id="doc-7">
-                            <label for="doc-7" class="document-file-label">{{ 'Replace File' if uploaded_declaration else 'Choose File' }}</label>
-                                <span class="document-selected-name">{{ uploaded_declaration[0].original_filename if uploaded_declaration else 'No file chosen' }}</span>
-                        </div>
-                    </div>
-
-                    <div class="document-card" style="margin-top:18px; border-left:4px solid var(--primary);">
-                        <div class="document-card-header">
-                            <span class="document-number">*</span>
-                            <h4>Other Supporting Documents</h4>
-                        </div>
-                        <p style="color:var(--text-light); font-size:14px; margin-bottom:12px;">You may upload additional relevant documents such as:</p>
-                        <ul style="margin:0 0 14px 18px; color:var(--text-light); font-size:14px; line-height:1.7;">
-                            <li>Valid Public Liability Insurance, where applicable to the service provided</li>
-                            <li>Valid industry-specific license, permit, registration, accreditation or professional certificate, where required</li>
-                            <li>Valid COIDA / Workmen’s Compensation Letter of Good Standing</li>
-                        </ul>
-                        {% set uploaded_other = documents | selectattr('document_type', 'equalto', 'Other Supporting Documents') | list %}
-                        <div class="document-file-input">
-                            <input type="file" name="document_file_other" id="doc-other">
-                            <label for="doc-other" class="document-file-label">Choose File</label>
-                                <span class="document-selected-name">{{ uploaded_other[0].original_filename if uploaded_other else 'No file chosen' }}</span>
-                        </div>
-                    </div>
-
-                    <div class="wizard-actions">
-                        <a href="{{ url_for('onboarding_category') }}" class="filter-btn filter-btn-secondary">Back</a>
-                        <button type="submit" class="filter-btn">Continue</button>
-                    </div>
-                </form>
-            </section>
-        </main>
-    </div>
-
-    <script>
-        function togglePdf(link) {
-            var iframe = link.parentNode.querySelector('.pdf-viewer');
-            if (!iframe) return;
-            var eye = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
-            var eyeOff = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
-            if (iframe.style.display === 'none') {
-                iframe.style.display = 'block';
-                link.innerHTML = eyeOff;
-            } else {
-                iframe.style.display = 'none';
-                link.innerHTML = eye;
-            }
-        }
-        document.querySelectorAll('.document-file-input input[type="file"]').forEach(function (input) {
-            const selectedName = input.closest('.document-file-input').querySelector('.document-selected-name');
-            input.addEventListener('change', function () {
-                const file = this.files && this.files[0] ? this.files[0].name : 'No file chosen';
-                if (selectedName) {
-                    selectedName.textContent = file;
-                }
-            });
-        });
-    </script>
-
-    <footer class="footer">
-        <p>NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
-    </footer>
-</body>
-</html>
+        <div class="ad-form-actions ad-form-actions--sticky">
+            <a href="{{ url_for('onboarding_category') }}" class="ad-btn ad-btn--ghost">← Back</a>
+            <button type="submit" class="ad-btn ad-btn--primary">Upload &amp; continue to review →</button>
+        </div>
+    </form>
+{% endblock %}
