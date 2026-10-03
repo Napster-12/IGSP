@@ -1,0 +1,134 @@
+{#- Form building blocks shared by the supplier onboarding steps and the edit page.
+    Import with: {% import "form_macros.html" as f with context %} -#}
+{% import "admin_macros.html" as ad with context %}
+
+{% macro input(name, label, value='', required=false, type='text', wide=false, hint='', attrs='') -%}
+    <div class="ad-field-row{% if wide %} ad-field-row--wide{% endif %}">
+        <label for="{{ name }}">{{ label }}{% if required %} <span class="req">*</span>{% endif %}</label>
+        <input id="{{ name }}" name="{{ name }}" type="{{ type }}" value="{{ value or '' }}" {% if required %}required{% endif %} {{ attrs|safe }}>
+        {% if hint %}<small class="ad-hint">{{ hint }}</small>{% endif %}
+    </div>
+{%- endmacro %}
+
+{% macro province_select(value='') -%}
+    <div class="ad-field-row">
+        <label for="province">Province <span class="req">*</span></label>
+        <select id="province" name="province" required>
+            <option value="">Select province</option>
+            {% for province in PROVINCES %}
+                <option value="{{ province }}" {% if value == province %}selected{% endif %}>{{ province }}</option>
+            {% endfor %}
+        </select>
+    </div>
+{%- endmacro %}
+
+{# Wizard progress for the 4 onboarding steps. #}
+{% macro steps(current) -%}
+    {% set labels = ['Company profile', 'Category', 'Documents', 'Review & submit'] %}
+    <ol class="ad-steps" aria-label="Application progress">
+        {% for label in labels %}
+            {% set n = loop.index %}
+            <li class="ad-step{% if n < current %} is-done{% elif n == current %} is-current{% endif %}" {% if n == current %}aria-current="step"{% endif %}>
+                <span class="ad-step-dot">{% if n < current %}{{ ad.icon('check') }}{% else %}{{ n }}{% endif %}</span>
+                <span class="ad-step-label">{{ label }}</span>
+            </li>
+        {% endfor %}
+    </ol>
+{%- endmacro %}
+
+{# One document upload slot: shows what's uploaded and lets the supplier pick a (replacement) PDF. #}
+{% macro document_slot(field, title, doc=none, number='', required=true, help='') -%}
+    <div class="ad-slot{% if doc %} is-uploaded{% elif required %} is-missing{% endif %}">
+        <span class="ad-slot-num">{% if doc %}{{ ad.icon('check') }}{% else %}{{ number }}{% endif %}</span>
+        <div class="ad-slot-body">
+            <strong>{{ title }}{% if not required %} <span class="ad-muted">(optional)</span>{% endif %}</strong>
+            {% if help %}<span class="ad-slot-help">{{ help }}</span>{% endif %}
+            <span class="ad-slot-file" data-file-name>
+                {% if doc %}
+                    Uploaded: {{ doc.original_filename }} ·
+                    <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" target="_blank" rel="noopener" class="ad-link">View</a>
+                {% else %}
+                    {{ 'Not uploaded yet' }}
+                {% endif %}
+            </span>
+        </div>
+        <label class="ad-btn ad-btn--ghost ad-btn--sm ad-slot-btn" for="{{ field }}">{{ ad.icon('upload') }} {{ 'Replace' if doc else 'Choose PDF' }}</label>
+        <input type="file" id="{{ field }}" name="{{ field }}" accept="application/pdf,.pdf" class="ad-sr" data-file-input>
+    </div>
+{%- endmacro %}
+
+{# Category radio cards, grouped by section. `selected` is a list, `details` a dict. #}
+{% macro category_picker(selected=[], details={}) -%}
+    <div class="ad-categories">
+        {% for section in CATEGORY_SECTIONS %}
+            <fieldset class="ad-category-group">
+                <legend>{{ section.name|title if section.name.isupper() else section.name }}</legend>
+                <div class="ad-choices">
+                    {% for item in section['items'] %}
+                        <div class="ad-choice-wrap">
+                            <label class="ad-choice">
+                                <input type="radio" name="categories" value="{{ item.value }}" data-index="{{ item.index }}" required
+                                       {% if item.value in selected %}checked{% endif %}>
+                                <span>{{ item.label|replace(', please specify:', '')|replace(' please specify:', '') }}</span>
+                            </label>
+                            {% if item.specify %}
+                                <div class="ad-choice-detail" data-detail-for="{{ item.index }}" {% if item.value not in selected %}hidden{% endif %}>
+                                    <input type="text" name="category_detail_{{ item.index }}" value="{{ details.get(item.value, '') }}" placeholder="Please specify…" aria-label="Details for {{ item.value }}">
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            </fieldset>
+        {% endfor %}
+    </div>
+{%- endmacro %}
+
+{# Directors / shareholders table; rows added with the "Add" button (static/js/portal.js). #}
+{% macro directors_table(directors=[]) -%}
+    {% import '_macros.html' as ui with context %}
+    <div class="ad-table-wrap">
+        <table class="ad-table directors-table" id="directors-table">
+            <thead>
+                <tr>
+                    <th>Initials &amp; surname <span class="req">*</span></th>
+                    <th>Nationality <span class="req">*</span></th>
+                    <th>ID / passport number <span class="req">*</span></th>
+                    <th>Role <span class="req">*</span></th>
+                    <th><span class="ad-sr">Remove</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for director in directors or [{}] %}
+                    {% set i = loop.index0 %}
+                    <tr>
+                        <td><input type="text" name="director_initials_{{ i }}" value="{{ director.initials_surname or '' }}" placeholder="e.g. J. Dube" required></td>
+                        <td>{{ ui.nationality_select('director_nationality_' ~ i, director.nationality or '') }}</td>
+                        <td>{{ ui.director_id_input('director_id_' ~ i, director.id_number or '') }}</td>
+                        <td>{{ role_select('director_role_' ~ i, director.role or '') }}</td>
+                        <td class="ad-cell-action"><button type="button" class="ad-btn ad-btn--ghost ad-btn--sm" data-remove-row>Remove</button></td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <template id="director-row-template">
+        <tr>
+            <td><input type="text" name="director_initials_{INDEX}" placeholder="e.g. J. Dube" required></td>
+            <td>{{ ui.nationality_select('director_nationality_{INDEX}') }}</td>
+            <td>{{ ui.director_id_input('director_id_{INDEX}') }}</td>
+            <td>{{ role_select('director_role_{INDEX}') }}</td>
+            <td class="ad-cell-action"><button type="button" class="ad-btn ad-btn--ghost ad-btn--sm" data-remove-row>Remove</button></td>
+        </tr>
+    </template>
+    <button type="button" class="ad-btn ad-btn--ghost ad-mt" data-add-director>{{ ad.icon('plus') }} Add director / shareholder</button>
+{%- endmacro %}
+
+{% macro role_select(name, value='') -%}
+    <select name="{{ name }}" required>
+        <option value="">Select role</option>
+        {% for role in ['Director', 'Shareholder', 'Director & Shareholder'] %}
+            <option value="{{ role }}" {% if value == role %}selected{% endif %}>{{ role }}</option>
+        {% endfor %}
+    </select>
+{%- endmacro %}

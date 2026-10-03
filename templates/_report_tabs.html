@@ -1,0 +1,7 @@
+{#- Report switcher shown at the top of every report. Expects `report_kinds` and `kind`. -#}
+<nav class="ad-report-tabs" aria-label="Choose a report">
+    {% for key, label in report_kinds %}
+        <a href="{{ url_for('admin_reports') if key == 'applications' else url_for('admin_report', kind=key, period=period if period is defined else None) }}"
+           class="ad-report-tab{% if key == kind %} is-active{% endif %}" {% if key == kind %}aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+</nav>

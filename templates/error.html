@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }} | IGSP</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+</head>
+<body class="auth-body">
+    <div class="auth-shell">
+        <div class="auth-card" style="text-align:center;">
+            <div class="auth-brand">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
+            </div>
+
+            <h1>{{ code }} — {{ title }}</h1>
+            <p class="auth-lead">
+                {% if code == 404 %}
+                    The page or document you're looking for doesn't exist, or you don't have access to it.
+                {% else %}
+                    {{ description }}
+                {% endif %}
+            </p>
+
+            <p class="auth-footer-text"><a href="{{ url_for('home') }}">Go to the home page</a></p>
+        </div>
+    </div>
+</body>
+</html>

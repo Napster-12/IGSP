@@ -28,7 +28,7 @@
                 {% endif %}
             {% endwith %}
 
-            <form class="igsp-form auth-form" method="post" action="{{ url_for('login') }}">
+            <form class="igsp-form auth-form" method="post" action="{{ url_for('login') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <label for="email">Email Address</label>
                 <input id="email" name="email" type="email" placeholder="name@company.co.za" required>
 
@@ -42,6 +42,8 @@
                         </svg>
                     </button>
                 </div>
+
+                <p class="auth-footer-text" style="text-align:right; margin:4px 0 0;"><a href="{{ url_for('forgot_password') }}">Forgot password?</a></p>
 
                 <button type="submit">Login</button>
             </form>

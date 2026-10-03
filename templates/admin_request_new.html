@@ -1,0 +1,68 @@
+{% extends "admin_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+
+{% block title %}Request {{ product.name }}{% endblock %}
+{% block breadcrumb %}<a href="{{ url_for('admin_catalogue') }}" class="ad-crumb">{{ ad.icon('back') }} Catalogue</a>{% endblock %}
+{% block page_title %}Request {{ product.name }}{% endblock %}
+{% block page_subtitle %}From {{ product.supplier.company_name }}{% endblock %}
+
+{% block content %}
+    <div class="ad-detail">
+        <div class="ad-detail-main">
+            <form method="post" class="ad-card ad-form" id="requestForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="ad-card-head"><h2>Request details</h2></div>
+                <div class="ad-form-grid ad-form-grid--2">
+                    <div class="ad-field-row">
+                        <label for="quantity">Quantity ({{ product.unit }}) <span class="req">*</span></label>
+                        <input id="quantity" name="quantity" type="number" min="1" {% if product.quantity_available is not none %}max="{{ product.quantity_available }}"{% endif %} value="{{ form.get('quantity', 1) }}" required>
+                        {% if product.quantity_available is not none %}<small class="ad-hint">{{ product.quantity_available }} available</small>{% endif %}
+                    </div>
+                    <div class="ad-field-row">
+                        <label for="required_by">Needed by</label>
+                        <input id="required_by" name="required_by" type="date" value="{{ form.get('required_by', '') }}">
+                        {% if product.lead_time_days is not none %}<small class="ad-hint">Supplier lead time: {{ product.lead_time_days }} day{{ '' if product.lead_time_days == 1 else 's' }}</small>{% endif %}
+                    </div>
+                    <div class="ad-field-row ad-field-row--wide">
+                        <label for="delivery_location">Delivery location <span class="req">*</span></label>
+                        <input id="delivery_location" name="delivery_location" type="text" maxlength="255" value="{{ form.get('delivery_location', '') }}" placeholder="Branch or full address" required>
+                    </div>
+                    <div class="ad-field-row ad-field-row--wide">
+                        <label for="notes">Notes for the supplier</label>
+                        <textarea id="notes" name="notes" rows="4" placeholder="Anything the supplier needs to know: service date, contact on site, specifications…">{{ form.get('notes', '') }}</textarea>
+                    </div>
+                </div>
+                <div class="ad-form-actions">
+                    <a href="{{ url_for('admin_catalogue') }}" class="ad-btn ad-btn--ghost">Cancel</a>
+                    <button type="submit" class="ad-btn ad-btn--primary">Send request to supplier</button>
+                </div>
+            </form>
+        </div>
+        <aside class="ad-detail-side">
+            <section class="ad-card ad-decision">
+                <div class="ad-card-head"><h2>Summary</h2></div>
+                <dl class="ad-fields ad-fields--1">
+                    <div class="ad-field"><dt>Product</dt><dd>{{ product.name }}</dd></div>
+                    <div class="ad-field"><dt>Supplier</dt><dd>{{ product.supplier.company_name }}</dd></div>
+                    <div class="ad-field"><dt>Unit price</dt><dd>{{ product.price|zar }} {{ product.unit }}</dd></div>
+                </dl>
+                <div class="ad-total ad-total--block ad-mt"><span>Estimated total</span><strong id="estimate" data-unit-price="{{ product.price }}">{{ (product.price * (form.get('quantity', 1)|int or 1))|zar }}</strong></div>
+                <p class="ad-hint ad-mt">The supplier is notified by email and can accept or decline.</p>
+            </section>
+        </aside>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var qty = document.getElementById('quantity'), out = document.getElementById('estimate');
+        var unit = parseFloat(out.dataset.unitPrice) || 0;
+        function update() {
+            var total = unit * (parseInt(qty.value, 10) || 0);
+            out.textContent = 'R ' + total.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        qty.addEventListener('input', update);
+    })();
+</script>
+{% endblock %}

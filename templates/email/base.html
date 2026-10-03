@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ subject }}</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #F7F6F6;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            color: #231F20;
+            font-size: 15px;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+        .email-wrapper {
+            max-width: 600px;
+            margin: 40px auto;
+            background-color: #ffffff;
+            border-radius: 14px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+            border: 1px solid #E6E3E3;
+        }
+        .email-header {
+            background-color: #F26522;
+            padding: 24px 30px;
+            text-align: center;
+        }
+        .email-header h1 {
+            color: #ffffff;
+            font-size: 22px;
+            margin: 0;
+            font-weight: 700;
+        }
+        .logo {
+            width: 140px;
+            max-width: 100%;
+            height: auto;
+            margin-bottom: 8px;
+            display: block;
+        }
+        .email-body {
+            padding: 30px;
+        }
+        .email-body h2 {
+            color: #B4560C;
+            font-size: 18px;
+            margin: 0 0 16px 0;
+            font-weight: 700;
+        }
+        .email-body h3 {
+            color: #231F20;
+            font-size: 16px;
+            margin: 24px 0 12px 0;
+            font-weight: 700;
+        }
+        .email-body p {
+            margin: 0 0 12px 0;
+            color: #231F20;
+        }
+        .email-body .content-box {
+            background-color: #FEF1E6;
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin: 16px 0;
+            border-left: 4px solid #F26522;
+        }
+        .email-body .content-box p {
+            margin: 0 0 8px 0;
+            color: #231F20;
+        }
+        .email-body .content-box strong {
+            color: #231F20;
+        }
+        .email-body .meta {
+            font-size: 14px;
+            color: #6E696A;
+            margin-top: 16px;
+        }
+        .email-body .meta span {
+            display: block;
+            margin-bottom: 4px;
+        }
+        .email-footer {
+            background-color: #F7F6F6;
+            padding: 20px 30px;
+            text-align: center;
+            font-size: 13px;
+            color: #6E696A;
+            border-top: 1px solid #E6E3E3;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #ffffff;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .badge-draft { background-color: #6E696A; }
+        .badge-submitted { background-color: #231F20; }
+        .badge-pending_review { background-color: #FDD56E; color: #231F20; }
+        .badge-under_review { background-color: #F26522; }
+        .badge-approved { background-color: #28a745; }
+        .badge-declined { background-color: #dc3545; }
+        .badge-returned_for_update { background-color: #A8430F; }
+        .email-btn {
+            display: inline-block;
+            padding: 12px 24px;
+            border-radius: 10px;
+            background: linear-gradient(90deg, #F26522, #F08422);
+            color: #ffffff;
+            font-size: 15px;
+            font-weight: 700;
+            text-decoration: none;
+            text-align: center;
+            margin: 16px 0;
+        }
+        .email-btn:hover {
+            background: linear-gradient(90deg, #C9501A, #F26522);
+        }
+        .divider {
+            height: 1px;
+            background-color: #E6E3E3;
+            border: none;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-wrapper">
+        <div class="email-header">
+            <img src="{{ logo_url }}" alt="IGSP Logo" class="logo">
+            <h1>{{ subject }}</h1>
+        </div>
+        <div class="email-body">
+            {% block content %}{% endblock %}
+            <div class="email-footer">
+                <p style="margin-top: 8px; font-size: 12px;">This email was sent automatically. Please do not reply directly.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

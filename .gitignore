@@ -5,3 +5,10 @@ __pycache__/
 *.pyo
 venv/
 .venv/
+env/
+mysql_data/
+static/uploads/*
+!static/uploads/.gitkeep
+.kilo/
+instance/
+.pytest_cache/

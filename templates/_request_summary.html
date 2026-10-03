@@ -1,0 +1,37 @@
+{#- Product request details + history, shared by the supplier and admin request pages. Expects `req`. -#}
+{% import "admin_macros.html" as ad with context %}
+
+<section class="ad-card">
+    <div class="ad-card-head">
+        <div><h2>{{ req.quantity }} × {{ req.product_name }}</h2><p>{{ req.unit_price|zar }} {{ req.unit }}</p></div>
+        <div class="ad-total"><span>Total</span><strong>{{ req.total|zar }}</strong></div>
+    </div>
+    <dl class="ad-fields">
+        <div class="ad-field"><dt>Supplier</dt><dd>{{ req.supplier.company_name }} <span class="ad-muted ad-mono">{{ req.supplier.supplier_id or '' }}</span></dd></div>
+        <div class="ad-field"><dt>Requested by</dt><dd>{{ req.admin.name or req.admin.email }}, Icebolethu Group</dd></div>
+        <div class="ad-field"><dt>Requested on</dt><dd>{{ req.created_at.strftime('%d %b %Y, %H:%M') if req.created_at else '—' }}</dd></div>
+        <div class="ad-field"><dt>Needed by</dt><dd>{{ req.required_by.strftime('%d %b %Y') if req.required_by else 'No date given' }}</dd></div>
+        <div class="ad-field ad-field--wide"><dt>Delivery location</dt><dd>{{ req.delivery_location }}</dd></div>
+        {% if req.notes %}<div class="ad-field ad-field--wide"><dt>Notes from Icebolethu Group</dt><dd class="ad-prewrap">{{ req.notes }}</dd></div>{% endif %}
+        {% if req.supplier_note %}<div class="ad-field ad-field--wide"><dt>Supplier's note</dt><dd class="ad-prewrap">{{ req.supplier_note }}</dd></div>{% endif %}
+    </dl>
+</section>
+
+<section class="ad-card">
+    <div class="ad-card-head"><div><h2>History</h2><p>Times in UTC</p></div></div>
+    <ol class="ad-timeline">
+        {% for event in req.events %}
+            <li class="ad-event ad-event--{{ event.actor_type }}">
+                <span class="ad-event-dot" aria-hidden="true"></span>
+                <div class="ad-event-body">
+                    <div class="ad-event-head">
+                        <strong>{{ {'requested': 'Requested', 'accept': 'Accepted', 'decline': 'Declined', 'deliver': 'Marked delivered', 'complete': 'Completed', 'cancel': 'Cancelled', 'quotation': 'Quotation printed'}.get(event.action, event.action|capitalize) }}</strong>
+                        {% if event.to_status %}<span class="ad-event-status">{% if event.from_status %}{{ ad.status_badge(event.from_status) }} →{% endif %} {{ ad.status_badge(event.to_status) }}</span>{% endif %}
+                    </div>
+                    {% if event.note %}<p class="ad-event-summary ad-prewrap">{{ event.note }}</p>{% endif %}
+                    <p class="ad-event-meta"><span class="ad-actor ad-actor--{{ event.actor_type }}">{{ event.actor_type|capitalize }}</span> {{ event.actor_name }} · {{ event.created_at.strftime('%d %b %Y, %H:%M') if event.created_at else '' }}</p>
+                </div>
+            </li>
+        {% endfor %}
+    </ol>
+</section>

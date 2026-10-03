@@ -1,155 +1,104 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Application | IGSP</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
-</head>
-<body class="dashboard-body">
-    <div class="dashboard-shell">
-        <aside class="dashboard-sidebar">
-            <div class="sidebar-brand">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
-            </div>
+{% extends "supplier_base.html" %}
+{% import "admin_macros.html" as ad with context %}
 
-            <div class="sidebar-menu-block">
-                <div class="sidebar-menu-label">Supplier Dashboard</div>
-                <a href="{{ url_for('dashboard') }}" class="sidebar-btn">Dashboard</a>
-                <a href="{{ url_for('application_detail', application_id=application.id) }}" class="sidebar-btn">This Application</a>
-            </div>
-        </aside>
+{% macro field(label, value, wide=false, mono=false) -%}
+    <div class="ad-field{% if wide %} ad-field--wide{% endif %}">
+        <dt>{{ label }}</dt>
+        <dd{% if mono %} class="ad-mono"{% endif %}>{% if value %}{{ value }}{% else %}<span class="ad-muted">—</span>{% endif %}</dd>
+    </div>
+{%- endmacro %}
 
-        <main class="dashboard-main">
-            <header class="dashboard-header">
-                <div class="dashboard-profile-summary">
-                    <div class="dashboard-profile-name">{{ user.supplier_id or user.id }}</div>
-                    <div class="dashboard-profile-role">{{ application.company_name }}</div>
-                </div>
+{% block title %}My application{% endblock %}
+{% block page_title %}{{ application.company_name }} {{ ad.status_badge(application.status) }}{% endblock %}
+{% block page_subtitle %}Submitted {{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}{% if application.updated_at and application.created_at and application.updated_at > application.created_at %} · Last updated {{ application.updated_at.strftime('%d %b %Y') }}{% endif %}{% endblock %}
+{% block page_actions %}
+    {% if can_edit %}
+        <a href="{{ url_for('edit_application', application_id=application.id) }}" class="ad-btn ad-btn--primary">{{ ad.icon('edit') }}
+            {{ 'Update & resubmit' if application.status in ['returned_for_update', 'declined'] else 'Edit application' }}</a>
+    {% endif %}
+{% endblock %}
 
-                <div class="dashboard-actions">
-                    <a href="{{ url_for('notifications') }}" class="dashboard-notification" aria-label="Notifications">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
-                            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
-                        </svg>
-                        {% if unread_notifications > 0 %}
-                            <span class="notification-badge">{{ unread_notifications }}</span>
-                        {% endif %}
-                    </a>
-                    <a class="dashboard-logout" href="{{ url_for('logout') }}">Logout</a>
-                </div>
-            </header>
+{% block content %}
+    {% if application.review_comments %}
+        <div class="ad-comment ad-comment--card">
+            <span class="ad-comment-label">Comments from Icebolethu Group</span>
+            <p>{{ application.review_comments }}</p>
+        </div>
+    {% endif %}
 
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
+    <section class="ad-card">
+        <div class="ad-card-head"><h2>Company</h2></div>
+        <dl class="ad-fields">
+            {{ field('Registered vendor name', application.registered_vendor_name, wide=true) }}
+            {{ field('Trading name', application.trading_name) }}
+            {{ field('Registration number', application.business_registration_number, mono=true) }}
+            {{ field('VAT number', application.vat_number, mono=true) }}
+            {{ field('Tax number', application.tax_number, mono=true) }}
+            {{ field('Website', application.website, wide=true) }}
+        </dl>
+    </section>
 
-            <section class="filter-section">
-                <div class="panel-head">
-                    <h3>Application Overview</h3>
-                    <span class="admin-badge admin-badge-{{ application.status }}">
-                        {{ application.status|replace('_', ' ')|title }}
-                    </span>
-                </div>
-
-                <div class="review-grid">
-                    <div class="review-card">
-                        <strong>Supplier ID</strong>
-                        <span>{{ user.supplier_id or 'N/A' }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>Company Name</strong>
-                        <span>{{ application.company_name }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>Key Contact</strong>
-                        <span>{{ application.contact_name }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>Email</strong>
-                        <span>{{ application.email }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>Category</strong>
-                        {% for app_cat in application.application_categories %}
-                            <span>{{ app_cat.category }}</span>
-                            {% if app_cat.category_detail %}
-                                <span style="display:block; margin-left:10px; color:var(--text-light);">{{ app_cat.category_detail }}</span>
-                            {% endif %}
-                        {% endfor %}
-                    </div>
-                    <div class="review-card">
-                        <strong>Submitted</strong>
-                        <span>{{ application.created_at.strftime('%Y-%m-%d') if application.created_at else 'N/A' }}</span>
-                    </div>
-                    <div class="review-card">
-                        <strong>Documents Status</strong>
-                        <span>{{ application.documents_status|title }}</span>
-                    </div>
-                </div>
-
-                {% if application.review_comments %}
-                    <div class="review-comment" style="margin-top:18px;">
-                        <strong>Review Comments:</strong>
-                        <p style="margin:8px 0 0;">{{ application.review_comments }}</p>
-                    </div>
-                {% endif %}
-            </section>
-
-            {% if documents %}
-            <section class="filter-section">
-                <div class="panel-head">
-                    <h3>Submitted Documents</h3>
-                </div>
-                <div class="documents-grid">
-                    {% for doc in documents %}
-                        <div class="document-card">
-                            <div class="document-card-header">
-                                <span class="document-number">{{ loop.index }}</span>
-                                <h4>{{ doc.document_type }}</h4>
-                            </div>
-                            <div class="document-uploaded">
-                                <span class="document-status-badge">Uploaded</span>
-                                <a href="javascript:void(0);" class="document-view-link" onclick="togglePdf(this); return false;">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                                </a>
-                                <iframe src="/uploads/{{ doc.file_path|replace('\\', '/') }}#toolbar=0&navpanes=0" class="pdf-viewer"></iframe>
-                            </div>
-                        </div>
-                    {% endfor %}
-                </div>
-            </section>
-            {% endif %}
-
-            <div style="margin-top:18px;">
-                <a href="{{ url_for('dashboard') }}" class="filter-btn filter-btn-secondary">Back</a>
-            </div>
-        </main>
+    <div class="ad-grid ad-grid--2">
+        <section class="ad-card">
+            <div class="ad-card-head"><h2>Address</h2></div>
+            <dl class="ad-fields ad-fields--1">
+                {{ field('Physical address', application.physical_address) }}
+                {{ field('City / Province', [application.city, application.province]|select|join(', ')) }}
+                {{ field('Postal code', application.postal_code) }}
+            </dl>
+        </section>
+        <section class="ad-card">
+            <div class="ad-card-head"><h2>Contact</h2></div>
+            <dl class="ad-fields ad-fields--1">
+                {{ field('Primary contact', [application.primary_contact_person, application.contact_person_role]|select|join(' · ')) }}
+                {{ field('Phone', application.contact_number) }}
+                {{ field('E-mail', application.email_address) }}
+            </dl>
+        </section>
     </div>
 
-    <footer class="footer">
-        <p>NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
-    </footer>
+    <section class="ad-card">
+        <div class="ad-card-head"><h2>Supplier category</h2></div>
+        <div class="ad-chips">
+            {% for app_cat in application.application_categories %}
+                <div class="ad-chip"><strong>{{ app_cat.category }}</strong>{% if app_cat.category_detail %}<span>{{ app_cat.category_detail }}</span>{% endif %}</div>
+            {% else %}
+                <div class="ad-chip"><strong>{{ application.supplier_category or '—' }}</strong></div>
+            {% endfor %}
+        </div>
+    </section>
 
-    <script>
-        function togglePdf(link) {
-            var iframe = link.parentNode.querySelector('.pdf-viewer');
-            if (!iframe) return;
-            var eye = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
-            var eyeOff = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
-            if (iframe.style.display === 'none') {
-                iframe.style.display = 'block';
-                link.innerHTML = eyeOff;
-            } else {
-                iframe.style.display = 'none';
-                link.innerHTML = eye;
-            }
-        }
-    </script>
-</body>
-</html>
+    <section class="ad-card">
+        <div class="ad-card-head"><h2>Directors &amp; shareholders</h2><span class="ad-muted">{{ application.directors|length }}</span></div>
+        <div class="ad-table-wrap">
+            <table class="ad-table ad-table--compact">
+                <thead><tr><th>Name</th><th>ID / passport</th><th>Role</th><th>Nationality</th></tr></thead>
+                <tbody>
+                    {% for director in application.directors %}
+                        <tr><td>{{ director.initials_surname }}</td><td class="ad-mono">{{ director.id_number }}</td><td>{{ director.role }}</td><td>{{ director.nationality }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="ad-card">
+        <div class="ad-card-head"><h2>Documents</h2><span class="ad-muted">{{ documents|length }} uploaded</span></div>
+        <ul class="ad-docs">
+            {% for doc in documents %}
+                <li class="ad-doc">
+                    <span class="ad-doc-icon" aria-hidden="true">{{ ad.icon('file') }}</span>
+                    <div class="ad-doc-text">
+                        <strong>{{ doc.document_type }}</strong>
+                        <span>{{ doc.original_filename }}{% if doc.uploaded_at %} · {{ doc.uploaded_at.strftime('%d %b %Y') }}{% endif %}</span>
+                    </div>
+                    <div class="ad-doc-actions">
+                        <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" target="_blank" rel="noopener" class="ad-btn ad-btn--ghost ad-btn--sm">View</a>
+                    </div>
+                </li>
+            {% else %}
+                <li class="ad-empty ad-empty--sm"><span>No documents uploaded.</span></li>
+            {% endfor %}
+        </ul>
+    </section>
+{% endblock %}

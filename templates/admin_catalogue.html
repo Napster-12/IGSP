@@ -1,0 +1,72 @@
+{% extends "admin_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+{% import "_macros.html" as ui with context %}
+
+{% block title %}Catalogue{% endblock %}
+{% block page_title %}Supplier catalogue{% endblock %}
+{% block page_subtitle %}{{ pagination.total }} product{{ '' if pagination.total == 1 else 's' }} from approved, active suppliers{% endblock %}
+{% block page_actions %}
+    <a href="{{ url_for('admin_requests') }}" class="ad-btn ad-btn--ghost">{{ ad.icon('cart') }} View requests</a>
+{% endblock %}
+
+{% block content %}
+    <section class="ad-card">
+        <form method="get" class="ad-filters">
+            <label class="ad-filter ad-filter--grow">
+                <span>Search</span>
+                <input type="search" name="search" value="{{ search }}" placeholder="Product, description or supplier — press Enter">
+            </label>
+            <label class="ad-filter">
+                <span>Category</span>
+                <select name="category" onchange="this.form.submit()">
+                    <option value="">All categories</option>
+                    {% for category in categories %}<option value="{{ category }}" {% if category == category_filter %}selected{% endif %}>{{ category }}</option>{% endfor %}
+                </select>
+            </label>
+            <label class="ad-filter">
+                <span>Supplier</span>
+                <select name="supplier" onchange="this.form.submit()">
+                    <option value="">All suppliers</option>
+                    {% for supplier in suppliers %}<option value="{{ supplier.id }}" {% if supplier.id == supplier_filter %}selected{% endif %}>{{ supplier.company_name }}</option>{% endfor %}
+                </select>
+            </label>
+            <div class="ad-filter-actions">
+                <button type="submit" class="ad-btn ad-btn--primary">Apply</button>
+                {% if page_args %}<a href="{{ url_for('admin_catalogue') }}" class="ad-btn ad-btn--ghost">Reset</a>{% endif %}
+            </div>
+        </form>
+    </section>
+
+    {% if products %}
+        <section class="ad-products">
+            {% for product in products %}
+                <article class="ad-product{% if not product.in_stock %} is-out{% endif %}">
+                    <div class="ad-product-top">
+                        <span class="ad-product-cat">{{ product.category }}</span>
+                        <h3>{{ product.name }}</h3>
+                        <a href="{{ url_for('admin_catalogue', supplier=product.user_id) }}" class="ad-product-supplier">{{ product.supplier.company_name }}</a>
+                    </div>
+                    {% if product.description %}<p class="ad-product-desc">{{ product.description }}</p>{% endif %}
+                    <dl class="ad-product-meta">
+                        <div><dt>Price</dt><dd><strong>{{ product.price|zar }}</strong> <span class="ad-muted">{{ product.unit }}</span></dd></div>
+                        <div><dt>Available</dt><dd>{% if product.quantity_available is none %}On request{% elif product.quantity_available == 0 %}<span class="ad-doc-status ad-doc-status--pending">Out of stock</span>{% else %}{{ product.quantity_available }}{% endif %}</dd></div>
+                        <div><dt>Lead time</dt><dd>{% if product.lead_time_days is not none %}{{ product.lead_time_days }} day{{ '' if product.lead_time_days == 1 else 's' }}{% else %}—{% endif %}</dd></div>
+                    </dl>
+                    {% if product.in_stock %}
+                        <a href="{{ url_for('admin_request_product', product_id=product.id) }}" class="ad-btn ad-btn--primary ad-btn--block">{{ ad.icon('cart') }} Request</a>
+                    {% else %}
+                        <span class="ad-btn ad-btn--ghost ad-btn--block" aria-disabled="true">Out of stock</span>
+                    {% endif %}
+                </article>
+            {% endfor %}
+        </section>
+        <section class="ad-card">{{ ui.render_pagination(pagination, 'admin_catalogue', page_args) }}</section>
+    {% else %}
+        <section class="ad-card">
+            <div class="ad-empty">
+                <strong>{{ 'No products match these filters' if page_args else 'No products listed yet' }}</strong>
+                <span>Approved suppliers add products to their inventory; listed items appear here.</span>
+            </div>
+        </section>
+    {% endif %}
+{% endblock %}

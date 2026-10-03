@@ -1,0 +1,65 @@
+{% extends "admin_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+
+{% block title %}History · {{ application.company_name }}{% endblock %}
+{% block breadcrumb %}<a href="{{ url_for('admin_application_detail', application_id=application.id) }}" class="ad-crumb">{{ ad.icon('back') }} {{ application.company_name }}</a>{% endblock %}
+{% block page_title %}History {{ ad.status_badge(application.status) }}{% endblock %}
+{% block page_subtitle %}Audit trail for {{ application.company_name }}{% if supplier and supplier.supplier_id %} (<span class="ad-mono">{{ supplier.supplier_id }}</span>){% endif %} · {{ history|length }} event{{ '' if history|length == 1 else 's' }} · times in UTC{% endblock %}
+{% block page_actions %}
+    <a href="{{ url_for('admin_application_detail', application_id=application.id) }}" class="ad-btn ad-btn--ghost">View application</a>
+    <a href="{{ url_for('admin_application_history_export', application_id=application.id) }}" class="ad-btn ad-btn--primary">{{ ad.icon('download') }} Export CSV</a>
+{% endblock %}
+
+{% block content %}
+    <section class="ad-card" id="history">
+        {% if history %}
+            <ol class="ad-timeline">
+                {% for event in history %}
+                    <li class="ad-event ad-event--{{ event.actor_type }}">
+                        <span class="ad-event-dot" aria-hidden="true"></span>
+                        <div class="ad-event-body">
+                            <div class="ad-event-head">
+                                <strong>{{ event_labels.get(event.action, event.action|replace('_', ' ')|capitalize) }}</strong>
+                                {% if event.from_status or event.to_status %}
+                                    <span class="ad-event-status">
+                                        {% if event.from_status %}{{ ad.status_badge(event.from_status) }} <span aria-hidden="true">→</span>{% endif %}
+                                        {% if event.to_status %}{{ ad.status_badge(event.to_status) }}{% endif %}
+                                    </span>
+                                {% endif %}
+                            </div>
+                            {% if event.summary and event.summary != event_labels.get(event.action) and event.action != 'status_changed' %}<p class="ad-event-summary">{{ event.summary }}</p>{% endif %}
+                            <p class="ad-event-meta">
+                                <span class="ad-actor ad-actor--{{ event.actor_type }}">{{ event.actor_type|capitalize }}</span>
+                                {{ event.actor_name or '—' }}{% if event.actor_email %} · {{ event.actor_email }}{% endif %}
+                                · <time datetime="{{ event.created_at.isoformat() if event.created_at else '' }}">{{ event.created_at.strftime('%d %b %Y, %H:%M') if event.created_at else '' }}</time>
+                                {% if event.ip_address %} · IP {{ event.ip_address }}{% endif %}
+                            </p>
+                            {% set changes = event.changes %}
+                            {% if changes %}
+                                <details class="ad-changes" {% if changes|length <= 3 %}open{% endif %}>
+                                    <summary>{{ changes|length }} change{{ '' if changes|length == 1 else 's' }}</summary>
+                                    <div class="ad-table-wrap">
+                                        <table class="ad-table ad-table--compact">
+                                            <thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead>
+                                            <tbody>
+                                                {% for change in changes %}
+                                                    <tr>
+                                                        <td class="ad-nowrap">{{ change.field }}</td>
+                                                        <td class="ad-change-old">{{ change.old or '—' }}</td>
+                                                        <td class="ad-change-new">{{ change.new or '—' }}</td>
+                                                    </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </details>
+                            {% endif %}
+                        </div>
+                    </li>
+                {% endfor %}
+            </ol>
+        {% else %}
+            <div class="ad-empty ad-empty--sm"><span>No history recorded yet.</span></div>
+        {% endif %}
+    </section>
+{% endblock %}

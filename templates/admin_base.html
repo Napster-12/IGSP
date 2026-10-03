@@ -1,0 +1,75 @@
+{#- Shared layout for every signed-in admin page. -#}
+{% import "admin_macros.html" as ad with context %}
+{% set nav = [
+    ('admin_dashboard', 'Dashboard', 'dashboard', ['admin_dashboard']),
+    ('admin_applications', 'Applications', 'applications', ['admin_applications', 'admin_application_detail']),
+    ('admin_suppliers', 'Suppliers', 'suppliers', ['admin_suppliers']),
+    ('admin_catalogue', 'Catalogue', 'box', ['admin_catalogue', 'admin_request_product']),
+    ('admin_requests', 'Requests', 'cart', ['admin_requests', 'admin_request_detail']),
+    ('admin_reports', 'Reports', 'reports', ['admin_reports', 'admin_report']),
+    ('admin_notifications', 'Notifications', 'bell', ['admin_notifications']),
+] %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Admin{% endblock %} | IGSP Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body class="ad-body">
+    <div class="ad-shell">
+        <aside class="ad-sidebar">
+            <a class="ad-brand" href="{{ url_for('admin_dashboard') }}">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Icebolethu Group">
+                <span>Supplier Portal Admin</span>
+            </a>
+
+            <nav class="ad-nav" aria-label="Admin">
+                {% for endpoint, label, icon_name, active_for in nav %}
+                    <a href="{{ url_for(endpoint) }}" class="ad-nav-link{% if request.endpoint in active_for %} is-active{% endif %}"
+                       {% if request.endpoint in active_for %}aria-current="page"{% endif %}>
+                        {{ ad.icon(icon_name) }}
+                        <span>{{ label }}</span>
+                        {% if endpoint == 'admin_notifications' and unread_notifications > 0 %}
+                            <span class="ad-nav-count">{{ unread_notifications }}</span>
+                        {% elif endpoint == 'admin_requests' and open_request_count > 0 %}
+                            <span class="ad-nav-count" title="Open requests">{{ open_request_count }}</span>
+                        {% endif %}
+                    </a>
+                {% endfor %}
+            </nav>
+
+            <div class="ad-account">
+                <div class="ad-avatar" aria-hidden="true">{{ ((admin.name or admin.email)[:1])|upper }}</div>
+                <div class="ad-account-text">
+                    <strong>{{ admin.name or 'Administrator' }}</strong>
+                    <span>{{ admin.email }}</span>
+                </div>
+                <a href="{{ url_for('admin_logout') }}" class="ad-logout" title="Log out" aria-label="Log out">{{ ad.icon('logout') }}</a>
+            </div>
+        </aside>
+
+        <main class="ad-main">
+            <header class="ad-page-head">
+                <div class="ad-page-title">
+                    {% block breadcrumb %}{% endblock %}
+                    <h1>{% block page_title %}{% endblock %}</h1>
+                    <p class="ad-subtitle">{% block page_subtitle %}{% endblock %}</p>
+                </div>
+                <div class="ad-page-actions">{% block page_actions %}{% endblock %}</div>
+            </header>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                    <div class="ad-flash ad-flash--{{ category }}" role="status">{{ message }}</div>
+                {% endfor %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

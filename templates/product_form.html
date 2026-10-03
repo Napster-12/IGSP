@@ -1,0 +1,66 @@
+{% extends "supplier_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+{% import "form_macros.html" as f with context %}
+
+{% block title %}{{ 'Edit product' if product else 'Add product' }}{% endblock %}
+{% block breadcrumb %}<a href="{{ url_for('inventory') }}" class="ad-crumb">{{ ad.icon('back') }} Inventory</a>{% endblock %}
+{% block page_title %}{{ 'Edit ' ~ product.name if product else 'Add a product or service' }}{% endblock %}
+{% block page_subtitle %}Prices are in South African Rand (ZAR){% endblock %}
+
+{% block content %}
+    <form method="post" class="ad-form ad-stack" action="{{ url_for('product_form', product_id=product.id) if product else url_for('product_form') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <section class="ad-card">
+            <div class="ad-card-head"><h2>Details</h2></div>
+            <div class="ad-form-grid">
+                {{ f.input('name', 'Product or service name', form.get('name'), required=true, wide=true, attrs='maxlength="150" placeholder="e.g. Standard pine casket"') }}
+                <div class="ad-field-row">
+                    <label for="category">Category <span class="req">*</span></label>
+                    <select id="category" name="category" required>
+                        <option value="">Select category</option>
+                        {% for section in CATEGORY_SECTIONS %}
+                            <optgroup label="{{ section.name|title if section.name.isupper() else section.name }}">
+                                {% for item in section['items'] %}
+                                    <option value="{{ item.value }}" {% if form.get('category') == item.value %}selected{% endif %}>{{ item.value }}</option>
+                                {% endfor %}
+                            </optgroup>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="ad-field-row ad-field-row--wide">
+                    <label for="description">Description</label>
+                    <textarea id="description" name="description" rows="4" maxlength="5000" placeholder="Size, material, what's included, delivery area…">{{ form.get('description', '') }}</textarea>
+                </div>
+            </div>
+        </section>
+
+        <section class="ad-card">
+            <div class="ad-card-head"><div><h2>Price &amp; availability</h2><p>Leave stock blank for services or items you don't count</p></div></div>
+            <div class="ad-form-grid">
+                <div class="ad-field-row">
+                    <label for="price">Price (R) <span class="req">*</span></label>
+                    <input id="price" name="price" type="text" inputmode="decimal" value="{{ form.get('price', '') }}" placeholder="0.00" required>
+                </div>
+                <div class="ad-field-row">
+                    <label for="unit">Unit <span class="req">*</span></label>
+                    <select id="unit" name="unit" required>
+                        {% for unit in PRODUCT_UNITS %}<option value="{{ unit }}" {% if form.get('unit') == unit %}selected{% endif %}>{{ unit }}</option>{% endfor %}
+                    </select>
+                </div>
+                {{ f.input('quantity_available', 'Quantity in stock', form.get('quantity_available', ''), attrs='inputmode="numeric" placeholder="Not tracked"') }}
+                {{ f.input('lead_time_days', 'Lead time (days)', form.get('lead_time_days', ''), attrs='inputmode="numeric" placeholder="e.g. 2"', hint='How long you need to deliver after a request is accepted.') }}
+                <div class="ad-field-row ad-field-row--wide">
+                    <label class="ad-check">
+                        <input type="checkbox" name="is_listed" value="1" {% if form.get('is_listed') %}checked{% endif %}>
+                        <span><strong>List in the Icebolethu Group catalogue</strong> — untick to keep it in your inventory without it being requestable</span>
+                    </label>
+                </div>
+            </div>
+        </section>
+
+        <div class="ad-form-actions ad-form-actions--sticky">
+            <a href="{{ url_for('inventory') }}" class="ad-btn ad-btn--ghost">Cancel</a>
+            <button type="submit" class="ad-btn ad-btn--primary">{{ 'Save changes' if product else 'Add product' }}</button>
+        </div>
+    </form>
+{% endblock %}
