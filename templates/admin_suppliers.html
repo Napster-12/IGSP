@@ -4,18 +4,52 @@
 
 {% block title %}Suppliers{% endblock %}
 {% block page_title %}Suppliers{% endblock %}
-{% block page_subtitle %}{{ pagination.total }} registered supplier{{ '' if pagination.total == 1 else 's' }}{% if search %} · matching “{{ search }}”{% endif %}{% endblock %}
+{% block page_subtitle %}{{ pagination.total }} supplier{{ '' if pagination.total == 1 else 's' }}{% if account_filter %} · {{ account_filter|title }}{% endif %}{% if application_filter %} · {{ 'Application not submitted' if application_filter == 'none' else status_label(application_filter) }}{% endif %}{% if search %} · matching “{{ search }}”{% endif %}{% endblock %}
 
 {% block content %}
+    {% set ACCOUNT_ICONS = {
+        '': 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+        'active': 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM16 11l2 2 4-4',
+        'inactive': 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM17 11h5',
+    } %}
+    {% set APP_ICONS = {
+        'none': 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 15h6',
+        'submitted': 'M22 2 11 13M22 2l-7 20-4-9-9-4z',
+        'pending_review': 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',
+        'under_review': 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35',
+        'approved': 'M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4 12 14.01l-3-3',
+        'declined': 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6',
+        'returned_for_update': 'M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3',
+    } %}
+    {% set ns = namespace(account=[], app=[]) %}
+    {% for value, label, count in account_cards %}
+        {% set ns.account = ns.account + [{'value': value, 'label': label, 'count': count,
+            'tone': {'': 'all', 'active': 'approved', 'inactive': 'cancelled'}[value], 'icon': ACCOUNT_ICONS[value],
+            'url': url_for('admin_suppliers', account=value or None, application=application_filter or None, search=search or None)}] %}
+    {% endfor %}
+    {% for value, label, count in application_cards %}
+        {% set ns.app = ns.app + [{'value': value, 'label': label, 'count': count,
+            'tone': 'cancelled' if value == 'none' else value, 'icon': APP_ICONS.get(value, APP_ICONS['none']),
+            'url': url_for('admin_suppliers', application=value, account=account_filter or None, search=search or None)}] %}
+    {% endfor %}
+    {{ ad.slicers('Account', ns.account, account_filter,
+                  url_for('admin_suppliers', application=application_filter or None, search=search or None) if account_filter else none,
+                  aria='Filter by account status', variant='compact') }}
+    {{ ad.slicers('Application', ns.app, application_filter,
+                  url_for('admin_suppliers', account=account_filter or None, search=search or None) if application_filter else none,
+                  aria='Filter by application status', variant='dense') }}
+
     <section class="ad-card">
         <form method="get" class="ad-toolbar">
+            {% if account_filter %}<input type="hidden" name="account" value="{{ account_filter }}">{% endif %}
+            {% if application_filter %}<input type="hidden" name="application" value="{{ application_filter }}">{% endif %}
             <label class="ad-search">
                 {{ ad.icon('search') }}
                 <span class="ad-sr">Search</span>
                 <input type="search" name="search" value="{{ search }}" placeholder="Search company, contact, email or supplier ID">
             </label>
             <button type="submit" class="ad-btn ad-btn--primary">Search</button>
-            {% if search %}<a href="{{ url_for('admin_suppliers') }}" class="ad-btn ad-btn--ghost">Clear</a>{% endif %}
+            {% if search %}<a href="{{ url_for('admin_suppliers', account=account_filter or None, application=application_filter or None) }}" class="ad-btn ad-btn--ghost">Clear</a>{% endif %}
         </form>
 
         {% if suppliers %}
@@ -68,11 +102,15 @@
                     </tbody>
                 </table>
             </div>
-            {{ ui.render_pagination(pagination, 'admin_suppliers', {'search': search} if search else {}) }}
+            {% set page_args = {} %}
+            {% if search %}{% set _ = page_args.update({'search': search}) %}{% endif %}
+            {% if account_filter %}{% set _ = page_args.update({'account': account_filter}) %}{% endif %}
+            {% if application_filter %}{% set _ = page_args.update({'application': application_filter}) %}{% endif %}
+            {{ ui.render_pagination(pagination, 'admin_suppliers', page_args) }}
         {% else %}
             <div class="ad-empty">
                 <strong>No suppliers found</strong>
-                <span>{% if search %}Try a different search.{% else %}Suppliers appear here once they register.{% endif %}</span>
+                <span>{% if search or account_filter or application_filter %}No suppliers match the selected cards{% if search %} and search{% endif %}. Pick another card or clear a filter.{% else %}Suppliers appear here once they register.{% endif %}</span>
             </div>
         {% endif %}
     </section>

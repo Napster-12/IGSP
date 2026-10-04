@@ -6,7 +6,7 @@ Flask app where suppliers register, complete a 4-step application (profile → c
 
 ```bash
 python3 -m venv env && source env/bin/activate
-pip install -r requirements-dev.txt
+pip install -r requirements.txt
 cp .env.example .env        # then fill in DB + SMTP settings
 flask --app app init-db     # create tables / apply schema upgrades
 flask --app app create-admin
@@ -21,7 +21,6 @@ Without SMTP settings, verification codes and password-reset links are printed t
 | --- | --- |
 | `flask --app app create-admin` | Create an admin (or reset an existing admin's password) |
 | `flask --app app seed-demo --count 30` | Insert demo suppliers (dev only; password `Password123!`) |
-| `pytest` | Run the test suite (uses a throwaway SQLite DB) |
 
 ## Production
 

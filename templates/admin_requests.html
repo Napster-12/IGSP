@@ -10,18 +10,32 @@
 {% endblock %}
 
 {% block content %}
-    <div class="ad-tab-rows">
-        <nav class="ad-tabs" aria-label="Filter by requester">
-            <a href="{{ url_for('admin_requests', status=status_filter or None) }}" class="ad-tab{% if not mine %} is-active{% endif %}">Everyone's</a>
-            <a href="{{ url_for('admin_requests', status=status_filter or None, mine='1') }}" class="ad-tab{% if mine %} is-active{% endif %}">Made by me</a>
-        </nav>
-        <nav class="ad-tabs" aria-label="Filter by status">
-            <a href="{{ url_for('admin_requests', mine='1' if mine else None) }}" class="ad-tab{% if not status_filter %} is-active{% endif %}">All statuses</a>
-            {% for status in REQUEST_STATUSES %}
-                <a href="{{ url_for('admin_requests', status=status, mine='1' if mine else None) }}" class="ad-tab{% if status_filter == status %} is-active{% endif %}">{{ status_label(status) }}</a>
-            {% endfor %}
-        </nav>
-    </div>
+    {% set REQUEST_ICONS = {
+        '': 'M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0',
+        'requested': 'M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z',
+        'accepted': 'M20 6 9 17l-5-5',
+        'declined': 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6',
+        'delivered': 'M1 3h15v13H1zM16 8h4l3 3v5h-7zM5.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM18.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+        'completed': 'M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4 12 14.01l-3-3',
+        'cancelled': 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM4.93 4.93l14.14 14.14',
+    } %}
+    {% set WHO_ICONS = {'': 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+                        '1': 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z'} %}
+    {% set ns = namespace(status=[], who=[]) %}
+    {% for value, label, count, total in status_cards %}
+        {% set ns.status = ns.status + [{'value': value, 'label': label, 'count': count, 'tone': value or 'all',
+            'icon': REQUEST_ICONS.get(value, REQUEST_ICONS['']), 'sub': total|zar if count else none,
+            'url': url_for('admin_requests', status=value or None, mine='1' if mine else None)}] %}
+    {% endfor %}
+    {% for value, label, count in requester_cards %}
+        {% set ns.who = ns.who + [{'value': value, 'label': label, 'count': count, 'tone': 'who', 'icon': WHO_ICONS[value],
+            'url': url_for('admin_requests', mine=value or None, status=status_filter or None)}] %}
+    {% endfor %}
+    {{ ad.slicers('Status', ns.status, status_filter,
+                  url_for('admin_requests', mine='1' if mine else None) if status_filter else none, variant='dense') }}
+    {{ ad.slicers('Requested by', ns.who, '1' if mine else '',
+                  url_for('admin_requests', status=status_filter or None) if mine else none,
+                  aria='Filter by who made the request', variant='compact') }}
 
     <section class="ad-card">
         {% if requests %}

@@ -3,70 +3,82 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Admin Sign In | IGSP</title>
+    <title>Admin Login | IGSP</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
 </head>
-<body class="ad-login-body">
-    <main class="ad-login">
-        <section class="ad-login-brand" aria-hidden="true">
-            <img src="{{ url_for('static', filename='images/logo.png') }}" alt="">
-            <div>
-                <h2>Supplier Portal</h2>
-                <p>Review supplier applications, manage supplier accounts and track onboarding across Icebolethu Group.</p>
-            </div>
-            <span class="ad-login-foot">Icebolethu Group · Administration</span>
-        </section>
+<body class="adm-login">
+    <div class="adm-login-photo" aria-hidden="true">
+        <img src="{{ url_for('static', filename='images/background.png') }}" alt="">
+    </div>
 
-        <section class="ad-login-panel">
-            <img class="ad-login-logo" src="{{ url_for('static', filename='images/logo.png') }}" alt="Icebolethu Group">
-            <h1>Admin sign in</h1>
-            <p class="ad-login-lead">For Icebolethu Group staff only.</p>
+    <div class="adm-login-side">
+        <main class="adm-login-main">
+            <img class="adm-login-logo" src="{{ url_for('static', filename='images/logo.png') }}" alt="Icebolethu Group">
+            <h1>Supplier admin login</h1>
+            <p class="adm-login-lead">Sign in to the Supplier Administration System.</p>
 
             {% if login_error %}
-                <div class="ad-flash ad-flash--error" role="alert">{{ login_error }}</div>
+                <div class="flash-message flash-error adm-login-flash">{{ login_error }}</div>
             {% endif %}
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% for category, message in messages %}
-                    <div class="ad-flash ad-flash--{{ category }}" role="status">{{ message }}</div>
+                    <div class="flash-message flash-{{ category }} adm-login-flash">{{ message }}</div>
                 {% endfor %}
             {% endwith %}
 
-            {% if MICROSOFT_CLIENT_ID %}
-                <a href="{{ url_for('admin_login_microsoft') }}" class="ad-btn ad-btn--ghost ad-btn--block ad-btn--lg">
-                    <svg width="18" height="18" viewBox="0 0 23 23" aria-hidden="true"><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
-                    Sign in with Microsoft
-                </a>
-                <div class="ad-divider"><span>or use your password</span></div>
-            {% endif %}
+            {% if step == "options" %}
+                <div class="adm-login-panel">
+                    <a href="{{ url_for('admin_login_microsoft') }}" class="adm-login-btn adm-login-btn--ms">
+                        <svg width="18" height="18" viewBox="0 0 23 23" aria-hidden="true"><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
+                        Continue with Microsoft (Azure AD)
+                    </a>
 
-            <form class="ad-form" action="{{ url_for('admin_login') }}" method="post">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="adm-login-or"><span>or sign in with username and password</span></div>
 
-                <label for="email">Work email</label>
-                <input id="email" name="email" type="email" placeholder="name@icebolethu.co.za" autocomplete="username" required autofocus>
+                    <form class="adm-login-form" method="post" action="{{ url_for('admin_login') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <label for="email">Username (work email)</label>
+                        <input id="email" name="email" type="email" placeholder="name@icebolethu.co.za" autocomplete="username" required>
 
-                <label for="password">Password</label>
-                <div class="ad-password">
-                    <input id="password" name="password" type="password" autocomplete="current-password" required>
-                    <button type="button" class="ad-password-toggle" aria-label="Show password" aria-pressed="false">Show</button>
+                        <label for="password">Password</label>
+                        <div class="password-field">
+                            <input id="password" name="password" type="password" placeholder="Enter your password" autocomplete="current-password" required>
+                            <button type="button" class="password-toggle" data-target="password" aria-label="Show password">
+                                <svg class="eye-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <button type="submit" class="adm-login-btn">Sign in</button>
+                    </form>
+
                 </div>
+            {% else %}
+                <a class="adm-login-btn" href="{{ url_for('admin_login_options') }}">Login</a>
+            {% endif %}
+        </main>
+    </div>
 
-                <button type="submit" class="ad-btn ad-btn--primary ad-btn--block ad-btn--lg">Sign in</button>
-            </form>
+    <footer class="adm-login-foot">
+        <p><strong>Call Centre:</strong> 031 208 9102</p>
+        <p><strong>Email:</strong> supplier_onboarding@icebolethu.co.za</p>
+    </footer>
 
-            <p class="ad-login-alt">Are you a supplier? <a href="{{ url_for('login') }}">Supplier login</a></p>
-        </section>
-    </main>
-
+    {% if step == "options" %}
     <script>
-        document.querySelector('.ad-password-toggle').addEventListener('click', function () {
-            var input = document.getElementById('password');
-            var show = input.type === 'password';
-            input.type = show ? 'text' : 'password';
-            this.textContent = show ? 'Hide' : 'Show';
-            this.setAttribute('aria-pressed', show ? 'true' : 'false');
-            this.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+        document.querySelectorAll('.password-toggle').forEach(function(button) {
+            button.addEventListener('click', function() {
+                const input = document.getElementById(this.dataset.target);
+                const isPassword = input.type === 'password';
+                input.type = isPassword ? 'text' : 'password';
+                this.setAttribute('aria-label', isPassword ? 'Hide password' : 'Show password');
+            });
         });
     </script>
+    {% endif %}
 </body>
 </html>

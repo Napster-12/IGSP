@@ -113,7 +113,7 @@
                                     <span>{% if doc %}{{ doc.original_filename }}{% else %}Required — not uploaded{% endif %}</span>
                                 </div>
                                 {% if doc %}
-                                    <a class="rv-doc-view" href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" target="_blank" rel="noopener">View</a>
+                                    <a class="rv-doc-view" href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" data-pdf-view data-pdf-title="{{ doc_type }}">View</a>
                                 {% else %}
                                     <a class="rv-doc-view" href="{{ url_for('onboarding_documents') }}">Upload</a>
                                 {% endif %}

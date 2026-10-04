@@ -2,7 +2,7 @@
     Expects: `values` (draft dict or application), `directors` (list of dicts). -#}
 {% import "form_macros.html" as f with context %}
 
-<section class="ad-card">
+<section class="ad-card ob-card ob-card--registration">
     <div class="ad-card-head">
         <div><h2>Company registration</h2><p>As registered with CIPC and SARS</p></div>
     </div>
@@ -17,7 +17,7 @@
     </div>
 </section>
 
-<section class="ad-card">
+<section class="ad-card ob-card ob-card--address">
     <div class="ad-card-head"><h2>Company address</h2></div>
     <div class="ad-form-grid">
         {{ f.input('physical_address', "Physical address", values.physical_address, required=true, wide=true) }}
@@ -27,7 +27,7 @@
     </div>
 </section>
 
-<section class="ad-card">
+<section class="ad-card ob-card ob-card--contact">
     <div class="ad-card-head">
         <div><h2>Contact details</h2><p>Pre-filled from your registration — change them if someone else should be contacted</p></div>
     </div>
@@ -39,7 +39,7 @@
     </div>
 </section>
 
-<section class="ad-card">
+<section class="ad-card ob-card ob-card--directors">
     <div class="ad-card-head">
         <div><h2>Directors &amp; shareholders</h2><p>South African directors need a valid 13-digit ID number; others a passport number</p></div>
     </div>

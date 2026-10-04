@@ -12,12 +12,13 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <section class="ad-card">
             <div class="ad-card-head">
-                <div><h2>Supplier category</h2><p>Choose the category that best describes your goods or services</p></div>
+                <div><h2>What do you supply?</h2><p>Choose the <strong>one</strong> category that best describes your main goods or services</p></div>
             </div>
             {{ f.category_picker(draft.supplier_categories or [], draft.supplier_category_details or {}) }}
         </section>
 
-        <div class="ad-form-actions ad-form-actions--sticky">
+        <div class="ad-form-actions ad-form-actions--sticky cat-actions">
+            <p class="cat-summary" data-category-summary aria-live="polite">No category selected</p>
             <a href="{{ url_for('onboarding_profile') }}" class="ad-btn ad-btn--ghost">← Back</a>
             <button type="submit" class="ad-btn ad-btn--primary">Continue to documents →</button>
         </div>
