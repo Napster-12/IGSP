@@ -9,6 +9,20 @@
             var input = box.querySelector('input');
             if (input) { input.required = show; }
         });
+        // Bottom-bar summary on the category step.
+        var summary = document.querySelector('[data-category-summary]');
+        if (summary) {
+            var checked = document.querySelector('input[name="categories"]:checked');
+            summary.innerHTML = '';
+            if (checked) {
+                summary.appendChild(document.createTextNode('Selected: '));
+                var strong = document.createElement('strong');
+                strong.textContent = checked.dataset.title || checked.value;
+                summary.appendChild(strong);
+            } else {
+                summary.textContent = 'No category selected';
+            }
+        }
     }
 
     // File inputs: show the chosen file name in the slot.

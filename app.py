@@ -140,9 +140,8 @@ SUPPLIER_CATEGORIES = [
     {"value": "Body Storage, Cold-Room and other Burial Services", "label": "Body Storage, Cold-Room and other Burial Services", "specify": False, "group": "SERVICES"},
     {"value": "Consulting", "label": "Consulting", "specify": False, "group": "SERVICES"},
     {"value": "Other", "label": "Other, please specify:", "specify": True, "group": "SERVICES"},
-    {"value": "Caskets", "label": "Caskets", "specify": False, "group": "GOODS"},
+    {"value": "Caskets and Tombstones", "label": "Caskets and Tombstones", "specify": False, "group": "GOODS"},
     {"value": "Livestock", "label": "Livestock", "specify": False, "group": "GOODS"},
-    {"value": "Tombstones", "label": "Tombstones", "specify": False, "group": "GOODS"},
     {"value": "Flowers, crosses and plaques", "label": "Flowers, crosses and plaques", "specify": False, "group": "GOODS"},
     {"value": "ICT Equipment, Media and Electronic Devices", "label": "ICT Equipment, Media and Electronic Devices, please specify:", "specify": True, "group": "GOODS"},
     {"value": "Tents, Draping and Décor", "label": "Tents, Draping and Décor", "specify": False, "group": RENTALS},
@@ -162,6 +161,8 @@ LEGACY_CATEGORY_MAP = {
     "Draping and Décor": "Tents, Draping and Décor",
     "Hearse": "Funeral Vehicles (Hearse / Family Car)",
     "Family Car": "Funeral Vehicles (Hearse / Family Car)",
+    "Caskets": "Caskets and Tombstones",
+    "Tombstones": "Caskets and Tombstones",
 }
 
 # Required documents, in upload-slot order (form field document_file_1 .. _7).
@@ -2058,52 +2059,59 @@ def admin_login():
         limiter_key = ("admin-login", client_ip(), email)
 
         if not email or not password:
-            return render_template("admin_login.html", login_error="Email and password are required.")
+            return render_template("admin_login.html", step="options", login_error="Email and password are required.")
         if login_limiter.is_blocked(limiter_key):
-            return render_template("admin_login.html", login_error="Too many login attempts. Please wait 15 minutes and try again.")
+            return render_template("admin_login.html", step="options", login_error="Too many login attempts. Please wait 15 minutes and try again.")
 
         admin = find_admin_by_email(email)
         if not admin or not admin.check_password(password):
             login_limiter.hit(limiter_key)
-            return render_template("admin_login.html", login_error="Invalid email or password.")
+            return render_template("admin_login.html", step="options", login_error="Invalid email or password.")
 
         login_limiter.reset(limiter_key)
         session["admin_id"] = admin.id
         session.permanent = True
         return redirect(url_for("admin_dashboard"))
 
-    return render_template("admin_login.html")
+    return render_template("admin_login.html", step="start")
+
+
+@app.route("/admin/login/options")
+def admin_login_options():
+    if get_current_admin():
+        return redirect(url_for("admin_dashboard"))
+    return render_template("admin_login.html", step="options")
 
 
 @app.route("/admin/login/microsoft")
 def admin_login_microsoft():
     if not MICROSOFT_CLIENT_ID or not MICROSOFT_CLIENT_SECRET:
         flash("Microsoft SSO is not configured.", "error")
-        return redirect(url_for("admin_login"))
+        return redirect(url_for("admin_login_options"))
     return oauth.microsoft.authorize_redirect(url_for("admin_login_microsoft_callback", _external=True))
 
 
 @app.route("/admin/login/microsoft/callback")
 def admin_login_microsoft_callback():
     if not MICROSOFT_CLIENT_ID or not MICROSOFT_CLIENT_SECRET:
-        return redirect(url_for("admin_login"))
+        return redirect(url_for("admin_login_options"))
     try:
         token = oauth.microsoft.authorize_access_token()
         user_info = token.get("userinfo") or oauth.microsoft.userinfo()
     except Exception as exc:  # noqa: BLE001
         app.logger.error("Microsoft authentication failed: %s", exc)
         flash("Microsoft authentication failed. Please try again.", "error")
-        return redirect(url_for("admin_login"))
+        return redirect(url_for("admin_login_options"))
 
     email = user_info.get("email") or user_info.get("preferred_username")
     if not email:
         flash("Could not retrieve an email address from your Microsoft account.", "error")
-        return redirect(url_for("admin_login"))
+        return redirect(url_for("admin_login_options"))
 
     admin = find_admin_by_email(email)
     if not admin:
         flash("No admin account found for this Microsoft account.", "error")
-        return redirect(url_for("admin_login"))
+        return redirect(url_for("admin_login_options"))
 
     session["admin_id"] = admin.id
     session.permanent = True
@@ -2114,7 +2122,7 @@ def admin_login_microsoft_callback():
 @app.route("/admin/logout")
 def admin_logout():
     session.pop("admin_id", None)
-    return redirect(url_for("home"))
+    return redirect(url_for("admin_login"))
 
 
 AWAITING_REVIEW_STATUSES = ["submitted", "pending_review", "under_review"]
@@ -2156,16 +2164,51 @@ def admin_dashboard():
 @admin_required
 def admin_suppliers():
     search = request.args.get("search", "").strip()
+    account_filter = request.args.get("account", "").strip()
+    if account_filter not in {"active", "inactive"}:
+        account_filter = ""
+    application_filter = request.args.get("application", "").strip()
+    if application_filter != "none" and application_filter not in STATUSES:
+        application_filter = ""
     page = request.args.get("page", 1, type=int)
-    query = User.query
+
+    # Each supplier has at most one application, linked by email.
+    base = User.query.outerjoin(SupplierApplication, func.lower(SupplierApplication.email) == func.lower(User.email))
     if search:
         like = f"%{search}%"
-        query = query.filter(DB.or_(
+        base = base.filter(DB.or_(
             User.company_name.ilike(like),
             User.contact_name.ilike(like),
             User.email.ilike(like),
             User.supplier_id.ilike(like),
         ))
+
+    def by_account(query, value):
+        if value == "active":
+            return query.filter(User.active.is_(True))
+        if value == "inactive":
+            return query.filter(User.active.is_(False))
+        return query
+
+    def by_application(query, value):
+        if value == "none":
+            return query.filter(SupplierApplication.id.is_(None))
+        return query.filter(SupplierApplication.status == value) if value else query
+
+    # Slicer cards: each count is what clicking the card would show, given the other slicer and the search.
+    in_application = by_application(base, application_filter)
+    account_cards = [("", "All suppliers", in_application.count()),
+                     ("active", "Active", by_account(in_application, "active").count()),
+                     ("inactive", "Inactive", by_account(in_application, "inactive").count())]
+    rows = dict(by_account(base, account_filter).with_entities(
+        SupplierApplication.status, func.count(User.id)).group_by(SupplierApplication.status).all())
+    application_cards = [("none", "Not submitted", rows.get(None, 0))] + [
+        (status, status_label(status), rows.get(status, 0))
+        for status in STATUSES
+        if status != "draft" and (status != "submitted" or rows.get(status) or application_filter == status)
+    ]
+
+    query = by_application(by_account(base, account_filter), application_filter)
     pagination = query.order_by(User.created_at.desc()).paginate(page=page, per_page=10, error_out=False)
     emails = [normalize_email(u.email) for u in pagination.items]
     applications_by_email = {}
@@ -2178,6 +2221,10 @@ def admin_suppliers():
         suppliers=pagination.items,
         pagination=pagination,
         search=search,
+        account_filter=account_filter,
+        application_filter=application_filter,
+        account_cards=account_cards,
+        application_cards=application_cards,
         applications_by_email=applications_by_email,
         normalize_email=normalize_email,
     )
@@ -2209,33 +2256,58 @@ def admin_applications():
     page = request.args.get("page", 1, type=int)
     admin = get_current_admin()
 
-    query = SupplierApplication.query
+    if status_filter not in STATUSES:
+        status_filter = ""
+    if assigned_filter not in {"me", "unassigned"}:
+        assigned_filter = ""
+
+    base = SupplierApplication.query.filter(SupplierApplication.status != "draft")
     if search:
         like = f"%{search}%"
-        query = query.filter(DB.or_(
+        base = base.filter(DB.or_(
             SupplierApplication.company_name.ilike(like),
             SupplierApplication.contact_name.ilike(like),
             SupplierApplication.email.ilike(like),
         ))
-    if status_filter:
-        query = query.filter(SupplierApplication.status == status_filter)
-    if assigned_filter == "me":
-        query = query.filter(SupplierApplication.assigned_admin_id == admin.id)
-    elif assigned_filter == "unassigned":
-        query = query.filter(SupplierApplication.assigned_admin_id.is_(None))
-    else:
-        assigned_filter = ""
 
+    def by_assignment(query, who):
+        if who == "me":
+            return query.filter(SupplierApplication.assigned_admin_id == admin.id)
+        if who == "unassigned":
+            return query.filter(SupplierApplication.assigned_admin_id.is_(None))
+        return query
+
+    def by_status(query, status):
+        return query.filter(SupplierApplication.status == status) if status else query
+
+    # Slicer cards. Each card's count is what clicking it would show, given the other slicer and the search.
+    status_rows = dict(by_assignment(base, assigned_filter).with_entities(
+        SupplierApplication.status, func.count(SupplierApplication.id)).group_by(SupplierApplication.status).all())
+    status_cards = [("", "All applications", sum(status_rows.values()))] + [
+        (status, status_label(status), status_rows.get(status, 0))
+        for status in STATUSES
+        if status != "draft" and (status != "submitted" or status_rows.get(status) or status_filter == status)
+    ]
+    in_status = by_status(base, status_filter)
+    assignment_cards = [
+        ("", "Everyone's", in_status.count()),
+        ("me", "Assigned to me", by_assignment(in_status, "me").count()),
+        ("unassigned", "Unassigned", by_assignment(in_status, "unassigned").count()),
+    ]
+
+    query = by_status(by_assignment(base, assigned_filter), status_filter)
     pagination = query.order_by(SupplierApplication.created_at.desc()).paginate(page=page, per_page=10, error_out=False)
     return render_template(
         "admin_applications.html",
-        admin=get_current_admin(),
+        admin=admin,
         applications=pagination.items,
         pagination=pagination,
         search=search,
         status_filter=status_filter,
         assigned_filter=assigned_filter,
         statuses=STATUSES,
+        status_cards=status_cards,
+        assignment_cards=assignment_cards,
     )
 
 
@@ -3241,14 +3313,16 @@ def delete_product(product_id):
 def supplier_requests():
     user = get_current_user()
     status = request.args.get("status", "").strip()
-    query = ProductRequest.query.filter_by(supplier_id=user.id)
+    base = ProductRequest.query.filter_by(supplier_id=user.id)
+    query = base
     if status in REQUEST_STATUSES:
         query = query.filter(ProductRequest.status == status)
     else:
         status = ""
     page = request.args.get("page", 1, type=int)
     pagination = query.order_by(ProductRequest.created_at.desc()).paginate(page=page, per_page=15, error_out=False)
-    return render_template("supplier_requests.html", user=user, requests=pagination.items, pagination=pagination, status_filter=status)
+    return render_template("supplier_requests.html", user=user, requests=pagination.items, pagination=pagination,
+                           status_filter=status, status_cards=request_status_cards(base))
 
 
 @app.route("/requests/<int:request_id>")
@@ -3400,19 +3474,39 @@ def admin_request_product(product_id):
 def admin_requests():
     admin = get_current_admin()
     status = request.args.get("status", "").strip()
-    mine = request.args.get("mine") == "1"
-    query = ProductRequest.query
-    if status in REQUEST_STATUSES:
-        query = query.filter(ProductRequest.status == status)
-    else:
+    if status not in REQUEST_STATUSES:
         status = ""
-    if mine:
-        query = query.filter(ProductRequest.admin_id == admin.id)
+    mine = request.args.get("mine") == "1"
+
+    def by_requester(query, only_mine):
+        return query.filter(ProductRequest.admin_id == admin.id) if only_mine else query
+
+    def by_status(query, value):
+        return query.filter(ProductRequest.status == value) if value else query
+
+    # Slicer cards: each count is what clicking the card would show, given the other slicer.
+    status_cards = request_status_cards(by_requester(ProductRequest.query, mine))
+    in_status = by_status(ProductRequest.query, status)
+    requester_cards = [("", "Everyone's", by_requester(in_status, False).count()),
+                       ("1", "Made by me", by_requester(in_status, True).count())]
+
+    query = by_status(by_requester(ProductRequest.query, mine), status)
     page = request.args.get("page", 1, type=int)
     pagination = query.order_by(ProductRequest.created_at.desc()).paginate(page=page, per_page=15, error_out=False)
     page_args = {k: v for k, v in {"status": status, "mine": "1" if mine else ""}.items() if v}
     return render_template("admin_requests.html", admin=admin, requests=pagination.items, pagination=pagination,
-                           status_filter=status, mine=mine, page_args=page_args)
+                           status_filter=status, mine=mine, page_args=page_args,
+                           status_cards=status_cards, requester_cards=requester_cards)
+
+
+def request_status_cards(query):
+    """[(status or '', label, count, total value)] for the request slicer cards, 'All' first."""
+    value = func.coalesce(func.sum(ProductRequest.unit_price * ProductRequest.quantity), 0)
+    rows = {st: (n, Decimal(str(v or 0))) for st, n, v in query.with_entities(
+        ProductRequest.status, func.count(ProductRequest.id), value).group_by(ProductRequest.status).all()}
+    cards = [("", "All requests", sum(n for n, _ in rows.values()), sum((v for _, v in rows.values()), Decimal("0")))]
+    cards += [(st, status_label(st), *rows.get(st, (0, Decimal("0")))) for st in REQUEST_STATUSES]
+    return cards
 
 
 @app.route("/admin/requests/<int:request_id>")
@@ -3640,9 +3734,12 @@ def migrate_legacy_categories():
             DB.session.delete(row)
         else:
             row.category = merged
-    if changed or rows:
+    products = Product.query.filter(Product.category.in_(legacy)).update(
+        {Product.category: case(LEGACY_CATEGORY_MAP, value=Product.category)}, synchronize_session=False)
+    if changed or rows or products:
         DB.session.commit()
-        app.logger.info("Moved %s application(s) and %s category row(s) to merged categories.", changed, len(rows))
+        app.logger.info("Moved %s application(s), %s category row(s) and %s product(s) to merged categories.",
+                        changed, len(rows), products)
 
 
 def init_database():
@@ -3714,16 +3811,16 @@ def release_application_command(application_id, reason):
 DEMO_EMAIL_DOMAIN = "demo-supplier.example"  # reserved .example TLD: can never receive real email
 
 DEMO_COMPANIES = [
-    ("Ubuntu Caskets", "Caskets"), ("Sizwe Funeral Catering", "Catering"), ("Eternal Rest Cold Rooms", "Body Storage, Cold-Room and other Burial Services"),
+    ("Ubuntu Caskets", "Caskets and Tombstones"), ("Sizwe Funeral Catering", "Catering"), ("Eternal Rest Cold Rooms", "Body Storage, Cold-Room and other Burial Services"),
     ("Masakhane Tents & Décor", "Tents, Draping and Décor"), ("Thembeka Floral Tributes", "Flowers, crosses and plaques"), ("Khanyisa Hearse Hire", "Funeral Vehicles (Hearse / Family Car)"),
-    ("Imbali Tombstones", "Tombstones"), ("Siyabonga Livestock", "Livestock"), ("Clean-Go Mobile Toilets", "Mobile toilet"),
+    ("Imbali Tombstones", "Caskets and Tombstones"), ("Siyabonga Livestock", "Livestock"), ("Clean-Go Mobile Toilets", "Mobile toilet"),
     ("Dignity Lowering Systems", "Lowering Device"), ("Zenzele Consulting", "Consulting"), ("Lethabo AV & Media", "ICT Equipment, Media and Electronic Devices"),
-    ("Royal Oak Coffins", "Caskets"), ("Mama Thandi's Kitchen", "Catering"), ("Peaceful Journey Transport", "Funeral Vehicles (Hearse / Family Car)"),
-    ("Marquee Masters SA", "Tents, Draping and Décor"), ("Granite & Memorial Works", "Tombstones"), ("Golden Petals Florists", "Flowers, crosses and plaques"),
+    ("Royal Oak Coffins", "Caskets and Tombstones"), ("Mama Thandi's Kitchen", "Catering"), ("Peaceful Journey Transport", "Funeral Vehicles (Hearse / Family Car)"),
+    ("Marquee Masters SA", "Tents, Draping and Décor"), ("Granite & Memorial Works", "Caskets and Tombstones"), ("Golden Petals Florists", "Flowers, crosses and plaques"),
     ("Nkosi Cattle Traders", "Livestock"), ("Sanitech Event Hire", "Mobile toilet"), ("Heritage Draping Co", "Tents, Draping and Décor"),
     ("Amandla Catering Services", "Catering"), ("Serenity Body Storage", "Body Storage, Cold-Room and other Burial Services"), ("Vukani Funeral Consultants", "Consulting"),
-    ("Kwanele Casket Makers", "Caskets"), ("Phila Sound & Screens", "ICT Equipment, Media and Electronic Devices"), ("Bayede Luxury Cars", "Funeral Vehicles (Hearse / Family Car)"),
-    ("Ithemba Memorial Stones", "Tombstones"), ("Siphesihle Event Tents", "Tents, Draping and Décor"), ("Mzansi Lowering Devices", "Lowering Device"),
+    ("Kwanele Casket Makers", "Caskets and Tombstones"), ("Phila Sound & Screens", "ICT Equipment, Media and Electronic Devices"), ("Bayede Luxury Cars", "Funeral Vehicles (Hearse / Family Car)"),
+    ("Ithemba Memorial Stones", "Caskets and Tombstones"), ("Siphesihle Event Tents", "Tents, Draping and Décor"), ("Mzansi Lowering Devices", "Lowering Device"),
 ]
 DEMO_PEOPLE = ["Thandiwe Mkhize", "Sipho Ndlovu", "Lerato Mokoena", "Bongani Zulu", "Nomvula Dlamini", "Kagiso Molefe",
                "Zanele Khumalo", "Themba Nkosi", "Palesa Mahlangu", "Mandla Sithole", "Ayanda Cele", "Refilwe Masilo",
@@ -3735,13 +3832,13 @@ DEMO_CITIES = {"KwaZulu-Natal": ["Durban", "Pietermaritzburg", "Richards Bay"], 
                "Limpopo": ["Polokwane", "Thohoyandou"], "Mpumalanga": ["Mbombela", "eMalahleni"], "Free State": ["Bloemfontein"],
                "North West": ["Rustenburg", "Mahikeng"], "Northern Cape": ["Kimberley"]}
 DEMO_PRODUCTS = {
-    "Caskets": [("Pine casket, standard", 4500, "each"), ("Oak casket, premium", 12800, "each"), ("Child casket, white", 2900, "each"), ("Casket with viewing glass", 7600, "each")],
+    "Caskets and Tombstones": [("Pine casket, standard", 4500, "each"), ("Oak casket, premium", 12800, "each"), ("Child casket, white", 2900, "each"), ("Casket with viewing glass", 7600, "each"),
+                               ("Granite headstone, single", 9800, "each"), ("Granite headstone, double", 16500, "each"), ("Marble book memorial", 7200, "each")],
     "Catering": [("Funeral catering, 100 guests", 18500, "per event"), ("Funeral catering, 250 guests", 39000, "per event"), ("Tea & refreshments, 50 guests", 3200, "per event")],
     "Body Storage, Cold-Room and other Burial Services": [("Cold-room storage", 450, "per day"), ("Body transport (local)", 1800, "per service"), ("Mortuary preparation", 2500, "per service")],
     "Tents, Draping and Décor": [("Marquee tent 10x20m", 6200, "per event"), ("Stretch tent 15x20m", 8900, "per event"), ("White draping & décor set", 2400, "per event"), ("Chairs with covers (100)", 1500, "per event")],
     "Flowers, crosses and plaques": [("Casket spray, roses", 1450, "each"), ("Wreath, mixed flowers", 850, "each"), ("Engraved brass plaque", 650, "each"), ("Wooden cross", 480, "each")],
     "Funeral Vehicles (Hearse / Family Car)": [("Hearse with driver", 3500, "per day"), ("Family car (7-seater)", 2200, "per day"), ("Luxury family car", 3800, "per day")],
-    "Tombstones": [("Granite headstone, single", 9800, "each"), ("Granite headstone, double", 16500, "each"), ("Marble book memorial", 7200, "each")],
     "Livestock": [("Cow (ceremonial)", 14000, "each"), ("Goat", 2200, "each"), ("Sheep", 2600, "each")],
     "Mobile toilet": [("VIP mobile toilet", 950, "per day"), ("Standard mobile toilet", 550, "per day"), ("Hand-wash station", 350, "per day")],
     "Lowering Device": [("Lowering device hire", 1200, "per service"), ("Grave dressing set", 900, "per service")],

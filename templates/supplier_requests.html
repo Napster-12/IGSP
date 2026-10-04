@@ -7,12 +7,22 @@
 {% block page_subtitle %}Requests from Icebolethu Group for items in your inventory{% endblock %}
 
 {% block content %}
-    <nav class="ad-tabs" aria-label="Filter by status">
-        <a href="{{ url_for('supplier_requests') }}" class="ad-tab{% if not status_filter %} is-active{% endif %}">All</a>
-        {% for status in REQUEST_STATUSES %}
-            <a href="{{ url_for('supplier_requests', status=status) }}" class="ad-tab{% if status_filter == status %} is-active{% endif %}">{{ status_label(status) }}</a>
-        {% endfor %}
-    </nav>
+    {% set REQUEST_ICONS = {
+        '': 'M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0',
+        'requested': 'M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z',
+        'accepted': 'M20 6 9 17l-5-5',
+        'declined': 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6',
+        'delivered': 'M1 3h15v13H1zM16 8h4l3 3v5h-7zM5.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM18.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+        'completed': 'M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4 12 14.01l-3-3',
+        'cancelled': 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM4.93 4.93l14.14 14.14',
+    } %}
+    {% set ns = namespace(status=[]) %}
+    {% for value, label, count, total in status_cards %}
+        {% set ns.status = ns.status + [{'value': value, 'label': label, 'count': count, 'tone': value or 'all',
+            'icon': REQUEST_ICONS.get(value, REQUEST_ICONS['']), 'sub': total|zar if count else none,
+            'url': url_for('supplier_requests', status=value or None)}] %}
+    {% endfor %}
+    {{ ad.slicers('Status', ns.status, status_filter, url_for('supplier_requests') if status_filter else none, variant='dense') }}
 
     <section class="ad-card">
         {% if requests %}

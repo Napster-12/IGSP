@@ -4,97 +4,126 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Verify Email | IGSP</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
 </head>
-<body class="auth-body">
-    <div class="auth-shell">
-        <div class="auth-card">
-            <div class="auth-brand">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="IGSP logo">
-            </div>
+<body class="adm-login">
+    <div class="adm-login-photo" aria-hidden="true">
+        <img src="{{ url_for('static', filename='images/background.png') }}" alt="">
+    </div>
 
-            <h1>Verify Your Email</h1>
-            <p class="auth-lead">We've sent a 6-digit verification code to <strong>{{ user.email }}</strong>. Enter it below to complete your login.</p>
+    <div class="adm-login-side">
+        <main class="adm-login-main">
+            <img class="adm-login-logo" src="{{ url_for('static', filename='images/logo.png') }}" alt="Icebolethu Group">
+            <h1>Verify your email</h1>
+            <p class="adm-login-lead" style="max-width:340px;">Enter the 6-digit code we sent to<br><strong class="otp-email">{{ user.email }}</strong></p>
 
             {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="flash-message flash-{{ category }}">{{ message }}</div>
-                    {% endfor %}
-                {% endif %}
+                {% for category, message in messages %}
+                    <div class="flash-message flash-{{ category }} adm-login-flash">{{ message }}</div>
+                {% endfor %}
             {% endwith %}
 
-            <form class="igsp-form auth-form" method="post" action="{{ url_for('verify_email') }}" id="verify-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <label>Verification Code</label>
-                <div class="otp-boxes" id="otp-boxes">
-                    <input type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" class="otp-input" data-index="0" autofocus>
-                    <input type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" class="otp-input" data-index="1">
-                    <input type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" class="otp-input" data-index="2">
-                    <input type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" class="otp-input" data-index="3">
-                    <input type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" class="otp-input" data-index="4">
-                    <input type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" class="otp-input" data-index="5">
-                </div>
-                <input type="hidden" id="code" name="code" required>
+            <div class="adm-login-panel">
+                <form class="adm-login-form" method="post" action="{{ url_for('verify_email') }}" id="verify-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="otp-row" role="group" aria-label="Verification code">
+                        {% for i in range(6) %}
+                            <input type="text" inputmode="numeric" pattern="[0-9]" maxlength="1" class="otp-box" aria-label="Digit {{ i + 1 }}"{% if i == 0 %} autocomplete="one-time-code" autofocus{% else %} autocomplete="off"{% endif %}>
+                        {% endfor %}
+                    </div>
+                    <input type="hidden" id="code" name="code" required>
 
-                <button type="submit">Verify</button>
-            </form>
+                    <button type="submit" class="adm-login-btn" id="verify-btn">Verify</button>
+                </form>
 
-            <form class="igsp-form auth-form" method="post" action="{{ url_for('resend_code') }}" style="margin-top:14px;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" style="background:linear-gradient(90deg,#6E696A,#4A4546);">Resend Code</button>
-            </form>
+                <form method="post" action="{{ url_for('resend_code') }}" class="otp-resend">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <span>Didn't get the code?</span>
+                    <button type="submit" id="resend-btn">Resend code</button>
+                </form>
+                <p class="otp-hint">The code expires after 10 minutes. Check your spam folder if it hasn't arrived.</p>
 
-            <p class="auth-footer-text">
-                <a href="{{ url_for('logout') }}">Cancel and log out</a>
-            </p>
-        </div>
+                <p class="adm-login-links"><a href="{{ url_for('logout') }}">Cancel and log out</a></p>
+            </div>
+        </main>
     </div>
+
+    <footer class="adm-login-foot">
+        <p><strong>Call Centre:</strong> 031 208 9102</p>
+        <p><strong>Email:</strong> supplier_onboarding@icebolethu.co.za</p>
+    </footer>
 
     <script>
         (function() {
-            const boxes = document.querySelectorAll('.otp-input');
+            const boxes = Array.from(document.querySelectorAll('.otp-box'));
             const hidden = document.getElementById('code');
             const form = document.getElementById('verify-form');
+            let submitted = false;
 
             function sync() {
-                hidden.value = Array.from(boxes).map(b => b.value).join('');
+                hidden.value = boxes.map(b => b.value).join('');
+                boxes.forEach(b => b.classList.toggle('is-filled', !!b.value));
+                if (hidden.value.length === 6 && !submitted) {
+                    submitted = true;
+                    form.requestSubmit ? form.requestSubmit() : form.submit();
+                }
+            }
+
+            function fill(digits, start) {
+                digits.split('').forEach((ch, k) => { if (boxes[start + k]) boxes[start + k].value = ch; });
+                const next = Math.min(start + digits.length, boxes.length - 1);
+                boxes[next].focus();
+                sync();
             }
 
             boxes.forEach((box, i) => {
-                box.addEventListener('input', (e) => {
-                    box.value = box.value.replace(/[^0-9]/g, '').slice(0, 1);
-                    if (box.value && i < boxes.length - 1) {
-                        boxes[i + 1].focus();
+                box.addEventListener('input', () => {
+                    const digits = box.value.replace(/[^0-9]/g, '');
+                    box.value = '';
+                    if (digits) {
+                        fill(digits.slice(0, boxes.length - i), i);  // also handles one-time-code autofill into the first box
+                    } else {
+                        sync();
                     }
-                    sync();
                 });
-
                 box.addEventListener('keydown', (e) => {
-                    if (e.key === 'Backspace' && !box.value && i > 0) {
-                        boxes[i - 1].focus();
-                    }
+                    if (e.key === 'Backspace' && !box.value && i > 0) { boxes[i - 1].value = ''; boxes[i - 1].focus(); sync(); e.preventDefault(); }
                     if (e.key === 'ArrowLeft' && i > 0) boxes[i - 1].focus();
                     if (e.key === 'ArrowRight' && i < boxes.length - 1) boxes[i + 1].focus();
                 });
-
+                box.addEventListener('focus', () => box.select());
                 box.addEventListener('paste', (e) => {
                     e.preventDefault();
-                    const data = (e.clipboardData || window.clipboardData).getData('text').replace(/[^0-9]/g, '').slice(0, 6);
-                    data.split('').forEach((ch, idx) => {
-                        if (boxes[idx]) boxes[idx].value = ch;
-                    });
-                    const last = Math.min(data.length, boxes.length) - 1;
-                    if (last >= 0) boxes[last].focus();
-                    sync();
+                    const digits = (e.clipboardData || window.clipboardData).getData('text').replace(/[^0-9]/g, '').slice(0, 6);
+                    if (digits) fill(digits, 0);
                 });
             });
 
             form.addEventListener('submit', (e) => {
-                sync();
+                hidden.value = boxes.map(b => b.value).join('');
                 if (hidden.value.length !== 6) {
                     e.preventDefault();
-                    boxes[0].focus();
+                    submitted = false;
+                    boxes.find(b => !b.value).focus();
+                    return;
                 }
+                document.getElementById('verify-btn').disabled = true;
+                document.getElementById('verify-btn').textContent = 'Verifying…';
             });
+
+            // Resend is allowed 30 seconds after a code is sent; the server enforces this too.
+            const resend = document.getElementById('resend-btn');
+            let wait = 30;
+            function tick() {
+                if (wait <= 0) { resend.disabled = false; resend.textContent = 'Resend code'; return; }
+                resend.disabled = true;
+                resend.textContent = 'Resend in ' + wait + 's';
+                wait -= 1;
+                setTimeout(tick, 1000);
+            }
+            tick();
         })();
     </script>
 </body>

@@ -117,7 +117,7 @@
                                     <span>{{ doc.original_filename }}{% if doc.uploaded_at %} · {{ doc.uploaded_at.strftime('%d %b %Y') }}{% endif %}</span>
                                 </div>
                                 <div class="ad-doc-actions">
-                                    <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" target="_blank" rel="noopener" class="ad-btn ad-btn--ghost ad-btn--sm">View</a>
+                                    <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" data-pdf-view data-pdf-title="{{ doc.document_type }}" class="ad-btn ad-btn--ghost ad-btn--sm">View</a>
                                     {% if is_mine %}
                                     <form method="post" action="{{ url_for('replace_admin_document', application_id=application.id, document_id=doc.id) }}" enctype="multipart/form-data">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

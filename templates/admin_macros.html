@@ -36,3 +36,24 @@
         <span class="ad-assignee">{{ application.assigned_admin.name or application.assigned_admin.email }}</span>
     {% endif %}
 {%- endmacro %}
+
+{#- Slicer cards: clickable stat cards that filter the list below.
+    cards: list of dicts {value, label, count, url, tone, icon (SVG path), sub (optional)}.
+    variant: '' (wraps, auto width) or 'compact' (fixed columns, shrinks to one row on phones). -#}
+{% macro slicers(heading, cards, active, clear_url=none, aria=none, variant='') -%}
+    <section class="sl-group" aria-label="{{ aria or ('Filter by ' ~ heading|lower) }}">
+        <div class="sl-head"><h2>{{ heading }}</h2>{% if clear_url %}<a class="sl-clear" href="{{ clear_url }}">Clear {{ heading|lower }}</a>{% endif %}</div>
+        <div class="sl-cards{% if variant %} sl-cards--{{ variant }}{% endif %}"{% if variant == 'compact' %} style="--sl-cols:{{ cards|length }}"{% endif %}>
+            {% for card in cards %}
+                {% set is_active = (active or '') == card.value %}
+                <a href="{{ card.url }}" class="sl-card sl-card--{{ card.tone }}{% if is_active %} is-active{% endif %}{% if not card.count %} is-empty{% endif %}"
+                   {% if is_active %}aria-current="true"{% endif %}>
+                    <span class="sl-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{ card.icon }}"/></svg></span>
+                    <span class="sl-value">{{ card.count }}</span>
+                    <span class="sl-label">{{ card.label }}</span>
+                    {% if card.sub %}<span class="sl-sub">{{ card.sub }}</span>{% endif %}
+                </a>
+            {% endfor %}
+        </div>
+    </section>
+{%- endmacro %}

@@ -12,14 +12,16 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {% set values = draft %}
         {% set directors = draft.directors %}
+        <div class="ob-layout">
         {% include "_profile_sections.html" %}
 
-        <section class="ad-card">
+        <section class="ad-card ob-card ob-card--profile">
             <div class="ad-card-head">
                 <div><h2>Company profile</h2><p>Upload your company profile (PDF), or provide a website above</p></div>
             </div>
             {{ f.document_slot('document_file_company_profile', 'Company profile', company_profile_doc, number='1', required=false) }}
         </section>
+        </div>
 
         <div class="ad-form-actions ad-form-actions--sticky">
             <a href="{{ url_for('dashboard') }}" class="ad-btn ad-btn--ghost">Cancel</a>

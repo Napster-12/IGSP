@@ -57,23 +57,55 @@
     </div>
 {%- endmacro %}
 
-{# Category radio cards, grouped by section. `selected` is a list, `details` a dict. #}
+{# Category tiles, grouped by section. One choice; "please specify" categories reveal a details box.
+   `selected` is a list, `details` a dict. #}
+{% set CATEGORY_INFO = {
+    'Catering': ('Meals, refreshments and catering staff', 'M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7'),
+    'Body Storage, Cold-Room and other Burial Services': ('Mortuary storage, cold rooms and burial services', 'M2 12h20M12 2v20M20 16l-4-4 4-4M4 8l4 4-4 4M16 4l-4 4-4-4M8 20l4-4 4 4'),
+    'Consulting': ('Professional and advisory services', 'M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16M4 6h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z'),
+    'Other': ('A service not listed here', 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM8 12h8M12 8v8'),
+    'Caskets and Tombstones': ('Coffins, caskets, headstones and memorial stones', 'M9 2h6l3 6-2 14H8L6 8zM12 7v7M9.5 9.5h5'),
+    'Livestock': ('Cattle, goats and sheep for ceremonies', 'M4 10c0-3 3-5 8-5s8 2 8 5v4a3 3 0 0 1-3 3h-1v3h-2v-3h-4v3H8v-3H7a3 3 0 0 1-3-3zM3 7l2 2M21 7l-2 2'),
+    'Flowers, crosses and plaques': ('Wreaths, floral arrangements, crosses and plaques', 'M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 11v11M12 22c-4 0-6-2-6-5 3 0 6 2 6 5zm0 0c4 0 6-2 6-5-3 0-6 2-6 5'),
+    'ICT Equipment, Media and Electronic Devices': ('Computers, screens, sound and other devices', 'M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8 21h8M12 17v4'),
+    'Tents, Draping and Décor': ('Marquees, draping, chairs and décor hire', 'M3 20 12 4l9 16zM12 4v16M8.5 20 12 13l3.5 7'),
+    'Funeral Vehicles (Hearse / Family Car)': ('Hearse and family car hire', 'M5 17H3v-5l2-5h11l4 5h1v5h-2M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM9 17h6M3 12h18'),
+    'Lowering Device': ('Grave lowering devices and equipment', 'M12 3v11M8 10l4 4 4-4M4 21h16M6 17v4M18 17v4'),
+    'Mobile toilet': ('Portable toilets for gravesites and events', 'M7 3h10v7H7zM5 10h14l-1.5 5h-11zM9 15l-1 6h8l-1-6'),
+} %}
+{% set GROUP_INFO = {'SERVICES': 'Work done for us', 'GOODS': 'Products we buy', 'BURIALS RELATED RENTALS AND PURCHASES': 'Items we hire or buy for burials'} %}
 {% macro category_picker(selected=[], details={}) -%}
-    <div class="ad-categories">
+    <div class="cat-picker">
         {% for section in CATEGORY_SECTIONS %}
-            <fieldset class="ad-category-group">
-                <legend>{{ section.name|title if section.name.isupper() else section.name }}</legend>
-                <div class="ad-choices">
+            <fieldset class="cat-group">
+                <legend class="cat-group-head">
+                    <span class="cat-group-name">{{ section.name|title if section.name.isupper() else section.name }}</span>
+                    {% if GROUP_INFO.get(section.name|upper) %}<span class="cat-group-sub">{{ GROUP_INFO.get(section.name|upper) }}</span>{% endif %}
+                </legend>
+                <div class="cat-tiles">
                     {% for item in section['items'] %}
-                        <div class="ad-choice-wrap">
-                            <label class="ad-choice">
-                                <input type="radio" name="categories" value="{{ item.value }}" data-index="{{ item.index }}" required
-                                       {% if item.value in selected %}checked{% endif %}>
-                                <span>{{ item.label|replace(', please specify:', '')|replace(' please specify:', '') }}</span>
+                        {% set info = CATEGORY_INFO.get(item.value, ('', 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z')) %}
+                        {% set title = item.label|replace(', please specify:', '')|replace(' please specify:', '') %}
+                        <div class="cat-tile">
+                            <label class="cat-tile-main">
+                                <input type="radio" name="categories" value="{{ item.value }}" data-index="{{ item.index }}" data-title="{{ title }}" required
+                                       {% if item.value in selected %}checked{% endif %} class="cat-radio">
+                                <span class="cat-icon" aria-hidden="true">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="{{ info[1] }}"/></svg>
+                                </span>
+                                <span class="cat-text">
+                                    <span class="cat-title">{{ title }}</span>
+                                    {% if info[0] %}<span class="cat-desc">{{ info[0] }}</span>{% endif %}
+                                </span>
+                                <span class="cat-check" aria-hidden="true">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
+                                </span>
                             </label>
                             {% if item.specify %}
-                                <div class="ad-choice-detail" data-detail-for="{{ item.index }}" {% if item.value not in selected %}hidden{% endif %}>
-                                    <input type="text" name="category_detail_{{ item.index }}" value="{{ details.get(item.value, '') }}" placeholder="Please specify…" aria-label="Details for {{ item.value }}">
+                                <div class="cat-detail" data-detail-for="{{ item.index }}" {% if item.value not in selected %}hidden{% endif %}>
+                                    <label for="category_detail_{{ item.index }}">Please specify <span class="req">*</span></label>
+                                    <input type="text" id="category_detail_{{ item.index }}" name="category_detail_{{ item.index }}" value="{{ details.get(item.value, '') }}"
+                                           placeholder="{{ 'e.g. Laptops, PA systems, screens' if 'ICT' in item.value else ('e.g. Hearse, family car' if 'Vehicles' in item.value else 'Describe what you supply') }}">
                                 </div>
                             {% endif %}
                         </div>
@@ -102,10 +134,10 @@
                 {% for director in directors or [{}] %}
                     {% set i = loop.index0 %}
                     <tr>
-                        <td><input type="text" name="director_initials_{{ i }}" value="{{ director.initials_surname or '' }}" placeholder="e.g. J. Dube" required></td>
-                        <td>{{ ui.nationality_select('director_nationality_' ~ i, director.nationality or '') }}</td>
-                        <td>{{ ui.director_id_input('director_id_' ~ i, director.id_number or '') }}</td>
-                        <td>{{ role_select('director_role_' ~ i, director.role or '') }}</td>
+                        <td data-label="Initials &amp; surname"><input type="text" name="director_initials_{{ i }}" value="{{ director.initials_surname or '' }}" placeholder="e.g. J. Dube" required></td>
+                        <td data-label="Nationality">{{ ui.nationality_select('director_nationality_' ~ i, director.nationality or '') }}</td>
+                        <td data-label="ID / passport number">{{ ui.director_id_input('director_id_' ~ i, director.id_number or '') }}</td>
+                        <td data-label="Role">{{ role_select('director_role_' ~ i, director.role or '') }}</td>
                         <td class="ad-cell-action"><button type="button" class="ad-btn ad-btn--ghost ad-btn--sm" data-remove-row>Remove</button></td>
                     </tr>
                 {% endfor %}
@@ -114,10 +146,10 @@
     </div>
     <template id="director-row-template">
         <tr>
-            <td><input type="text" name="director_initials_{INDEX}" placeholder="e.g. J. Dube" required></td>
-            <td>{{ ui.nationality_select('director_nationality_{INDEX}') }}</td>
-            <td>{{ ui.director_id_input('director_id_{INDEX}') }}</td>
-            <td>{{ role_select('director_role_{INDEX}') }}</td>
+            <td data-label="Initials &amp; surname"><input type="text" name="director_initials_{INDEX}" placeholder="e.g. J. Dube" required></td>
+            <td data-label="Nationality">{{ ui.nationality_select('director_nationality_{INDEX}') }}</td>
+            <td data-label="ID / passport number">{{ ui.director_id_input('director_id_{INDEX}') }}</td>
+            <td data-label="Role">{{ role_select('director_role_{INDEX}') }}</td>
             <td class="ad-cell-action"><button type="button" class="ad-btn ad-btn--ghost ad-btn--sm" data-remove-row>Remove</button></td>
         </tr>
     </template>

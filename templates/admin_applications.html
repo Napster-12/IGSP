@@ -7,20 +7,36 @@
 {% block page_subtitle %}{{ pagination.total }} application{{ '' if pagination.total == 1 else 's' }}{% if status_filter %} · {{ status_label(status_filter) }}{% endif %}{% if search %} · matching “{{ search }}”{% endif %}{% endblock %}
 
 {% block content %}
-    {% set keep = {'search': search or None, 'assigned': assigned_filter or None} %}
-    <div class="ad-tab-rows">
-        <nav class="ad-tabs" aria-label="Filter by assignment">
-            <a href="{{ url_for('admin_applications', status=status_filter or None, search=search or None) }}" class="ad-tab{% if not assigned_filter %} is-active{% endif %}">Everyone's</a>
-            <a href="{{ url_for('admin_applications', status=status_filter or None, search=search or None, assigned='me') }}" class="ad-tab{% if assigned_filter == 'me' %} is-active{% endif %}">Assigned to me</a>
-            <a href="{{ url_for('admin_applications', status=status_filter or None, search=search or None, assigned='unassigned') }}" class="ad-tab{% if assigned_filter == 'unassigned' %} is-active{% endif %}">Unassigned</a>
-        </nav>
-        <nav class="ad-tabs" aria-label="Filter by status">
-            <a href="{{ url_for('admin_applications', **keep) }}" class="ad-tab{% if not status_filter %} is-active{% endif %}">All statuses</a>
-            {% for status in statuses if status != 'draft' %}
-                <a href="{{ url_for('admin_applications', status=status, **keep) }}" class="ad-tab{% if status_filter == status %} is-active{% endif %}">{{ status_label(status) }}</a>
-            {% endfor %}
-        </nav>
-    </div>
+    {% set STATUS_ICONS = {
+        '': 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8',
+        'submitted': 'M22 2 11 13M22 2l-7 20-4-9-9-4z',
+        'pending_review': 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',
+        'under_review': 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35',
+        'approved': 'M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4 12 14.01l-3-3',
+        'declined': 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6',
+        'returned_for_update': 'M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3',
+    } %}
+    {% set WHO_ICONS = {
+        '': 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+        'me': 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+        'unassigned': 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM17 8l5 5M22 8l-5 5',
+    } %}
+
+    {% set ns = namespace(status=[], who=[]) %}
+    {% for value, label, count in status_cards %}
+        {% set ns.status = ns.status + [{'value': value, 'label': label, 'count': count, 'tone': value or 'all',
+            'icon': STATUS_ICONS.get(value, STATUS_ICONS['']),
+            'url': url_for('admin_applications', status=value or None, search=search or None, assigned=assigned_filter or None)}] %}
+    {% endfor %}
+    {% for value, label, count in assignment_cards %}
+        {% set ns.who = ns.who + [{'value': value, 'label': label, 'count': count, 'tone': 'who', 'icon': WHO_ICONS[value],
+            'url': url_for('admin_applications', assigned=value or None, search=search or None, status=status_filter or None)}] %}
+    {% endfor %}
+    {{ ad.slicers('Status', ns.status, status_filter,
+                  url_for('admin_applications', search=search or None, assigned=assigned_filter or None) if status_filter else none) }}
+    {{ ad.slicers('Assignment', ns.who, assigned_filter,
+                  url_for('admin_applications', search=search or None, status=status_filter or None) if assigned_filter else none,
+                  variant='compact') }}
 
     <section class="ad-card">
         <form method="get" class="ad-toolbar">
@@ -32,7 +48,7 @@
                 <input type="search" name="search" value="{{ search }}" placeholder="Search company, contact or email">
             </label>
             <button type="submit" class="ad-btn ad-btn--primary">Search</button>
-            {% if search %}<a href="{{ url_for('admin_applications', status=status_filter or None) }}" class="ad-btn ad-btn--ghost">Clear</a>{% endif %}
+            {% if search %}<a href="{{ url_for('admin_applications', status=status_filter or None, assigned=assigned_filter or None) }}" class="ad-btn ad-btn--ghost">Clear</a>{% endif %}
         </form>
 
         {% if applications %}
@@ -68,7 +84,7 @@
         {% else %}
             <div class="ad-empty">
                 <strong>No applications found</strong>
-                <span>Try a different search or status filter.</span>
+                <span>No applications match the selected cards{% if search %} and search{% endif %}. Pick another card or clear a filter.</span>
             </div>
         {% endif %}
     </section>
