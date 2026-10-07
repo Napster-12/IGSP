@@ -7,13 +7,13 @@ Flask app where suppliers register, complete a 4-step application (profile → c
 ```bash
 python3 -m venv env && source env/bin/activate
 pip install -r requirements.txt
-cp .env.example .env        # then fill in DB + SMTP settings
+cp .env.example .env        # then fill in DB + email settings
 flask --app app init-db     # create tables / apply schema upgrades
 flask --app app create-admin
 flask --app app run --debug
 ```
 
-Without SMTP settings, verification codes and password-reset links are printed to the server log, which is handy for local development.
+Without email settings, verification codes and password-reset links are printed to the server log, which is handy for local development. On AWS, set `MAIL_PROVIDER=ses` to send through the Amazon SES API with the server's IAM role (the server needs `ses:SendEmail` for the sender address); otherwise the `SMTP_*` settings are used.
 
 ## Useful commands
 
