@@ -20,6 +20,7 @@ from email.mime.text import MIMEText
 from functools import wraps
 from urllib.parse import quote_plus, urlparse
 
+import boto3
 import click
 from authlib.integrations.flask_client import OAuth
 from dotenv import load_dotenv
@@ -117,6 +118,10 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER)
+# "ses" sends through the Amazon SES API with the server's AWS credentials (e.g. an EC2
+# instance role) instead of SMTP. af-south-1 has no SES SMTP endpoint. SMTP_FROM is the sender.
+MAIL_PROVIDER = os.getenv("MAIL_PROVIDER", "smtp").strip().lower()
+SES_REGION = os.getenv("SES_REGION", "af-south-1")
 
 # Shown on printed quotations. Optional; blank values are simply left off the document.
 COMPANY_DETAILS = {
@@ -603,11 +608,33 @@ def documents_for_application(application, supplier):
 # Email
 # ---------------------------------------------------------------------------
 
-def smtp_configured():
+def email_configured():
+    if MAIL_PROVIDER == "ses":
+        return bool(SMTP_FROM)
     return bool(SMTP_USER and SMTP_PASSWORD)
 
 
+_ses_client = None
+
+
+def _ses():
+    global _ses_client
+    if _ses_client is None:
+        _ses_client = boto3.client("sesv2", region_name=SES_REGION)
+    return _ses_client
+
+
 def _deliver(to_email, subject, body, subtype):
+    if MAIL_PROVIDER == "ses":
+        _ses().send_email(
+            FromEmailAddress=SMTP_FROM,
+            Destination={"ToAddresses": [to_email]},
+            Content={"Simple": {
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body": {"Html" if subtype == "html" else "Text": {"Data": body, "Charset": "UTF-8"}},
+            }},
+        )
+        return
     msg = MIMEText(body, subtype, "utf-8")
     msg["Subject"] = subject
     msg["From"] = SMTP_FROM
@@ -643,8 +670,8 @@ def render_email(subject, message, recipient_name, application=None, action_url=
 
 def send_verification_email(to_email, code):
     """Send a login code synchronously so the caller can report failures."""
-    if not smtp_configured():
-        app.logger.warning("SMTP not configured. Verification code for %s: %s", to_email, code)
+    if not email_configured():
+        app.logger.warning("Email not configured. Verification code for %s: %s", to_email, code)
         return True
     body = render_email(
         "Your IGSP Verification Code",
@@ -664,8 +691,8 @@ def send_notification_email(to_email, subject, body, recipient_name=None, applic
                             action_url=None, action_label=None):
     if not to_email:
         return False
-    if not smtp_configured():
-        app.logger.info("SMTP not configured. Email to %s: %s", to_email, subject)
+    if not email_configured():
+        app.logger.info("Email not configured. Email to %s: %s", to_email, subject)
         return False
     html = render_email(subject, body, recipient_name or "Supplier", application, action_url, action_label)
     _deliver_in_background(to_email, subject, html, "html")
@@ -1428,7 +1455,7 @@ def forgot_password():
         user = find_user_by_email(email) if email else None
         if user:
             reset_url = url_for("reset_password", token=make_password_reset_token(user), _external=True)
-            if smtp_configured():
+            if email_configured():
                 send_notification_email(
                     user.email,
                     "Reset your IGSP password",
@@ -1439,7 +1466,7 @@ def forgot_password():
                     action_label="Reset password",
                 )
             else:
-                app.logger.warning("SMTP not configured. Password reset link for %s: %s", user.email, reset_url)
+                app.logger.warning("Email not configured. Password reset link for %s: %s", user.email, reset_url)
         # Same response whether or not the account exists, so emails can't be enumerated.
         flash("If an account exists for that email, a password reset link has been sent.", "success")
         return redirect(url_for("login"))
