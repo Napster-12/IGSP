@@ -31,3 +31,12 @@ gunicorn -w 1 --threads 8 -b 0.0.0.0:8000 app:app
 Set `SECRET_KEY`, `SESSION_COOKIE_SECURE=1` (behind HTTPS) and leave `FLASK_DEBUG=0`. Login rate limiting is in-process, so a single worker with threads keeps it accurate.
 
 Uploaded documents are stored in `static/uploads/<user id>/` but are **not** publicly served; `/uploads/...` only returns a file to the supplier who owns it or to an admin. Back this folder up together with the database.
+
+## Staging and deploys
+
+Staging runs at https://igsp.staging.icebolethu.co.za (AWS af-south-1). Every push to `main` deploys there automatically through GitHub Actions ([`.github/workflows/deploy-staging.yml`](.github/workflows/deploy-staging.yml)):
+
+1. **Build check:** install the requirements, compile, and import the app. This also runs on every pull request.
+2. **Deploy:** only if the check passes, and only from `main`. The workflow signs in to AWS through GitHub OIDC (no stored keys) and runs a fixed deploy script on the server. The script pulls `main`, installs dependencies, runs `init-db`, restarts, and checks `/health`. **If anything fails, it rolls back to the previous version automatically.**
+
+To deploy, merge to `main` and watch the run in the **Actions** tab. To redeploy without a code change, use **Run workflow** on the "Deploy to staging" workflow.

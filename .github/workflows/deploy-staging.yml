@@ -1,0 +1,88 @@
+# Build check on every pull request; build check + deploy to staging on every push to main.
+#
+# The deploy job signs in to AWS with the role igsp-github-deploy (GitHub OIDC, no stored keys).
+# That role can do one thing: run the SSM document IGSP-DeployStaging on the staging server, which
+# runs /usr/local/bin/igsp-deploy (pull origin/main, install deps, init-db, restart, health check,
+# automatic rollback on failure).
+
+name: Deploy to staging
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-staging-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: af-south-1
+  DEPLOY_ROLE: arn:aws:iam::202533539363:role/igsp-github-deploy
+  STAGING_INSTANCE: i-0fbaac95c2670b42b
+  STAGING_URL: https://igsp.staging.icebolethu.co.za
+
+jobs:
+  check:
+    name: Build check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile and import the app
+        env:
+          DATABASE_URL: sqlite:///ci.db
+          SECRET_KEY: ci-only
+        run: |
+          python -m py_compile app.py quotation_pdf.py
+          python -c "import app; print('App imports OK with', len(list(app.app.url_map.iter_rules())), 'routes')"
+
+  deploy:
+    name: Deploy to staging
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy through AWS Systems Manager
+        run: |
+          set -euo pipefail
+          id=$(aws ssm send-command \
+                 --document-name IGSP-DeployStaging \
+                 --instance-ids "$STAGING_INSTANCE" \
+                 --comment "${GITHUB_REPOSITORY} ${GITHUB_SHA::7} by ${GITHUB_ACTOR}" \
+                 --query Command.CommandId --output text)
+          echo "SSM command: $id"
+          status=Pending
+          for i in $(seq 1 90); do
+            status=$(aws ssm get-command-invocation --command-id "$id" --instance-id "$STAGING_INSTANCE" \
+                       --query Status --output text 2>/dev/null || echo Pending)
+            case "$status" in Success|Failed|Cancelled|TimedOut) break ;; esac
+            sleep 5
+          done
+          echo "Deploy status: $status"
+          aws ssm get-command-invocation --command-id "$id" --instance-id "$STAGING_INSTANCE" \
+            --query '[StandardOutputContent, StandardErrorContent]' --output text
+          test "$status" = Success
+
+      - name: Check the live site
+        run: curl -sf --retry 3 "$STAGING_URL/health"
