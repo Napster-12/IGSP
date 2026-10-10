@@ -31,11 +31,6 @@
                     <a href="{{ url_for('inventory') }}" class="ad-nav-link{% if inv %} is-active{% endif %}" {% if inv %}aria-current="page"{% endif %}>
                         {{ ad.icon('box') }}<span>Inventory</span>
                     </a>
-                    {% set reqs = request.endpoint in ['supplier_requests', 'supplier_request_detail'] %}
-                    <a href="{{ url_for('supplier_requests') }}" class="ad-nav-link{% if reqs %} is-active{% endif %}" {% if reqs %}aria-current="page"{% endif %}>
-                        {{ ad.icon('cart') }}<span>Requests</span>
-                        {% if open_request_count > 0 %}<span class="ad-nav-count" title="New requests awaiting your response">{{ open_request_count }}</span>{% endif %}
-                    </a>
                 {% endif %}
                 <a href="{{ url_for('notifications') }}" class="ad-nav-link{% if request.endpoint == 'notifications' %} is-active{% endif %}" {% if request.endpoint == 'notifications' %}aria-current="page"{% endif %}>
                     {{ ad.icon('bell') }}<span>Notifications</span>

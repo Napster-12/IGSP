@@ -5,9 +5,6 @@
 {% block title %}Catalogue{% endblock %}
 {% block page_title %}Supplier catalogue{% endblock %}
 {% block page_subtitle %}{{ pagination.total }} product{{ '' if pagination.total == 1 else 's' }} from approved, active suppliers{% endblock %}
-{% block page_actions %}
-    <a href="{{ url_for('admin_requests') }}" class="ad-btn ad-btn--ghost">{{ ad.icon('cart') }} View requests</a>
-{% endblock %}
 
 {% block content %}
     <section class="ad-card">
@@ -49,14 +46,15 @@
                     {% if product.description %}<p class="ad-product-desc">{{ product.description }}</p>{% endif %}
                     <dl class="ad-product-meta">
                         <div><dt>Price</dt><dd><strong>{{ product.price|zar }}</strong> <span class="ad-muted">{{ product.unit }}</span></dd></div>
-                        <div><dt>Available</dt><dd>{% if product.quantity_available is none %}On request{% elif product.quantity_available == 0 %}<span class="ad-doc-status ad-doc-status--pending">Out of stock</span>{% else %}{{ product.quantity_available }}{% endif %}</dd></div>
+                        <div><dt>Available</dt><dd>{% if product.quantity_available is none %}Not tracked{% elif product.quantity_available == 0 %}<span class="ad-doc-status ad-doc-status--pending">Out of stock</span>{% else %}{{ product.quantity_available }}{% endif %}</dd></div>
                         <div><dt>Lead time</dt><dd>{% if product.lead_time_days is not none %}{{ product.lead_time_days }} day{{ '' if product.lead_time_days == 1 else 's' }}{% else %}—{% endif %}</dd></div>
                     </dl>
-                    {% if product.in_stock %}
-                        <a href="{{ url_for('admin_request_product', product_id=product.id) }}" class="ad-btn ad-btn--primary ad-btn--block">{{ ad.icon('cart') }} Request</a>
-                    {% else %}
-                        <span class="ad-btn ad-btn--ghost ad-btn--block" aria-disabled="true">Out of stock</span>
-                    {% endif %}
+                    {% set supplier = product.supplier %}
+                    <div class="ad-product-contact">
+                        <span>{{ supplier.contact_name }}</span>
+                        {% if supplier.phone %}<a href="tel:{{ supplier.phone|replace(' ', '') }}">{{ supplier.phone }}</a>{% endif %}
+                        <a href="mailto:{{ supplier.email }}?subject={{ ('Order: ' ~ product.name)|urlencode }}">{{ supplier.email }}</a>
+                    </div>
                 </article>
             {% endfor %}
         </section>

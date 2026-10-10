@@ -48,11 +48,11 @@
                     </select>
                 </div>
                 {{ f.input('quantity_available', 'Quantity in stock', form.get('quantity_available', ''), attrs='inputmode="numeric" placeholder="Not tracked"') }}
-                {{ f.input('lead_time_days', 'Lead time (days)', form.get('lead_time_days', ''), attrs='inputmode="numeric" placeholder="e.g. 2"', hint='How long you need to deliver after a request is accepted.') }}
+                {{ f.input('lead_time_days', 'Lead time (days)', form.get('lead_time_days', ''), attrs='inputmode="numeric" placeholder="e.g. 2"', hint='How long you need to deliver after an order is placed.') }}
                 <div class="ad-field-row ad-field-row--wide">
                     <label class="ad-check">
                         <input type="checkbox" name="is_listed" value="1" {% if form.get('is_listed') %}checked{% endif %}>
-                        <span><strong>List in the Icebolethu Group catalogue</strong> — untick to keep it in your inventory without it being requestable</span>
+                        <span><strong>List in the Icebolethu Group catalogue</strong> — untick to keep it in your inventory without showing it to Icebolethu Group</span>
                     </label>
                 </div>
             </div>

@@ -4,8 +4,7 @@
     ('admin_dashboard', 'Dashboard', 'dashboard', ['admin_dashboard']),
     ('admin_applications', 'Applications', 'applications', ['admin_applications', 'admin_application_detail']),
     ('admin_suppliers', 'Suppliers', 'suppliers', ['admin_suppliers']),
-    ('admin_catalogue', 'Catalogue', 'box', ['admin_catalogue', 'admin_request_product']),
-    ('admin_requests', 'Requests', 'cart', ['admin_requests', 'admin_request_detail']),
+    ('admin_catalogue', 'Catalogue', 'box', ['admin_catalogue']),
     ('admin_reports', 'Reports', 'reports', ['admin_reports', 'admin_report']),
     ('admin_notifications', 'Notifications', 'bell', ['admin_notifications']),
 ] %}
@@ -34,8 +33,6 @@
                         <span>{{ label }}</span>
                         {% if endpoint == 'admin_notifications' and unread_notifications > 0 %}
                             <span class="ad-nav-count">{{ unread_notifications }}</span>
-                        {% elif endpoint == 'admin_requests' and open_request_count > 0 %}
-                            <span class="ad-nav-count" title="Open requests">{{ open_request_count }}</span>
                         {% endif %}
                     </a>
                 {% endfor %}
