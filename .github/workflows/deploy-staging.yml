@@ -46,7 +46,7 @@ jobs:
           DATABASE_URL: sqlite:///ci.db
           SECRET_KEY: ci-only
         run: |
-          python -m py_compile app.py quotation_pdf.py
+          python -m py_compile app.py
           python -c "import app; print('App imports OK with', len(list(app.app.url_map.iter_rules())), 'routes')"
 
   deploy:

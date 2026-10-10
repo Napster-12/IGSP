@@ -14,7 +14,7 @@ import threading
 import time
 import zipfile
 from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from email.mime.text import MIMEText
 from functools import wraps
@@ -122,17 +122,6 @@ SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER)
 # instance role) instead of SMTP. af-south-1 has no SES SMTP endpoint. SMTP_FROM is the sender.
 MAIL_PROVIDER = os.getenv("MAIL_PROVIDER", "smtp").strip().lower()
 SES_REGION = os.getenv("SES_REGION", "af-south-1")
-
-# Shown on printed quotations. Optional; blank values are simply left off the document.
-COMPANY_DETAILS = {
-    "name": os.getenv("COMPANY_NAME", "Icebolethu Group"),
-    "address": os.getenv("COMPANY_ADDRESS", ""),
-    "registration_number": os.getenv("COMPANY_REG_NUMBER", ""),
-    "vat_number": os.getenv("COMPANY_VAT_NUMBER", ""),
-    "phone": os.getenv("COMPANY_PHONE", ""),
-    "email": os.getenv("COMPANY_EMAIL", ""),
-}
-VAT_RATE = Decimal(os.getenv("VAT_RATE", "15"))
 
 
 # ---------------------------------------------------------------------------
@@ -412,8 +401,6 @@ class ApplicationEvent(DB.Model):
 
 
 PRODUCT_UNITS = ["each", "per day", "per hour", "per event", "per kg", "per litre", "per box", "per set", "per service"]
-REQUEST_STATUSES = ["requested", "accepted", "declined", "delivered", "completed", "cancelled"]
-OPEN_REQUEST_STATUSES = {"requested", "accepted", "delivered"}
 
 
 class Product(DB.Model):
@@ -442,7 +429,10 @@ class Product(DB.Model):
 
 
 class ProductRequest(DB.Model):
-    """An admin's request for a supplier's product. Name, unit and price are copied at request time."""
+    """Retired: product requests were removed from the portal (orders are placed outside it).
+
+    The table is kept so existing rows, and their links to products and suppliers, stay valid.
+    """
     __tablename__ = "product_requests"
 
     id = DB.Column(DB.Integer, primary_key=True)
@@ -477,7 +467,7 @@ class ProductRequest(DB.Model):
 
 
 class ProductRequestEvent(DB.Model):
-    """Append-only history of a product request."""
+    """Retired with ProductRequest; kept for existing rows."""
     __tablename__ = "product_request_events"
 
     id = DB.Column(DB.Integer, primary_key=True)
@@ -967,19 +957,6 @@ def format_zar(value):
     return "R " + f"{amount:,.2f}".replace(",", " ")
 
 
-def open_request_count():
-    """Open product requests for the nav badge: the supplier's own, or all (for admins)."""
-    try:
-        if g.get("is_admin_view") and g.get("admin"):
-            return ProductRequest.query.filter(ProductRequest.status.in_(OPEN_REQUEST_STATUSES)).count()
-        if g.get("user") and g.user.active:
-            return ProductRequest.query.filter(ProductRequest.supplier_id == g.user.id,
-                                               ProductRequest.status == "requested").count()
-    except Exception:  # noqa: BLE001 — never break page rendering over a badge
-        DB.session.rollback()
-    return 0
-
-
 @app.context_processor
 def inject_globals():
     cats = []
@@ -1007,9 +984,7 @@ def inject_globals():
         "status_label": status_label,
         "unread_notifications": unread,
         "supplier_application": supplier_application,
-        "REQUEST_STATUSES": REQUEST_STATUSES,
         "PRODUCT_UNITS": PRODUCT_UNITS,
-        "open_request_count": open_request_count(),
         "EDITABLE_STATUSES": EDITABLE_STATUSES,
     }
 
@@ -2823,14 +2798,12 @@ def admin_reports():
 
 REPORT_KINDS = [
     ("applications", "Applications"),
-    ("requests", "Product requests"),
     ("suppliers", "Suppliers"),
     ("inventory", "Inventory"),
     ("activity", "Admin activity"),
 ]
 REPORT_PERIODS = [("30d", "Last 30 days"), ("90d", "Last 90 days"), ("12m", "Last 12 months"),
                   ("ytd", "This year"), ("all", "All time")]
-COMMITTED_REQUEST_STATUSES = {"accepted", "delivered", "completed"}
 
 
 def report_period(args):
@@ -2871,54 +2844,6 @@ def cell(text, href=None, badge=None, num=False, mono=False, money=None):
             "money": money}
 
 
-def requests_report(start):
-    query = ProductRequest.query
-    if start:
-        query = query.filter(ProductRequest.created_at >= start)
-    reqs = query.order_by(ProductRequest.created_at.desc()).all()
-    committed = [r for r in reqs if r.status in COMMITTED_REQUEST_STATUSES]
-    committed_value = sum((r.total for r in committed), Decimal("0"))
-    completed_value = sum((r.total for r in reqs if r.status == "completed"), Decimal("0"))
-    open_count = sum(1 for r in reqs if r.status in OPEN_REQUEST_STATUSES)
-    lost = sum(1 for r in reqs if r.status in {"declined", "cancelled"})
-
-    by_supplier, by_product = defaultdict(Decimal), defaultdict(Decimal)
-    for r in committed:
-        by_supplier[r.supplier.company_name] += r.total
-        by_product[r.product_name] += r.total
-    months, monthly = monthly_series(((r.created_at, r.total) for r in committed), start)
-    status_counts = [(s, sum(1 for r in reqs if r.status == s)) for s in REQUEST_STATUSES]
-    status_counts = [(s, c) for s, c in status_counts if c]
-
-    return {
-        "kpis": [
-            ("Requests", len(reqs), f"{open_count} open"),
-            ("Committed value", format_zar(committed_value), "accepted, delivered or completed"),
-            ("Completed value", format_zar(completed_value), "received and confirmed"),
-            ("Average order", format_zar(committed_value / len(committed)) if committed else "—", "committed requests"),
-            ("Declined / cancelled", lost, f"{round(lost / len(reqs) * 100) if reqs else 0}% of requests"),
-        ],
-        "charts": [
-            {"id": "c1", "title": "Committed value per month", "subtitle": "Accepted, delivered and completed requests",
-             "labels": months, "values": monthly, "money": True, "months": True},
-            {"id": "c2", "title": "Requests by status", "subtitle": "Only statuses in use",
-             "labels": [status_label(s) for s, _ in status_counts], "values": [c for _, c in status_counts], "horizontal": True},
-            {"id": "c3", "title": "Top suppliers", "subtitle": "By committed value", "horizontal": True, "money": True,
-             **dict(zip(("labels", "values"), top_n(by_supplier)))},
-            {"id": "c4", "title": "Top products", "subtitle": "By committed value", "horizontal": True, "money": True,
-             **dict(zip(("labels", "values"), top_n(by_product)))},
-        ],
-        "columns": ["Reference", "Date", "Product", "Supplier", "Qty", "Total", "Status", "Requested by"],
-        "rows": [[
-            cell(r.reference, href=url_for("admin_request_detail", request_id=r.id), mono=True),
-            cell(r.created_at.strftime("%d %b %Y") if r.created_at else ""),
-            cell(r.product_name), cell(r.supplier.company_name), cell(str(r.quantity), num=True),
-            cell(format_zar(r.total), money=r.total), cell(status_label(r.status), badge=r.status),
-            cell(r.admin.name or r.admin.email),
-        ] for r in reqs],
-    }
-
-
 def suppliers_report(start):
     query = User.query
     if start:
@@ -2928,12 +2853,6 @@ def suppliers_report(start):
     ids = [u.id for u in suppliers]
     product_counts = dict(DB.session.query(Product.user_id, func.count()).filter(
         Product.user_id.in_(ids), Product.is_archived.is_(False)).group_by(Product.user_id).all()) if ids else {}
-    request_rows = ProductRequest.query.filter(ProductRequest.supplier_id.in_(ids)).all() if ids else []
-    request_counts, committed = defaultdict(int), defaultdict(Decimal)
-    for r in request_rows:
-        request_counts[r.supplier_id] += 1
-        if r.status in COMMITTED_REQUEST_STATUSES:
-            committed[r.supplier_id] += r.total
 
     by_category, by_province = defaultdict(int), defaultdict(int)
     for u in suppliers:
@@ -2965,7 +2884,7 @@ def suppliers_report(start):
             {"id": "c4", "title": "By province", "subtitle": "From supplier applications", "horizontal": True,
              **dict(zip(("labels", "values"), top_n(by_province, 10)))},
         ],
-        "columns": ["Supplier", "Supplier ID", "Registered", "Application", "Account", "Products", "Requests", "Committed value"],
+        "columns": ["Supplier", "Supplier ID", "Registered", "Application", "Account", "Products"],
         "rows": [[
             cell(u.company_name, href=(url_for("admin_application_detail", application_id=apps[normalize_email(u.email)].id)
                                        if normalize_email(u.email) in apps else None)),
@@ -2975,8 +2894,6 @@ def suppliers_report(start):
              if normalize_email(u.email) in apps else cell("Not submitted")),
             cell("Active" if u.active else "Inactive", badge="active" if u.active else "inactive"),
             cell(str(product_counts.get(u.id, 0)), num=True),
-            cell(str(request_counts.get(u.id, 0)), num=True),
-            cell(format_zar(committed.get(u.id, 0)), money=committed.get(u.id, Decimal("0"))),
         ] for u in suppliers],
     }
 
@@ -3008,9 +2925,9 @@ def inventory_report(_start):
     return {
         "snapshot": True,
         "kpis": [
-            ("Listed products", len(listed), "requestable in the catalogue"),
+            ("Listed products", len(listed), "visible in the catalogue"),
             ("Hidden", len(live) - len(listed), "in inventory, not listed"),
-            ("Out of stock", len(out_of_stock), "listed but can't be requested"),
+            ("Out of stock", len(out_of_stock), "listed but unavailable"),
             ("Low stock", len(low_stock), "2 or fewer left"),
             ("Suppliers with products", len({p.user_id for p in listed}), f"{len(by_category)} categories covered"),
         ],
@@ -3030,17 +2947,14 @@ def inventory_report(_start):
     }
 
 
-ACTIVITY_LABELS = {**EVENT_LABELS, "requested": "Product requested", "complete": "Request completed",
-                   "cancel": "Request cancelled", "quotation": "Quotation generated"}
+ACTIVITY_LABELS = EVENT_LABELS
 
 
 def activity_report(start):
     app_events = ApplicationEvent.query.filter(ApplicationEvent.actor_type == "admin")
-    req_events = ProductRequestEvent.query.filter(ProductRequestEvent.actor_type == "admin")
     if start:
         app_events = app_events.filter(ApplicationEvent.created_at >= start)
-        req_events = req_events.filter(ProductRequestEvent.created_at >= start)
-    events = [("application", e) for e in app_events.all()] + [("request", e) for e in req_events.all()]
+    events = [("application", e) for e in app_events.all()]
     events.sort(key=lambda pair: pair[1].created_at or datetime.min, reverse=True)
 
     def count(*actions):
@@ -3053,17 +2967,11 @@ def activity_report(start):
     months, monthly = monthly_series(((e.created_at, 1) for _, e in events), start)
     applications = {a.id: a for a in SupplierApplication.query.filter(
         SupplierApplication.id.in_({e.application_id for kind, e in events if kind == "application"})).all()} if events else {}
-    requests_by_id = {r.id: r for r in ProductRequest.query.filter(
-        ProductRequest.id.in_({e.request_id for kind, e in events if kind == "request"})).all()} if events else {}
 
     def subject(kind, e):
-        if kind == "application":
-            a = applications.get(e.application_id)
-            return cell(a.company_name if a else f"Application {e.application_id}",
-                        href=url_for("admin_application_history", application_id=e.application_id))
-        r = requests_by_id.get(e.request_id)
-        return cell(r.reference if r else f"Request {e.request_id}",
-                    href=url_for("admin_request_detail", request_id=e.request_id), mono=True)
+        a = applications.get(e.application_id)
+        return cell(a.company_name if a else f"Application {e.application_id}",
+                    href=url_for("admin_application_history", application_id=e.application_id))
 
     return {
         "kpis": [
@@ -3071,7 +2979,7 @@ def activity_report(start):
             ("Decisions", count("status_changed"), "application status changes"),
             ("Assignments", count("assigned", "unassigned"), "assigned or unassigned"),
             ("Documents opened", count("document_viewed", "documents_downloaded"), "views and ZIP downloads"),
-            ("Product requests", count("requested"), f"{count('quotation')} quotations generated"),
+            ("Admins active", len(per_admin), "with at least one action"),
         ],
         "charts": [
             {"id": "c1", "title": "Actions per admin", "subtitle": "All recorded actions", "horizontal": True,
@@ -3092,10 +3000,9 @@ def activity_report(start):
     }
 
 
-REPORT_BUILDERS = {"requests": requests_report, "suppliers": suppliers_report,
+REPORT_BUILDERS = {"suppliers": suppliers_report,
                    "inventory": inventory_report, "activity": activity_report}
 REPORT_DESCRIPTIONS = {
-    "requests": "Spend and fulfilment of product requests to suppliers",
     "suppliers": "Supplier registrations, status and activity",
     "inventory": "What approved suppliers currently offer — a live snapshot",
     "activity": "What each admin has done, from the audit trail",
@@ -3176,11 +3083,11 @@ def admin_reports_export():
 
 
 # ---------------------------------------------------------------------------
-# Inventory (approved suppliers) and product requests (admins)
+# Inventory (approved suppliers) and catalogue (admins)
 # ---------------------------------------------------------------------------
 
 def active_supplier_required(view_func):
-    """Inventory and requests are only for suppliers whose account is active (application approved)."""
+    """Inventory is only for suppliers whose account is active (application approved)."""
     @wraps(view_func)
     @login_required
     def wrapper(*args, **kwargs):
@@ -3218,30 +3125,6 @@ def parse_product_form(form):
         "name": values["name"][:150], "category": values["category"], "description": values["description"][:5000],
         "unit": values["unit"], "price": price, **numbers,
     }, None
-
-
-def log_request_event(product_request, action, note="", from_status=None, to_status=None, actor=None):
-    actor = actor or (get_current_admin() if g.get("is_admin_view") else get_current_user())
-    if isinstance(actor, Admin):
-        actor_type, name = "admin", actor.name or actor.email
-    elif isinstance(actor, User):
-        actor_type, name = "supplier", actor.contact_name or actor.company_name
-    else:
-        actor_type, name = "system", "System"
-    DB.session.add(ProductRequestEvent(
-        request_id=product_request.id, actor_type=actor_type, actor_name=(name or "")[:150],
-        action=action, from_status=from_status, to_status=to_status, note=(note or "")[:2000],
-    ))
-
-
-def notify_request_admin(product_request, title, message):
-    admin = product_request.admin
-    if not admin:
-        return
-    DB.session.add(Notification(admin_id=admin.id, title=title, message=message))
-    send_notification_email(admin.email, title, message, recipient_name=admin.name or "Admin",
-                            action_url=url_for("admin_request_detail", request_id=product_request.id, _external=True),
-                            action_label="View request")
 
 
 # ---- Supplier: inventory ----
@@ -3323,7 +3206,7 @@ def toggle_product(product_id):
 def delete_product(product_id):
     product = Product.query.filter_by(id=product_id, user_id=get_current_user().id, is_archived=False).first_or_404()
     if ProductRequest.query.filter_by(product_id=product.id).first():
-        # Keep it for the request history, but remove it from the inventory and catalogue.
+        # Old product requests still reference it, so archive instead of deleting.
         product.is_archived = True
         product.is_listed = False
     else:
@@ -3333,74 +3216,7 @@ def delete_product(product_id):
     return redirect(url_for("inventory"))
 
 
-# ---- Supplier: requests received ----
-
-@app.route("/requests")
-@active_supplier_required
-def supplier_requests():
-    user = get_current_user()
-    status = request.args.get("status", "").strip()
-    base = ProductRequest.query.filter_by(supplier_id=user.id)
-    query = base
-    if status in REQUEST_STATUSES:
-        query = query.filter(ProductRequest.status == status)
-    else:
-        status = ""
-    page = request.args.get("page", 1, type=int)
-    pagination = query.order_by(ProductRequest.created_at.desc()).paginate(page=page, per_page=15, error_out=False)
-    return render_template("supplier_requests.html", user=user, requests=pagination.items, pagination=pagination,
-                           status_filter=status, status_cards=request_status_cards(base))
-
-
-@app.route("/requests/<int:request_id>")
-@active_supplier_required
-def supplier_request_detail(request_id):
-    user = get_current_user()
-    product_request = ProductRequest.query.filter_by(id=request_id, supplier_id=user.id).first_or_404()
-    return render_template("supplier_request_detail.html", user=user, req=product_request)
-
-
-SUPPLIER_TRANSITIONS = {"accept": ("requested", "accepted"), "decline": ("requested", "declined"), "deliver": ("accepted", "delivered")}
-
-
-@app.route("/requests/<int:request_id>/respond", methods=["POST"])
-@active_supplier_required
-def respond_to_request(request_id):
-    user = get_current_user()
-    product_request = ProductRequest.query.filter_by(id=request_id, supplier_id=user.id).first_or_404()
-    detail_url = url_for("supplier_request_detail", request_id=product_request.id)
-    action = request.form.get("action", "")
-    note = request.form.get("note", "").strip()
-
-    if action not in SUPPLIER_TRANSITIONS or product_request.status != SUPPLIER_TRANSITIONS[action][0]:
-        flash("That action isn't available for this request any more.", "error")
-        return redirect(detail_url)
-    if action == "decline" and not note:
-        flash("Please tell Icebolethu Group why you're declining this request.", "error")
-        return redirect(detail_url)
-
-    product = product_request.product
-    if action == "accept" and product.quantity_available is not None:
-        if product.quantity_available < product_request.quantity:
-            flash(f"You only have {product.quantity_available} in stock. Update your inventory before accepting.", "error")
-            return redirect(detail_url)
-        product.quantity_available -= product_request.quantity
-
-    old, new = SUPPLIER_TRANSITIONS[action]
-    product_request.status = new
-    if note:
-        product_request.supplier_note = note
-    log_request_event(product_request, action, note=note, from_status=old, to_status=new)
-    verb = {"accept": "accepted", "decline": "declined", "deliver": "marked as delivered"}[action]
-    notify_request_admin(product_request, f"Request {product_request.reference} {verb}",
-                         f"{user.company_name} {verb} your request for {product_request.quantity} × {product_request.product_name}."
-                         + (f" Note: {note}" if note else ""))
-    DB.session.commit()
-    flash(f"Request {product_request.reference} {verb}.", "success")
-    return redirect(detail_url)
-
-
-# ---- Admin: catalogue and requests ----
+# ---- Admin: catalogue ----
 
 def catalogue_query():
     return (Product.query.join(User, Product.user_id == User.id)
@@ -3434,215 +3250,6 @@ def admin_catalogue():
         search=search, category_filter=category, supplier_filter=supplier_id, categories=categories,
         suppliers=suppliers, page_args=page_args,
     )
-
-
-@app.route("/admin/catalogue/<int:product_id>/request", methods=["GET", "POST"])
-@admin_required
-def admin_request_product(product_id):
-    admin = get_current_admin()
-    product = catalogue_query().filter(Product.id == product_id).first()
-    if not product:
-        flash("That product is no longer available in the catalogue.", "error")
-        return redirect(url_for("admin_catalogue"))
-
-    if request.method == "POST":
-        form = read_fields(request.form, ["quantity", "required_by", "delivery_location", "notes"])
-        error = None
-        quantity = int(form["quantity"]) if form["quantity"].isdigit() else 0
-        if quantity < 1:
-            error = "Please enter a quantity of at least 1."
-        elif product.quantity_available is not None and quantity > product.quantity_available:
-            error = f"{product.supplier.company_name} only has {product.quantity_available} available."
-        required_by = None
-        if not error and form["required_by"]:
-            try:
-                required_by = datetime.strptime(form["required_by"], "%Y-%m-%d").date()
-                if required_by < date.today():
-                    error = "The required-by date can't be in the past."
-            except ValueError:
-                error = "Please enter a valid required-by date."
-        if not error and not form["delivery_location"]:
-            error = "Please enter a delivery location."
-        if error:
-            flash(error, "error")
-            return render_template("admin_request_new.html", admin=admin, product=product, form=request.form), 400
-
-        product_request = ProductRequest(
-            product_id=product.id, supplier_id=product.user_id, admin_id=admin.id,
-            product_name=product.name, unit=product.unit, unit_price=product.price, quantity=quantity,
-            required_by=required_by, delivery_location=form["delivery_location"][:255], notes=form["notes"][:5000],
-        )
-        DB.session.add(product_request)
-        DB.session.flush()
-        log_request_event(product_request, "requested", note=form["notes"], to_status="requested")
-        supplier = product.supplier
-        DB.session.add(Notification(
-            user_id=supplier.id, title=f"New product request {product_request.reference}",
-            message=f"Icebolethu Group requested {quantity} × {product.name}"
-                    + (f", needed by {required_by.strftime('%d %b %Y')}" if required_by else "") + ".",
-        ))
-        send_notification_email(
-            supplier.email, f"New product request {product_request.reference}",
-            f"Icebolethu Group has requested {quantity} × {product.name} ({format_zar(product_request.total)}). "
-            "Please accept or decline it in the supplier portal.",
-            recipient_name=supplier.contact_name or supplier.company_name,
-            action_url=url_for("supplier_request_detail", request_id=product_request.id, _external=True),
-            action_label="Respond to request",
-        )
-        DB.session.commit()
-        flash(f"Request {product_request.reference} sent to {supplier.company_name}.", "success")
-        return redirect(url_for("admin_request_detail", request_id=product_request.id))
-
-    return render_template("admin_request_new.html", admin=admin, product=product, form={"quantity": 1})
-
-
-@app.route("/admin/requests")
-@admin_required
-def admin_requests():
-    admin = get_current_admin()
-    status = request.args.get("status", "").strip()
-    if status not in REQUEST_STATUSES:
-        status = ""
-    mine = request.args.get("mine") == "1"
-
-    def by_requester(query, only_mine):
-        return query.filter(ProductRequest.admin_id == admin.id) if only_mine else query
-
-    def by_status(query, value):
-        return query.filter(ProductRequest.status == value) if value else query
-
-    # Slicer cards: each count is what clicking the card would show, given the other slicer.
-    status_cards = request_status_cards(by_requester(ProductRequest.query, mine))
-    in_status = by_status(ProductRequest.query, status)
-    requester_cards = [("", "Everyone's", by_requester(in_status, False).count()),
-                       ("1", "Made by me", by_requester(in_status, True).count())]
-
-    query = by_status(by_requester(ProductRequest.query, mine), status)
-    page = request.args.get("page", 1, type=int)
-    pagination = query.order_by(ProductRequest.created_at.desc()).paginate(page=page, per_page=15, error_out=False)
-    page_args = {k: v for k, v in {"status": status, "mine": "1" if mine else ""}.items() if v}
-    return render_template("admin_requests.html", admin=admin, requests=pagination.items, pagination=pagination,
-                           status_filter=status, mine=mine, page_args=page_args,
-                           status_cards=status_cards, requester_cards=requester_cards)
-
-
-def request_status_cards(query):
-    """[(status or '', label, count, total value)] for the request slicer cards, 'All' first."""
-    value = func.coalesce(func.sum(ProductRequest.unit_price * ProductRequest.quantity), 0)
-    rows = {st: (n, Decimal(str(v or 0))) for st, n, v in query.with_entities(
-        ProductRequest.status, func.count(ProductRequest.id), value).group_by(ProductRequest.status).all()}
-    cards = [("", "All requests", sum(n for n, _ in rows.values()), sum((v for _, v in rows.values()), Decimal("0")))]
-    cards += [(st, status_label(st), *rows.get(st, (0, Decimal("0")))) for st in REQUEST_STATUSES]
-    return cards
-
-
-@app.route("/admin/requests/<int:request_id>")
-@admin_required
-def admin_request_detail(request_id):
-    return render_template("admin_request_detail.html", admin=get_current_admin(),
-                           req=DB.get_or_404(ProductRequest, request_id))
-
-
-# A quotation is only issued once the supplier has accepted (and so confirmed price and availability).
-QUOTATION_READY_STATUSES = {"accepted", "delivered", "completed"}
-
-
-def quotation_context(product_request):
-    """Everything the printable page and the PDF need, computed once so both always agree."""
-    supplier = product_request.supplier
-    application = get_user_application(supplier) if supplier else None
-    total = product_request.total
-    vat_registered = bool(application and (application.vat_number or "").strip())
-    # Supplier prices are treated as VAT-inclusive; show the VAT portion when the supplier is VAT registered.
-    vat_amount = (total * VAT_RATE / (100 + VAT_RATE)).quantize(Decimal("0.01")) if vat_registered else Decimal("0.00")
-    return {
-        "req": product_request,
-        "supplier": supplier,
-        "application": application,
-        "company": COMPANY_DETAILS,
-        "quote_number": f"QT-{product_request.id:05d}",
-        "issued_on": utcnow(),
-        "total": total,
-        "vat_registered": vat_registered,
-        "vat_rate": VAT_RATE,
-        "vat_amount": vat_amount,
-        "total_excl_vat": total - vat_amount,
-        "accepted_on": next((e.created_at for e in product_request.events if e.action == "accept"), None),
-    }
-
-
-def quotation_request_or_redirect(request_id):
-    product_request = DB.get_or_404(ProductRequest, request_id)
-    if product_request.status not in QUOTATION_READY_STATUSES:
-        flash("The quotation becomes available once the supplier has accepted the request.", "error")
-        return product_request, redirect(url_for("admin_request_detail", request_id=product_request.id))
-    return product_request, None
-
-
-@app.route("/admin/requests/<int:request_id>/quotation")
-@admin_required
-def admin_request_quotation(request_id):
-    product_request, blocked = quotation_request_or_redirect(request_id)
-    if blocked:
-        return blocked
-    context = quotation_context(product_request)
-    log_request_event(product_request, "quotation", note="Quotation opened for printing")
-    DB.session.commit()
-    return render_template("admin_quotation.html", admin=get_current_admin(), **context)
-
-
-@app.route("/admin/requests/<int:request_id>/quotation.pdf")
-@admin_required
-def admin_request_quotation_pdf(request_id):
-    from quotation_pdf import build_quotation_pdf  # imported lazily so the app still runs without reportlab
-
-    product_request, blocked = quotation_request_or_redirect(request_id)
-    if blocked:
-        return blocked
-    admin = get_current_admin()
-    context = quotation_context(product_request)
-    pdf_bytes = build_quotation_pdf(context, generated_by=admin.name or admin.email,
-                                    logo_path=os.path.join(STATIC_DIR, "images", "logo.png"))
-    log_request_event(product_request, "quotation", note="Quotation downloaded as PDF")
-    DB.session.commit()
-    supplier_part = secure_filename(product_request.supplier.company_name or "supplier") or "supplier"
-    return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf", as_attachment=True,
-                     download_name=f"{context['quote_number']}_{supplier_part}.pdf")
-
-
-ADMIN_TRANSITIONS = {"complete": ({"delivered"}, "completed"), "cancel": ({"requested", "accepted"}, "cancelled")}
-
-
-@app.route("/admin/requests/<int:request_id>/update", methods=["POST"])
-@admin_required
-def admin_update_request(request_id):
-    product_request = DB.get_or_404(ProductRequest, request_id)
-    detail_url = url_for("admin_request_detail", request_id=product_request.id)
-    action = request.form.get("action", "")
-    note = request.form.get("note", "").strip()
-    if action not in ADMIN_TRANSITIONS or product_request.status not in ADMIN_TRANSITIONS[action][0]:
-        flash("That action isn't available for this request any more.", "error")
-        return redirect(detail_url)
-    if action == "cancel" and not note:
-        flash("Please give the supplier a reason for cancelling.", "error")
-        return redirect(detail_url)
-
-    old, new = product_request.status, ADMIN_TRANSITIONS[action][1]
-    if action == "cancel" and old == "accepted" and product_request.product.quantity_available is not None:
-        product_request.product.quantity_available += product_request.quantity  # return reserved stock
-    product_request.status = new
-    log_request_event(product_request, action, note=note, from_status=old, to_status=new)
-    verb = "completed" if action == "complete" else "cancelled"
-    supplier = product_request.supplier
-    message = f"Icebolethu Group {verb} request {product_request.reference} ({product_request.quantity} × {product_request.product_name})." + (f" Note: {note}" if note else "")
-    DB.session.add(Notification(user_id=supplier.id, title=f"Request {product_request.reference} {verb}", message=message))
-    send_notification_email(supplier.email, f"Request {product_request.reference} {verb}", message,
-                            recipient_name=supplier.contact_name or supplier.company_name,
-                            action_url=url_for("supplier_request_detail", request_id=product_request.id, _external=True),
-                            action_label="View request")
-    DB.session.commit()
-    flash(f"Request {product_request.reference} {verb}.", "success")
-    return redirect(detail_url)
 
 
 # ---------------------------------------------------------------------------
@@ -3924,12 +3531,11 @@ def remove_demo_data():
 
 @app.cli.command("seed-demo")
 @click.option("--suppliers", "count", default=30, show_default=True, help="Number of demo suppliers.")
-@click.option("--months", default=6, show_default=True, help="Spread registrations and requests over this many months.")
-@click.option("--requests", "request_count", default=60, show_default=True, help="Number of demo product requests.")
+@click.option("--months", default=6, show_default=True, help="Spread registrations over this many months.")
 @click.option("--remove", is_flag=True, help="Delete all demo data instead of creating it.")
 @click.option("--seed", default=2026, show_default=True, help="Random seed, for repeatable demo data.")
-def seed_demo_command(count, months, request_count, remove, seed):
-    """Create (or --remove) realistic demo suppliers, applications, inventory and requests.
+def seed_demo_command(count, months, remove, seed):
+    """Create (or --remove) realistic demo suppliers, applications and inventory.
 
     Demo suppliers use @demo-supplier.example addresses (undeliverable), password Password123!
     """
@@ -4068,61 +3674,9 @@ def seed_demo_command(count, months, request_count, remove, seed):
             products.append((product, approved_at))
     DB.session.flush()
 
-    # Product requests spread over the period after each supplier was approved.
-    request_status_pool = ["completed"] * 8 + ["delivered"] * 3 + ["accepted"] * 3 + ["requested"] * 3 + ["declined", "cancelled"]
-    locations = ["Icebolethu Durban branch, 12 Smith St", "Icebolethu Pietermaritzburg branch", "Icebolethu Johannesburg office",
-                 "Family home, Umlazi", "Community hall, KwaMashu", "Gravesite, Chesterville cemetery"]
-    created_requests = 0
-    for _ in range(request_count if products else 0):
-        product, approved_at = rng.choice(products)
-        start_at = max(approved_at + timedelta(days=1), period_start)
-        if start_at >= now:
-            continue
-        created = start_at + timedelta(seconds=rng.randint(0, int((now - start_at).total_seconds())))
-        admin = rng.choice(admins)
-        status = rng.choice(request_status_pool)
-        product_request = ProductRequest(
-            product_id=product.id, supplier_id=product.user_id, admin_id=admin.id, product_name=product.name, unit=product.unit,
-            unit_price=product.price, quantity=rng.randint(1, 3 if product.unit == "each" else 2),
-            required_by=(created + timedelta(days=rng.randint(3, 14))).date(), delivery_location=rng.choice(locations),
-            notes=rng.choice(["", "Service on Saturday morning.", "Please confirm delivery time with the family.", "Urgent: needed by Friday."]),
-            status=status, created_at=created, updated_at=created,
-        )
-        DB.session.add(product_request)
-        DB.session.flush()
-        supplier = product_request.supplier
-
-        def req_event(when, actor, action, note="", frm=None, to=None):
-            DB.session.add(ProductRequestEvent(
-                request_id=product_request.id, created_at=when, actor_type="admin" if isinstance(actor, Admin) else "supplier",
-                actor_name=(actor.name if isinstance(actor, Admin) else actor.contact_name) or actor.email,
-                action=action, note=note, from_status=frm, to_status=to))
-
-        req_event(created, admin, "requested", product_request.notes, to="requested")
-        when = created
-        steps = {"accepted": [("accept", "requested", "accepted")], "declined": [("decline", "requested", "declined")],
-                 "delivered": [("accept", "requested", "accepted"), ("deliver", "accepted", "delivered")],
-                 "completed": [("accept", "requested", "accepted"), ("deliver", "accepted", "delivered"), ("complete", "delivered", "completed")],
-                 "cancelled": [("accept", "requested", "accepted"), ("cancel", "accepted", "cancelled")]}.get(status, [])
-        for action, frm, to in steps:
-            when = min(when + timedelta(hours=rng.randint(2, 48)), now)
-            actor = admin if action in {"complete", "cancel"} else supplier
-            note = {"accept": rng.choice(["", "Confirmed, will deliver on time.", "Available, delivery Friday morning."]),
-                    "decline": "Fully booked on that date, sorry.", "deliver": rng.choice(["Delivered and signed for.", "Set up on site."]),
-                    "cancel": "Family changed the service date.", "complete": ""}[action]
-            if action == "decline":
-                product_request.supplier_note = note
-            elif note and action in {"accept", "deliver"}:
-                product_request.supplier_note = note
-            req_event(when, actor, action, note, frm, to)
-        if status in {"completed", "delivered", "accepted"} and rng.random() < 0.6:
-            req_event(min(when + timedelta(hours=1), now), admin, "quotation", "Quotation downloaded as PDF")
-        product_request.updated_at = when
-        created_requests += 1
-
     DB.session.commit()
     click.echo(f"Created {len(created_users)} demo suppliers ({len(approved)} approved, {len(products)} products) "
-               f"and {created_requests} product requests over the last {months} months.")
+               f"over the last {months} months.")
     click.echo(f"Demo supplier logins: <company>@{DEMO_EMAIL_DOMAIN} / Password123!   Remove with: flask --app app seed-demo --remove")
 
 

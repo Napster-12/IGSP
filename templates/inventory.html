@@ -13,21 +13,20 @@
         <section class="ad-card ad-hero">
             <div>
                 <h2>Add your first product or service</h2>
-                <p>Congratulations on being approved! List what you supply, with your prices and availability. Icebolethu Group's procurement team can then request items directly from your inventory.</p>
+                <p>Congratulations on being approved! List what you supply, with your prices and availability. Icebolethu Group's procurement team uses your inventory to compare prices and will contact you directly to place orders.</p>
                 <a href="{{ url_for('product_form') }}" class="ad-btn ad-btn--primary ad-btn--lg ad-mt">{{ ad.icon('plus') }} Add product</a>
             </div>
             <ol class="ad-howto">
                 <li><strong>Add products</strong><span>Name, price, unit and how many you have available</span></li>
-                <li><strong>Receive requests</strong><span>We'll notify you by email when Icebolethu Group requests an item</span></li>
-                <li><strong>Accept &amp; deliver</strong><span>Accept or decline each request, then mark it delivered</span></li>
+                <li><strong>List them</strong><span>Listed items appear in the Icebolethu Group catalogue</span></li>
+                <li><strong>Keep it current</strong><span>Update prices and stock so the team sees accurate information</span></li>
             </ol>
         </section>
     {% else %}
-        <section class="ad-stats" aria-label="Inventory summary">
+        <section class="ad-stats ad-stats--3" aria-label="Inventory summary">
             <div class="ad-stat"><span class="ad-stat-label">Products</span><span class="ad-stat-value">{{ total_count }}</span><span class="ad-stat-sub">in your inventory</span></div>
             <div class="ad-stat"><span class="ad-stat-label">Listed</span><span class="ad-stat-value">{{ listed_count }}</span><span class="ad-stat-sub">visible to Icebolethu Group</span></div>
-            <div class="ad-stat"><span class="ad-stat-label">Out of stock</span><span class="ad-stat-value">{{ out_of_stock_count }}</span><span class="ad-stat-sub">can't be requested</span></div>
-            <a class="ad-stat" href="{{ url_for('supplier_requests', status='requested') }}"><span class="ad-stat-label">New requests</span><span class="ad-stat-value">{{ open_request_count }}</span><span class="ad-stat-sub">awaiting your response</span></a>
+            <div class="ad-stat"><span class="ad-stat-label">Out of stock</span><span class="ad-stat-value">{{ out_of_stock_count }}</span><span class="ad-stat-sub">shown as unavailable</span></div>
         </section>
 
         <section class="ad-card">

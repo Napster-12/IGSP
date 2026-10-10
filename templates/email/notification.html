@@ -1,25 +1,63 @@
 {% extends "email/base.html" %}
+{% set badge_colours = {
+    'draft': ('#6E696A', '#ffffff'),
+    'submitted': ('#231F20', '#ffffff'),
+    'pending_review': ('#FDD56E', '#231F20'),
+    'under_review': ('#F26522', '#ffffff'),
+    'approved': ('#28a745', '#ffffff'),
+    'declined': ('#dc3545', '#ffffff'),
+    'returned_for_update': ('#A8430F', '#ffffff'),
+} %}
 {% block content %}
-    <h2>Hello {{ recipient_name }},</h2>
-    <p>{{ message }}</p>
+    <p style="margin:0 0 14px; font-size:16px; font-weight:600; color:#1F2430;">Hello {{ recipient_name }},</p>
+    <p style="margin:0 0 18px; color:#1F2430;">{{ message }}</p>
+
     {% if application %}
-    <div class="content-box">
-        <p><strong>Company:</strong> {{ application.company_name }}</p>
-        <p><strong>Contact:</strong> {{ application.contact_name }}</p>
-        <p><strong>Status:</strong> <span class="badge badge-{{ application.status }}">{{ application.status|replace('_', ' ')|title }}</span></p>
-        <p><strong>Submitted:</strong> {{ application.created_at.strftime('%Y-%m-%d') if application.created_at else 'N/A' }}</p>
-        {% if application.review_comments %}
-        <p><strong>Review Comments:</strong> {{ application.review_comments }}</p>
-        {% endif %}
-    </div>
+    {% set bg, fg = badge_colours.get(application.status, ('#6E696A', '#ffffff')) %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px; background-color:#FDF3EA; border-left:4px solid #DD7A2D; border-radius:8px;">
+        <tr>
+            <td style="padding:16px 20px; font-size:14px; line-height:1.6; color:#1F2430;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px; color:#1F2430;">
+                    <tr>
+                        <td style="padding:3px 12px 3px 0; color:#5B5F66; white-space:nowrap; vertical-align:top;">Company</td>
+                        <td style="padding:3px 0; font-weight:600;">{{ application.company_name }}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:3px 12px 3px 0; color:#5B5F66; white-space:nowrap; vertical-align:top;">Contact</td>
+                        <td style="padding:3px 0; font-weight:600;">{{ application.contact_name }}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:3px 12px 3px 0; color:#5B5F66; white-space:nowrap; vertical-align:middle;">Status</td>
+                        <td style="padding:3px 0;">
+                            <span style="display:inline-block; padding:3px 12px; border-radius:20px; font-size:11px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; background-color:{{ bg }}; color:{{ fg }};">{{ application.status|replace('_', ' ')|title }}</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:3px 12px 3px 0; color:#5B5F66; white-space:nowrap; vertical-align:top;">Submitted</td>
+                        <td style="padding:3px 0; font-weight:600;">{{ application.created_at.strftime('%Y-%m-%d') if application.created_at else 'N/A' }}</td>
+                    </tr>
+                    {% if application.review_comments %}
+                    <tr>
+                        <td style="padding:3px 12px 3px 0; color:#5B5F66; white-space:nowrap; vertical-align:top;">Comments</td>
+                        <td style="padding:3px 0;">{{ application.review_comments }}</td>
+                    </tr>
+                    {% endif %}
+                </table>
+            </td>
+        </tr>
+    </table>
     {% endif %}
+
     {% if action_url %}
-    <p style="margin:24px 0;">
-        <a href="{{ action_url }}" style="display:inline-block; background:#F26522; color:#ffffff; text-decoration:none; padding:12px 22px; border-radius:6px; font-weight:bold;">{{ action_label or 'Open IGSP' }}</a>
-    </p>
-    <p style="font-size:12px; color:#6E696A;">If the button doesn't work, copy this link into your browser:<br>{{ action_url }}</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:8px auto 16px;">
+        <tr>
+            <td align="center" style="background-color:#DD7A2D; border-radius:6px;">
+                <a href="{{ action_url }}" style="display:inline-block; padding:13px 32px; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none; border-radius:6px;">{{ action_label or 'Open IGSP' }}</a>
+            </td>
+        </tr>
+    </table>
+    <p style="margin:0 0 20px; font-size:12px; line-height:1.5; color:#6E696A; text-align:center; word-break:break-all;">If the button doesn't work, copy this link into your browser:<br><a href="{{ action_url }}" style="color:#B4560C;">{{ action_url }}</a></p>
     {% endif %}
-    <div class="meta">
-        <p>Thank you,<br>IGSP Team</p>
-    </div>
+
+    <p style="margin:20px 0 0; font-size:14px; color:#5B5F66;">Thank you,<br><strong style="color:#1F2430;">IGSP Team</strong></p>
 {% endblock %}

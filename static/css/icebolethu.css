@@ -4130,6 +4130,7 @@ table tr:hover{
     gap:16px;
 }
 .ad-stats--6{ grid-template-columns:repeat(6, minmax(0, 1fr)); }
+.ad-stats--3{ grid-template-columns:repeat(3, minmax(0, 1fr)); }
 .ad-stat{
     display:flex;
     flex-direction:column;
@@ -5099,95 +5100,10 @@ a.ad-stat:hover{
 .ad-product-meta{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
 .ad-product-meta > div:first-child{ grid-column:1 / -1; }
 .ad-product-meta dd{ white-space:nowrap; }
+.ad-product-contact{ display:flex; flex-direction:column; gap:2px; padding-top:10px; border-top:1px solid var(--border); font-size:13px; color:var(--text-light); min-width:0; }
+.ad-product-contact a{ color:var(--primary-text); font-weight:600; text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ad-product-contact a:hover{ text-decoration:underline; }
 
-/*==========================================================
-    PRINTABLE QUOTATION (admin_quotation.html) — A4
-==========================================================*/
-.qt-body{ background:#EFEDED; color:var(--brand-black); font-size:13px; }
-.qt-toolbar{
-    position:sticky; top:0; z-index:5;
-    display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
-    padding:12px 20px; background:var(--white); border-bottom:1px solid var(--border);
-}
-.qt-toolbar-hint{ color:var(--text-light); font-size:13px; }
-.qt-page{
-    position:relative;
-    width:210mm; min-height:297mm; max-width:100%;
-    margin:24px auto; padding:16mm 15mm;
-    background:#fff; box-shadow:var(--shadow-md);
-    overflow:hidden;
-}
-.qt-watermark{
-    position:absolute; top:42%; left:50%;
-    transform:translate(-50%, -50%) rotate(-28deg);
-    font-size:110px; font-weight:800; letter-spacing:.08em;
-    color:rgba(242,101,34,.10); pointer-events:none; white-space:nowrap;
-}
-.qt-head{ display:flex; justify-content:space-between; gap:24px; padding-bottom:14px; border-bottom:3px solid var(--brand-deep-orange); }
-.qt-brand{ display:flex; flex-direction:column; gap:10px; }
-.qt-brand img{ width:180px; }
-.qt-company, .qt-parties div{ display:flex; flex-direction:column; gap:1px; line-height:1.45; }
-.qt-company span, .qt-parties span{ color:#4A4546; }
-.qt-title{ text-align:right; }
-.qt-title h1{ font-size:30px; letter-spacing:.04em; text-transform:uppercase; color:var(--brand-deep-orange); margin-bottom:8px; }
-.qt-meta{ margin-left:auto; border-collapse:collapse; }
-.qt-meta th{ padding:2px 12px 2px 0; text-align:left; font-weight:600; color:#6E696A; }
-.qt-meta td{ padding:2px 0; text-align:right; font-weight:600; font-variant-numeric:tabular-nums; }
-.qt-warning{ margin-top:12px; padding:8px 12px; border:1px solid #F5C9B3; border-radius:6px; background:#FDE7DC; color:#A8430F; font-weight:600; }
-.qt-parties{ display:grid; grid-template-columns:1fr 1fr; gap:24px; margin:18px 0; }
-.qt-parties h2, .qt-notes h2, .qt-sign h2{
-    font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--brand-deep-orange); margin-bottom:4px;
-}
-.qt-mt{ margin-top:12px; }
-.qt-lines{ width:100%; border-collapse:collapse; margin-top:6px; }
-.qt-lines th{ padding:8px; background:var(--brand-black); color:#fff; font-size:11px; text-align:left; text-transform:uppercase; letter-spacing:.04em; }
-.qt-lines td{ padding:10px 8px; border-bottom:1px solid var(--border); vertical-align:top; }
-.qt-num{ text-align:right !important; font-variant-numeric:tabular-nums; white-space:nowrap; }
-.qt-sub{ display:block; font-size:12px; color:#6E696A; }
-.qt-summary{ display:grid; grid-template-columns:minmax(0, 1fr) 260px; gap:24px; margin-top:14px; }
-.qt-notes p{ margin-bottom:10px; color:#4A4546; white-space:pre-wrap; }
-.qt-totals{ width:100%; border-collapse:collapse; align-self:start; }
-.qt-totals th{ padding:6px 0; text-align:left; font-weight:500; color:#4A4546; }
-.qt-totals td{ padding:6px 0; text-align:right; font-variant-numeric:tabular-nums; }
-.qt-grand th, .qt-grand td{ padding-top:10px; border-top:2px solid var(--brand-black); font-size:16px; font-weight:800; color:var(--brand-black); }
-.qt-fine{ margin-top:10px; font-size:11px; color:#6E696A; }
-.qt-sign{ display:grid; grid-template-columns:1fr 1fr; gap:32px; margin-top:28px; }
-.qt-sign div{ display:flex; flex-direction:column; }
-.qt-line{ min-height:26px; padding-top:8px; border-bottom:1px solid var(--brand-black); }
-.qt-label{ font-size:10px; color:#6E696A; margin-bottom:8px; }
-.qt-foot{ margin-top:28px; padding-top:10px; border-top:1px solid var(--border); font-size:10px; color:#6E696A; text-align:center; }
-
-@page{ size:A4; margin:0; }
-@media print{
-    .qt-body{ background:#fff; }
-    .qt-toolbar{ display:none; }
-    .qt-page{ margin:0; box-shadow:none; width:auto; min-height:auto; }
-    .qt-lines th{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-    .qt-watermark, .qt-warning, .qt-head{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-}
-@media screen and (max-width: 760px){
-    .qt-page{ padding:20px; }
-    .qt-head, .qt-parties, .qt-summary, .qt-sign{ display:flex; flex-direction:column; }
-    .qt-title{ text-align:left; }
-    .qt-meta{ margin-left:0; }
-}
-
-/* Older global table styles must not leak into the quotation. */
-.qt-meta th, .qt-meta td, .qt-totals th, .qt-totals td{ background:transparent; color:inherit; text-transform:none; letter-spacing:0; font-size:13px; }
-.qt-meta th, .qt-totals th{ color:#6E696A; }
-.qt-meta tr, .qt-totals tr{ background:transparent; }
-.qt-grand th, .qt-grand td{ color:var(--brand-black); font-size:16px; }
-.qt-lines tbody tr:hover td{ background:transparent; }
-@media print{
-    .qt-page{ padding:12mm 13mm; }
-    .qt-head{ display:flex; flex-direction:row; }
-    .qt-parties, .qt-sign{ display:grid; grid-template-columns:1fr 1fr; }
-    .qt-summary{ display:grid; grid-template-columns:minmax(0, 1fr) 62mm; }
-    .qt-title{ text-align:right; }
-    .qt-meta{ margin-left:auto; }
-    .qt-sign, .qt-summary{ break-inside:avoid; }
-}
-.qt-toolbar-actions{ display:flex; gap:8px; }
 .ad-btn[aria-disabled="true"]{ opacity:.6; cursor:default; }
 
 /* ---- Report switcher ---- */
