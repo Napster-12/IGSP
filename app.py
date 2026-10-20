@@ -14,7 +14,7 @@ import threading
 import time
 import zipfile
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from email.mime.text import MIMEText
 from functools import wraps
@@ -123,6 +123,19 @@ SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER)
 MAIL_PROVIDER = os.getenv("MAIL_PROVIDER", "smtp").strip().lower()
 SES_REGION = os.getenv("SES_REGION", "af-south-1")
 
+# Certificate expiry checks run in the background every N hours (0 turns them off, e.g. when cron
+# runs `flask --app app check-certificates` instead). Links in those emails use PUBLIC_BASE_URL.
+CERT_CHECK_INTERVAL_HOURS = float(os.getenv("CERT_CHECK_INTERVAL_HOURS", "6"))
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+
+# Supplier registration certificate, issued on approval. A signature image, if wanted, goes in
+# static/images/certificate_signature.png (transparent PNG).
+CERTIFICATE_SIGNATORY_NAME = os.getenv("CERTIFICATE_SIGNATORY_NAME", "")
+CERTIFICATE_SIGNATORY_TITLE = os.getenv("CERTIFICATE_SIGNATORY_TITLE", "Chief Financial Officer")
+CERTIFICATE_FOOTER = os.getenv(
+    "CERTIFICATE_FOOTER", "Icebolethu Group · Call Centre 031 208 9102 · supplier_onboarding@icebolethu.co.za")
+CERTIFICATE_VALID_DAYS = 365
+
 
 # ---------------------------------------------------------------------------
 # Domain constants
@@ -169,6 +182,22 @@ REQUIRED_DOCUMENTS = [
     "Proof of Company residential address (not older than 3 months)",
     "Declaration Form",
 ]
+# Certificates that carry an issue and expiry date. Both dates are mandatory whenever these are uploaded.
+DATED_DOCUMENTS = {
+    "SARS VAT Certificate": "SARS VAT certificate",
+    "Valid B-BBEE certificate, letter from Accountant or Sworn Affidavit": "B-BBEE certificate, accountant's letter or affidavit",
+}
+EXPIRY_WARNING_DAYS = 30
+# Reminders go out this many days before expiry (largest first); expiry itself deactivates the account.
+EXPIRY_REMINDER_DAYS = (30, 7)
+# Sensible bounds for those dates (also stop browsers accepting 5- or 6-digit years).
+EARLIEST_ISSUE_DATE = date(1990, 1, 1)
+MAX_VALIDITY_YEARS = 20
+
+
+def latest_expiry_date(today=None):
+    today = today or date.today()
+    return today.replace(year=today.year + MAX_VALIDITY_YEARS, day=28 if today.month == 2 and today.day == 29 else today.day)
 COMPANY_PROFILE_DOC = "Company Profile"
 OTHER_DOCS = "Other Supporting Documents"
 
@@ -176,9 +205,12 @@ UPLOAD_SLOTS = {f"document_file_{i}": doc for i, doc in enumerate(REQUIRED_DOCUM
 UPLOAD_SLOTS["document_file_other"] = OTHER_DOCS
 UPLOAD_SLOTS["document_file_company_profile"] = COMPANY_PROFILE_DOC
 
-STATUSES = ["draft", "submitted", "pending_review", "under_review", "approved", "declined", "returned_for_update"]
+STATUSES = ["draft", "submitted", "pending_review", "under_review", "approved", "on_file", "declined", "returned_for_update"]
 DOCUMENT_STATUSES = ["pending", "complete"]
 EDITABLE_STATUSES = {"draft", "submitted", "pending_review", "under_review", "returned_for_update", "declined"}
+# "On file": everything checked and in order, but no supplier account yet. Kept for when the services are needed.
+ON_FILE_MESSAGE = ("Your application has been received and all your documents and information are in order. "
+                   "We will keep your details on file and contact you when we need your services.")
 
 PROVINCES = [
     "Eastern Cape", "Free State", "Gauteng", "KwaZulu-Natal", "Limpopo",
@@ -246,6 +278,9 @@ DIRECTOR_FIELD_RE = re.compile(r"^director_(initials|id|role|nationality)_(\d+)$
 
 VERIFY_CODE_MAX_ATTEMPTS = 5
 RESEND_COOLDOWN_SECONDS = 30
+# Bump when templates/terms_content.html changes materially; each acceptance records the version agreed to.
+TERMS_VERSION = "2026-10"
+TERMS_REQUIRED_MESSAGE = "Please accept our Terms & Conditions."
 PASSWORD_RESET_MAX_AGE = 3600
 
 
@@ -311,6 +346,10 @@ class SupplierApplication(DB.Model):
     phone = DB.Column(DB.String(50), nullable=False)
     supplier_category = DB.Column(DB.String(120), nullable=False)
     supplier_category_detail = DB.Column(DB.String(255), default="")
+    # True while the supplier account is deactivated because a certificate expired; renewing restores it.
+    expiry_suspended = DB.Column(DB.Boolean, nullable=False, default=False)
+    # Set each time the application is approved; the registration certificate is dated from it.
+    approved_at = DB.Column(DB.DateTime, nullable=True)
     company_profile = DB.Column(DB.Text, nullable=False)
     documents_status = DB.Column(DB.String(50), default="pending")
     status = DB.Column(DB.String(50), default="submitted")
@@ -361,6 +400,20 @@ class SupplierDocument(DB.Model):
     file_path = DB.Column(DB.String(255), nullable=False)
     original_filename = DB.Column(DB.String(255), nullable=False)
     uploaded_at = DB.Column(DB.DateTime, default=utcnow)
+    issue_date = DB.Column(DB.Date, nullable=True)  # set for DATED_DOCUMENTS only
+    expiry_date = DB.Column(DB.Date, nullable=True)
+    # Last expiry notice sent for these dates: "" (none), "30", "7" (days-before reminders) or "expired".
+    expiry_notice = DB.Column(DB.String(10), nullable=False, default="")
+
+    @property
+    def expiry_state(self):
+        """'expired', 'expiring' (within EXPIRY_WARNING_DAYS), 'valid', or None when there is no expiry date."""
+        if not self.expiry_date:
+            return None
+        days_left = (self.expiry_date - date.today()).days
+        if days_left < 0:
+            return "expired"
+        return "expiring" if days_left <= EXPIRY_WARNING_DAYS else "valid"
 
 
 class SupplierDirector(DB.Model):
@@ -514,6 +567,8 @@ class User(DB.Model):
     active = DB.Column(DB.Boolean, nullable=False, default=False)
     verification_code_hash = DB.Column(DB.String(256), nullable=True)
     verification_code_expires = DB.Column(DB.DateTime, nullable=True)
+    terms_version = DB.Column(DB.String(20), nullable=True)
+    terms_accepted_at = DB.Column(DB.DateTime, nullable=True)
     created_at = DB.Column(DB.DateTime, default=utcnow)
 
     def set_password(self, password):
@@ -521,6 +576,10 @@ class User(DB.Model):
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+    def accept_terms(self):
+        self.terms_version = TERMS_VERSION
+        self.terms_accepted_at = utcnow()
 
     def generate_verification_code(self):
         code = f"{secrets.randbelow(900000) + 100000}"
@@ -689,7 +748,7 @@ def send_notification_email(to_email, subject, body, recipient_name=None, applic
     return True
 
 
-def notify_supplier(supplier, title, message, application=None):
+def notify_supplier(supplier, title, message, application=None, action_url=None, action_label=None):
     DB.session.add(Notification(
         user_id=supplier.id,
         title=title,
@@ -700,8 +759,8 @@ def notify_supplier(supplier, title, message, application=None):
         supplier.email, title, message,
         recipient_name=supplier.contact_name or supplier.company_name,
         application=application,
-        action_url=url_for("dashboard", _external=True),
-        action_label="Open your dashboard",
+        action_url=action_url or url_for("dashboard", _external=True),
+        action_label=action_label or "Open your dashboard",
     )
 
 
@@ -861,6 +920,10 @@ EVENT_LABELS = {
     "assigned": "Assigned to admin",
     "unassigned": "Unassigned",
     "document_viewed": "Document viewed",
+    "certificate_reminder": "Certificate expiry reminder sent",
+    "certificate_expired": "Certificate expired",
+    "certificates_renewed": "Certificates renewed by supplier",
+    "registration_certificate_issued": "Supplier registration certificate issued",
 }
 
 AUDIT_FIELD_LABELS = {
@@ -986,6 +1049,11 @@ def inject_globals():
         "supplier_application": supplier_application,
         "PRODUCT_UNITS": PRODUCT_UNITS,
         "EDITABLE_STATUSES": EDITABLE_STATUSES,
+        "DATED_DOCUMENTS": DATED_DOCUMENTS,
+        "EXPIRY_REMINDER_DAYS": EXPIRY_REMINDER_DAYS,
+        "TODAY": date.today(),
+        "EARLIEST_ISSUE_DATE": EARLIEST_ISSUE_DATE,
+        "LATEST_EXPIRY_DATE": latest_expiry_date(),
     }
 
 
@@ -1075,6 +1143,64 @@ def store_document(user_id, application_id, document_type, file_storage):
     )
     DB.session.add(document)
     return document
+
+
+def parse_document_dates(form, slots, documents, uploads, uploads_only=False):
+    """Read the issue and expiry dates entered for dated documents (VAT and B-BBEE certificates).
+
+    The date fields are named after the upload slot (``<slot>_issue_date`` / ``<slot>_expiry_date``). Dates are
+    required for every dated document being uploaded now or already on file (only those being uploaded when
+    `uploads_only`). Returns ({document_type: (issue, expiry)}, error).
+    """
+    on_file = {doc_type for doc_type, _ in uploads}
+    if not uploads_only:
+        on_file |= {doc.document_type for doc in documents}
+    today = date.today()
+    dates = {}
+    for field, doc_type in slots.items():
+        if doc_type not in DATED_DOCUMENTS or doc_type not in on_file:
+            continue
+        name = DATED_DOCUMENTS[doc_type]
+        parsed = {}
+        for part, label in (("issue_date", "issue"), ("expiry_date", "expiry")):
+            raw = (form.get(f"{field}_{part}") or "").strip()
+            if not raw:
+                return None, f"Please enter the {label} date of your {name}."
+            try:
+                parsed[part] = datetime.strptime(raw, "%Y-%m-%d").date()
+            except ValueError:
+                return None, f"The {label} date of your {name} isn't a valid date; please use a 4-digit year."
+        issue, expiry = parsed["issue_date"], parsed["expiry_date"]
+        if issue < EARLIEST_ISSUE_DATE:
+            return None, f"Please check the issue date of your {name}; it can't be before {EARLIEST_ISSUE_DATE:%Y}."
+        if expiry > latest_expiry_date(today):
+            return None, (f"Please check the expiry date of your {name}; it can't be more than "
+                          f"{MAX_VALIDITY_YEARS} years from today.")
+        if issue > today:
+            return None, f"The issue date of your {name} can't be in the future."
+        if expiry <= issue:
+            return None, f"The expiry date of your {name} must be after its issue date."
+        if expiry < today:
+            return None, f"Your {name} expired on {expiry.strftime('%d %b %Y')}. Please upload a current, valid one."
+        dates[doc_type] = (issue, expiry)
+    return dates, None
+
+
+def apply_document_dates(documents, dates):
+    """Store parsed dates on the matching documents; returns [change] entries for the audit trail."""
+    changes = []
+    for document in documents:
+        if document.document_type not in dates:
+            continue
+        issue, expiry = dates[document.document_type]
+        if (document.issue_date, document.expiry_date) != (issue, expiry):
+            old = (f"{document.issue_date:%d %b %Y} – {document.expiry_date:%d %b %Y}"
+                   if document.issue_date and document.expiry_date else "")
+            changes.append({"field": f"Dates: {document.document_type}", "old": old,
+                            "new": f"{issue:%d %b %Y} – {expiry:%d %b %Y}"})
+            document.issue_date, document.expiry_date = issue, expiry
+            document.expiry_notice = ""
+    return changes
 
 
 def missing_required_documents(documents):
@@ -1282,6 +1408,9 @@ def signup():
         if not all([email, password, confirm_password, form["company_name"], form["contact_name"], form["phone"]]):
             flash("All fields are required.", "error")
             return redirect(url_for("signup"))
+        if not request.form.get("accept_terms"):
+            flash(TERMS_REQUIRED_MESSAGE, "error")
+            return redirect(url_for("signup"))
         if not EMAIL_RE.match(email):
             flash("Please enter a valid email address.", "error")
             return redirect(url_for("signup"))
@@ -1303,6 +1432,7 @@ def signup():
             active=False,
         )
         user.set_password(password)
+        user.accept_terms()
         DB.session.add(user)
         DB.session.commit()
 
@@ -1330,6 +1460,8 @@ def login():
 
         if not email or not password:
             return render_template("login.html", login_error="Email and password are required.")
+        if not request.form.get("accept_terms"):
+            return render_template("login.html", login_error=TERMS_REQUIRED_MESSAGE)
         if login_limiter.is_blocked(limiter_key):
             return render_template("login.html", login_error="Too many login attempts. Please wait 15 minutes and try again.")
 
@@ -1339,12 +1471,18 @@ def login():
             return render_template("login.html", login_error="Invalid email or password.")
 
         login_limiter.reset(limiter_key)
+        user.accept_terms()
         if not start_email_verification(user):
             session.pop("pending_user_id", None)
             return render_template("login.html", login_error="We couldn't send your verification code. Please try again shortly.")
         return redirect(url_for("verify_email"))
 
     return render_template("login.html")
+
+
+@app.route("/terms")
+def terms():
+    return render_template("terms.html")
 
 
 @app.route("/logout")
@@ -1646,9 +1784,15 @@ def onboarding_documents():
         except UploadError as exc:
             flash(str(exc), "error")
             return redirect(url_for("onboarding_documents"))
+        dates, date_error = parse_document_dates(request.form, slots, pending_documents(user), uploads)
+        if date_error:
+            flash(date_error + " Nothing was uploaded; please choose the file again.", "error")
+            return redirect(url_for("onboarding_documents"))
 
         for doc_type, file_storage in uploads:
             store_document(user.id, None, doc_type, file_storage)
+        DB.session.flush()
+        apply_document_dates(pending_documents(user), dates)
         DB.session.commit()
 
         missing = missing_required_documents(pending_documents(user))
@@ -1752,6 +1896,15 @@ def supplier_applications_query(user):
     return SupplierApplication.query.filter(func.lower(SupplierApplication.email) == normalize_email(user.email))
 
 
+def certificate_alerts(application):
+    """Dated certificates that are expired or expiring soon, for the supplier's dashboard."""
+    if not application:
+        return []
+    documents = SupplierDocument.query.filter(SupplierDocument.application_id == application.id,
+                                              SupplierDocument.document_type.in_(list(DATED_DOCUMENTS))).all()
+    return sorted((doc for doc in documents if doc.expiry_state in {"expired", "expiring"}), key=lambda d: d.expiry_date)
+
+
 @app.route("/dashboard")
 @login_required
 def dashboard():
@@ -1770,6 +1923,7 @@ def dashboard():
         pending_count=base_query.filter(SupplierApplication.status == "pending_review").count(),
         documents=SupplierDocument.query.filter_by(user_id=user.id).all(),
         contact_phone=(latest.phone if latest and latest.phone else user.phone),
+        certificate_alerts=certificate_alerts(latest),
     )
 
 
@@ -1855,6 +2009,10 @@ def edit_application(application_id):
         except UploadError as exc:
             flash(str(exc), "error")
             return redirect(edit_url)
+        dates, date_error = parse_document_dates(request.form, UPLOAD_SLOTS, documents, uploads)
+        if date_error:
+            flash(date_error + " Nothing was saved; please choose any files again.", "error")
+            return redirect(edit_url)
 
         has_profile_doc = any(d.document_type == COMPANY_PROFILE_DOC for d in documents) or any(
             doc_type == COMPANY_PROFILE_DOC for doc_type, _ in uploads
@@ -1880,6 +2038,7 @@ def edit_application(application_id):
         DB.session.flush()
 
         all_docs = SupplierDocument.query.filter_by(application_id=application.id).all()
+        date_changes = apply_document_dates(all_docs, dates)
         application.documents_status = "pending" if missing_required_documents(all_docs) else "complete"
 
         resubmitted = application.status in {"returned_for_update", "declined"}
@@ -1889,6 +2048,7 @@ def edit_application(application_id):
         changes = diff_snapshots(before, application_snapshot(application))
         changes += [{"field": f"Document: {doc_type}", "old": previous_files.get(doc_type, ""), "new": fs.filename}
                     for doc_type, fs in uploads]
+        changes += date_changes
         log_event(
             application, "resubmitted" if resubmitted else "updated",
             summary=(f"{'Resubmitted' if resubmitted else 'Updated'}: {len(changes)} change(s)" if changes
@@ -2240,6 +2400,7 @@ def toggle_supplier(supplier_id):
     state = "activated" if supplier.active else "deactivated"
     supplier_application = get_user_application(supplier)
     if supplier_application:
+        supplier_application.expiry_suspended = False
         log_event(supplier_application, f"account_{state}", summary=f"Supplier account {state}",
                   changes=[{"field": "Account", "old": "Inactive" if supplier.active else "Active",
                             "new": "Active" if supplier.active else "Inactive"}])
@@ -2463,7 +2624,12 @@ def update_application(application_id):
               f"{'declined' if new_status == 'declined' else 'being returned'}.", "error")
         return redirect(url_for("admin_application_detail", application_id=application.id))
 
+    if new_status == "on_file":
+        new_doc_status = "complete"  # being put on file means the documents were checked and are in order
+
     old_doc_status = application.documents_status
+    if new_status == "approved" and old_status != "approved":
+        application.approved_at = utcnow()
     application.status = new_status
     application.documents_status = new_doc_status
     application.review_comments = request.form.get("review_comments", "").strip()
@@ -2483,28 +2649,43 @@ def update_application(application_id):
     supplier = get_application_supplier(application)
     if supplier:
         if old_status != application.status:
-            notify_supplier(
-                supplier,
-                "Application Status Updated",
-                f"Your application for {application.company_name} has been updated to: {status_label(application.status)}.",
-                application,
-            )
-            if application.status == "approved" and not supplier.active:
-                supplier.active = True
-                log_event(application, "account_activated", summary="Supplier account activated automatically on approval",
-                          changes=[{"field": "Account", "old": "Inactive", "new": "Active"}])
+            if application.status == "on_file":
+                notify_supplier(supplier, "Application Received – On File",
+                                f"Thank you for applying to become a supplier for {application.company_name}. {ON_FILE_MESSAGE}",
+                                application)
+            elif application.status != "approved":  # approval sends the welcome email below instead
                 notify_supplier(
-                    supplier, "Account Activated",
-                    "Congratulations! Your supplier account has been activated following the approval of your application.",
+                    supplier,
+                    "Application Status Updated",
+                    f"Your application for {application.company_name} has been updated to: {status_label(application.status)}.",
                     application,
                 )
-            elif application.status == "declined" and supplier.active:
+            if application.status != "approved" or not supplier.active:
+                application.expiry_suspended = False  # an admin decision replaces any automatic suspension
+            if application.status == "approved":
+                if not supplier.active:
+                    supplier.active = True
+                    log_event(application, "account_activated", summary="Supplier account activated automatically on approval",
+                              changes=[{"field": "Account", "old": "Inactive", "new": "Active"}])
+                valid_until = certificate_details(application, supplier)["valid_until"].strftime("%d %b %Y")
+                log_event(application, "registration_certificate_issued", summary=f"Valid until {valid_until}")
+                notify_supplier(
+                    supplier, "Welcome to Icebolethu Group",
+                    f"Congratulations! Your application has been approved and {application.company_name} is now registered "
+                    "as an Approved Supplier of Icebolethu Group. Your supplier account is active: sign in to list the "
+                    "products and services you offer and keep your VAT and B-BBEE certificates up to date. "
+                    f"Your Certificate of Supplier Registration is ready to view, print or save as PDF (valid until {valid_until}).",
+                    application, action_url=url_for("supplier_registration_certificate", _external=True),
+                    action_label="View your supplier certificate",
+                )
+            elif application.status in {"declined", "on_file"} and supplier.active:
+                reason = "declined" if application.status == "declined" else "put on file"
                 supplier.active = False
-                log_event(application, "account_deactivated", summary="Supplier account deactivated automatically on decline",
+                log_event(application, "account_deactivated", summary=f"Supplier account deactivated automatically ({reason})",
                           changes=[{"field": "Account", "old": "Active", "new": "Inactive"}])
                 notify_supplier(
                     supplier, "Account Deactivated",
-                    "Your supplier account has been deactivated because your application was declined.",
+                    f"Your supplier account has been deactivated because your application was {reason}.",
                     application,
                 )
         if application.review_comments and application.review_comments != old_comments:
@@ -2541,14 +2722,22 @@ def replace_admin_document(application_id, document_id):
     except UploadError as exc:
         flash(str(exc), "error")
         return redirect(detail_url)
+    dates, date_error = parse_document_dates(request.form, {"document_file": document.document_type}, [document],
+                                             [(document.document_type, file_storage)])
+    if date_error:
+        flash(date_error, "error")
+        return redirect(detail_url)
 
-    log_event(application, "document_replaced", summary=f"Replaced {document.document_type}",
-              changes=[{"field": document.document_type, "old": document.original_filename, "new": file_storage.filename}])
+    changes = [{"field": document.document_type, "old": document.original_filename, "new": file_storage.filename}]
+    changes += apply_document_dates([document], dates)
+    log_event(application, "document_replaced", summary=f"Replaced {document.document_type}", changes=changes)
     new_path = save_upload(file_storage, document.user_id)
     remove_upload(document.file_path)
     document.file_path = new_path
     document.original_filename = file_storage.filename
     document.uploaded_at = utcnow()
+    if document.document_type in DATED_DOCUMENTS:
+        restore_after_renewal(application, get_application_supplier(application))
     DB.session.commit()
 
     flash("Document replaced successfully.", "success")
@@ -3253,6 +3442,267 @@ def admin_catalogue():
 
 
 # ---------------------------------------------------------------------------
+# Certificate expiry: reminders, deactivation and renewal
+# ---------------------------------------------------------------------------
+
+# Applications whose certificates we watch (not drafts, and not declined ones).
+EXPIRY_WATCHED_STATUSES = {"submitted", "pending_review", "under_review", "returned_for_update", "approved", "on_file"}
+_NOTICE_RANK = {"": 0, **{str(days): i for i, days in enumerate(EXPIRY_REMINDER_DAYS, start=1)},
+                "expired": len(EXPIRY_REMINDER_DAYS) + 1}
+
+
+def due_expiry_notice(document, today):
+    """The notice this document should have had by now ("30", "7", "expired") or "" for none."""
+    days_left = (document.expiry_date - today).days
+    if days_left < 0:
+        return "expired"
+    for days in sorted(EXPIRY_REMINDER_DAYS):
+        if days_left <= days:
+            return str(days)
+    return ""
+
+
+def claim_expiry_notice(document, notice):
+    """Atomically move a document to `notice`; False if another worker already did. Keeps notices one-off."""
+    claimed = SupplierDocument.query.filter_by(id=document.id, expiry_notice=document.expiry_notice).update(
+        {SupplierDocument.expiry_notice: notice}, synchronize_session=False)
+    return claimed == 1
+
+
+def check_certificate_expiry(today=None):
+    """Send due expiry reminders and deactivate suppliers whose certificates have expired. Safe to re-run.
+
+    Returns (reminders sent, accounts deactivated).
+    """
+    today = today or date.today()
+    reminders = deactivated = 0
+    documents = (SupplierDocument.query.join(SupplierApplication, SupplierDocument.application_id == SupplierApplication.id)
+                 .filter(SupplierDocument.document_type.in_(list(DATED_DOCUMENTS)),
+                         SupplierDocument.expiry_date.isnot(None),
+                         SupplierApplication.status.in_(EXPIRY_WATCHED_STATUSES))
+                 .all())
+    for document in documents:
+        notice = due_expiry_notice(document, today)
+        if _NOTICE_RANK[notice] <= _NOTICE_RANK.get(document.expiry_notice, 0) or not claim_expiry_notice(document, notice):
+            continue
+        application = DB.session.get(SupplierApplication, document.application_id)
+        supplier = get_application_supplier(application)
+        name = DATED_DOCUMENTS[document.document_type]
+        expires = document.expiry_date.strftime("%d %b %Y")
+        renew_url = url_for("supplier_certificates", _external=True)
+
+        if notice != "expired":
+            days_left = (document.expiry_date - today).days
+            when = "today" if days_left == 0 else f"in {days_left} day{'' if days_left == 1 else 's'}"
+            consequence = (" If it expires before you do, your supplier account will be deactivated until it is renewed."
+                           if supplier and supplier.active else "")
+            if supplier:
+                notify_supplier(supplier, "Certificate expiring soon",
+                                f"Your {name} for {application.company_name} expires {when} ({expires}). "
+                                f"Please upload the renewed certificate in the supplier portal.{consequence}",
+                                application, action_url=renew_url, action_label="Upload renewed certificate")
+            log_event(application, "certificate_reminder", summary=f"{document.document_type}: expires {expires} ({notice}-day reminder)",
+                      actor="system")
+            reminders += 1
+            continue
+
+        was_active = bool(supplier and supplier.active)
+        if was_active:
+            supplier.active = False
+            application.expiry_suspended = True
+            deactivated += 1
+            log_event(application, "account_deactivated", summary=f"Supplier account deactivated: {document.document_type} expired",
+                      changes=[{"field": "Account", "old": "Active", "new": "Inactive"}], actor="system")
+        log_event(application, "certificate_expired", summary=f"{document.document_type} expired on {expires}", actor="system")
+        if supplier:
+            notify_supplier(
+                supplier, "Certificate expired" + (" – account deactivated" if was_active else ""),
+                f"Your {name} for {application.company_name} expired on {expires}. "
+                + ("Your supplier account has been deactivated until you upload the renewed certificate."
+                   if was_active else "Please upload the renewed certificate to keep your application up to date."),
+                application, action_url=renew_url, action_label="Upload renewed certificate")
+        notify_admins(f"Certificate expired: {application.company_name}",
+                      f"{application.company_name}'s {name} expired on {expires}."
+                      + (" Their supplier account was deactivated automatically." if was_active else ""), application)
+    DB.session.commit()
+    return reminders, deactivated
+
+
+def restore_after_renewal(application, supplier):
+    """Reactivate an account that was deactivated only because a certificate expired, once none are expired."""
+    if not (application.expiry_suspended and supplier and application.status == "approved"):
+        return False
+    certificates = SupplierDocument.query.filter(SupplierDocument.application_id == application.id,
+                                                 SupplierDocument.document_type.in_(list(DATED_DOCUMENTS))).all()
+    if any(doc.expiry_state == "expired" for doc in certificates):
+        return False
+    application.expiry_suspended = False
+    supplier.active = True
+    log_event(application, "account_activated", summary="Supplier account reactivated after certificate renewal",
+              changes=[{"field": "Account", "old": "Inactive", "new": "Active"}])
+    notify_supplier(supplier, "Account reactivated",
+                    "Thank you for uploading your renewed certificate. Your supplier account is active again.", application)
+    return True
+
+
+def run_certificate_checks():
+    """Run the expiry check outside a request (scheduler or CLI), with links built from PUBLIC_BASE_URL."""
+    with app.test_request_context(base_url=PUBLIC_BASE_URL or "http://localhost:5000"):
+        try:
+            reminders, deactivated = check_certificate_expiry()
+            if reminders or deactivated:
+                app.logger.info("Certificate check: %s reminder(s), %s account(s) deactivated", reminders, deactivated)
+            return reminders, deactivated
+        except Exception as exc:  # noqa: BLE001 — never let the background loop die
+            DB.session.rollback()
+            app.logger.error("Certificate check failed: %s", exc)
+            return 0, 0
+
+
+_certificate_scheduler_started = False
+
+
+@app.before_request
+def start_certificate_scheduler():
+    """Start the background expiry check once per web process (not for CLI commands or tests)."""
+    global _certificate_scheduler_started
+    if _certificate_scheduler_started or CERT_CHECK_INTERVAL_HOURS <= 0 or app.config.get("TESTING"):
+        return
+    _certificate_scheduler_started = True
+    if not PUBLIC_BASE_URL:
+        app.logger.warning("PUBLIC_BASE_URL is not set; links in certificate expiry emails will point at localhost.")
+
+    def loop():
+        time.sleep(60)  # let the app finish starting
+        while True:
+            run_certificate_checks()
+            time.sleep(CERT_CHECK_INTERVAL_HOURS * 3600)
+
+    threading.Thread(target=loop, name="certificate-expiry-check", daemon=True).start()
+
+
+@app.cli.command("check-certificates")
+def check_certificates_command():
+    """Send certificate expiry reminders and deactivate suppliers with expired certificates."""
+    reminders, deactivated = run_certificate_checks()
+    click.echo(f"{reminders} reminder(s) sent, {deactivated} account(s) deactivated.")
+
+
+# ---------------------------------------------------------------------------
+# Supplier registration certificate
+# ---------------------------------------------------------------------------
+
+def approval_date(application):
+    """When the application was approved. Older approvals predate approved_at, so use the audit trail."""
+    if application.approved_at:
+        return application.approved_at
+    event = (ApplicationEvent.query.filter_by(application_id=application.id, to_status="approved")
+             .order_by(ApplicationEvent.created_at.desc()).first())
+    return event.created_at if event else (application.updated_at or application.created_at or utcnow())
+
+
+def certificate_details(application, supplier):
+    registered = approval_date(application).date()
+    rows = [(ac.category, ac.category_detail) for ac in application.application_categories if ac.category]
+    if not rows:
+        rows = [(application.supplier_category, application.supplier_category_detail)]
+    return {
+        "company_name": application.registered_vendor_name or application.company_name,
+        "supplier_number": supplier.supplier_id if supplier and supplier.supplier_id else "—",
+        "services": " / ".join(category for category, _ in rows if category),
+        "service_details": " / ".join(detail for _, detail in rows if detail),
+        "registered": registered,
+        "valid_until": registered + timedelta(days=CERTIFICATE_VALID_DAYS),
+        "signatory_name": CERTIFICATE_SIGNATORY_NAME,
+        "signatory_title": CERTIFICATE_SIGNATORY_TITLE,
+        "footer": CERTIFICATE_FOOTER,
+        "has_signature": os.path.exists(os.path.join(app.static_folder, "images", "certificate_signature.png")),
+    }
+
+
+def render_certificate(application, supplier, back_url):
+    details = certificate_details(application, supplier)
+    filename = secure_filename(f"{details['company_name']} supplier certificate") or "supplier_certificate"
+    return render_template("registration_certificate.html", cert=details, back_url=back_url, filename=filename)
+
+
+@app.route("/certificate")
+@login_required
+def supplier_registration_certificate():
+    user = get_current_user()
+    application = get_user_application(user)
+    if not application or application.status != "approved":
+        flash("Your supplier certificate is available once your application has been approved.", "error")
+        return redirect(url_for("dashboard"))
+    return render_certificate(application, user, url_for("supplier_certificates"))
+
+
+@app.route("/admin/applications/<int:application_id>/certificate")
+@admin_required
+def admin_registration_certificate(application_id):
+    application = DB.get_or_404(SupplierApplication, application_id)
+    detail_url = url_for("admin_application_detail", application_id=application.id)
+    if application.status != "approved":
+        flash("A supplier certificate is only issued for approved applications.", "error")
+        return redirect(detail_url)
+    return render_certificate(application, get_application_supplier(application), detail_url)
+
+
+@app.route("/certificates", methods=["GET", "POST"])
+@login_required
+def supplier_certificates():
+    """Upload renewed VAT / B-BBEE certificates at any time, including after approval."""
+    user = get_current_user()
+    application = get_user_application(user)
+    if not application or application.status == "draft":
+        flash("Submit your supplier application first.", "error")
+        return redirect(url_for("dashboard"))
+    slots = {field: doc_type for field, doc_type in UPLOAD_SLOTS.items() if doc_type in DATED_DOCUMENTS}
+    documents = SupplierDocument.query.filter(SupplierDocument.application_id == application.id,
+                                              SupplierDocument.document_type.in_(list(DATED_DOCUMENTS))).all()
+
+    if request.method == "POST":
+        try:
+            uploads = collect_uploads(request.files, slots)
+        except UploadError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("supplier_certificates"))
+        if not uploads:
+            flash("Please choose the renewed certificate (PDF) to upload.", "error")
+            return redirect(url_for("supplier_certificates"))
+        dates, date_error = parse_document_dates(request.form, slots, documents, uploads, uploads_only=True)
+        if date_error:
+            flash(date_error + " Nothing was uploaded; please choose the file again.", "error")
+            return redirect(url_for("supplier_certificates"))
+
+        previous = {doc.document_type: doc.original_filename for doc in documents}
+        for doc_type, file_storage in uploads:
+            store_document(user.id, application.id, doc_type, file_storage)
+        DB.session.flush()
+        documents = SupplierDocument.query.filter(SupplierDocument.application_id == application.id,
+                                                  SupplierDocument.document_type.in_(list(DATED_DOCUMENTS))).all()
+        changes = [{"field": f"Document: {doc_type}", "old": previous.get(doc_type, ""), "new": fs.filename}
+                   for doc_type, fs in uploads]
+        changes += apply_document_dates(documents, dates)
+        all_docs = SupplierDocument.query.filter_by(application_id=application.id).all()
+        application.documents_status = "pending" if missing_required_documents(all_docs) else "complete"
+        log_event(application, "certificates_renewed",
+                  summary="Renewed: " + ", ".join(DATED_DOCUMENTS[doc_type] for doc_type, _ in uploads), changes=changes)
+        notify_admins(f"Certificate renewed: {application.company_name}",
+                      f"{application.company_name} uploaded a renewed "
+                      + " and ".join(DATED_DOCUMENTS[doc_type] for doc_type, _ in uploads) + ".", application)
+        reactivated = restore_after_renewal(application, user)
+        DB.session.commit()
+        flash("Thank you, your renewed certificate has been uploaded."
+              + (" Your supplier account is active again." if reactivated else ""), "success")
+        return redirect(url_for("supplier_certificates"))
+
+    registration = certificate_details(application, user) if application.status == "approved" else None
+    return render_template("supplier_certificates.html", user=user, application=application, registration=registration,
+                           documents={doc.document_type: doc for doc in documents}, slots=slots)
+
+
+# ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------
 
@@ -3324,6 +3774,8 @@ def migrate_mysql_schema():
         "supplier_id": "VARCHAR(20) NULL UNIQUE",
         "verification_code_hash": "VARCHAR(256) NULL",
         "verification_code_expires": "DATETIME NULL",
+        "terms_version": "VARCHAR(20) NULL",
+        "terms_accepted_at": "DATETIME NULL",
     })
     name_col = _columns("users").get("name")
     if name_col is not None and name_col[4] is None:
@@ -3333,8 +3785,13 @@ def migrate_mysql_schema():
         "assigned_admin_id": "INT NULL",
         "assigned_at": "DATETIME NULL",
         "supplier_category_detail": "VARCHAR(255) NOT NULL DEFAULT ''",
+        "expiry_suspended": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "approved_at": "DATETIME NULL",
         **{field: f"VARCHAR({SupplierApplication.__table__.c[field].type.length}) DEFAULT ''" for field in PROFILE_FIELDS},
     })
+
+    _add_missing_columns("supplier_documents", {"issue_date": "DATE NULL", "expiry_date": "DATE NULL",
+                                                "expiry_notice": "VARCHAR(10) NOT NULL DEFAULT ''"})
 
     notifications = _columns("notifications")
     if "admin_id" not in notifications:
@@ -3553,7 +4010,7 @@ def seed_demo_command(count, months, remove, seed):
     rng = random.Random(seed)
     now = utcnow()
     period_start = now - timedelta(days=30 * months)
-    status_pool = (["approved"] * 14 + ["pending_review"] * 5 + ["under_review"] * 4 + ["submitted"] * 2
+    status_pool = (["approved"] * 12 + ["on_file"] * 3 + ["pending_review"] * 5 + ["under_review"] * 4 + ["submitted"] * 2
                    + ["returned_for_update"] * 3 + ["declined"] * 2)
     rng.shuffle(status_pool)
     password_hash = generate_password_hash("Password123!")
@@ -3621,9 +4078,11 @@ def seed_demo_command(count, months, remove, seed):
             filename = f"{int(submitted_at.timestamp())}_{secrets.token_hex(3)}_{secure_filename(doc_type)[:40]}.pdf"
             with open(os.path.join(folder, filename), "wb") as fh:
                 fh.write(DEMO_PDF)
+            issued = (submitted_at - timedelta(days=rng.randint(30, 300))).date() if doc_type in DATED_DOCUMENTS else None
             DB.session.add(SupplierDocument(user_id=user.id, application_id=application.id, document_type=doc_type,
                                             file_path=f"uploads/{user.id}/{filename}", original_filename=f"{doc_type}.pdf",
-                                            uploaded_at=submitted_at))
+                                            uploaded_at=submitted_at, issue_date=issued,
+                                            expiry_date=issued and issued + timedelta(days=365)))
         application.documents_status = "pending" if missing else "complete"
 
         event(application, submitted_at, user, "submitted", summary=f"Submitted with {len(doc_types) - len(missing)} document(s)", to_status="pending_review")
@@ -3639,7 +4098,7 @@ def seed_demo_command(count, months, remove, seed):
                 event(application, when, admin, "document_viewed", summary=f"Viewed {doc_type}")
             previous = "pending_review"
             path = {"under_review": ["under_review"], "approved": ["under_review", "approved"], "declined": ["under_review", "declined"],
-                    "returned_for_update": ["under_review", "returned_for_update"]}.get(status, [])
+                    "on_file": ["under_review", "on_file"], "returned_for_update": ["under_review", "returned_for_update"]}.get(status, [])
             for step in path:
                 when += timedelta(days=rng.randint(1, 5), hours=rng.randint(1, 6))
                 comment = rng.choice(DEMO_COMMENTS[step]) if step in DEMO_COMMENTS else ""

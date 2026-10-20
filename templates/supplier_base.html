@@ -18,36 +18,44 @@
                 <span>Supplier Portal</span>
             </a>
 
-            <nav class="ad-nav" aria-label="Supplier">
-                <a href="{{ url_for('dashboard') }}" class="ad-nav-link{% if request.endpoint == 'dashboard' %} is-active{% endif %}" {% if request.endpoint == 'dashboard' %}aria-current="page"{% endif %}>
-                    {{ ad.icon('dashboard') }}<span>Dashboard</span>
-                </a>
-                {% set app_url = url_for('application_detail', application_id=supplier_application.id) if supplier_application else url_for('onboarding_profile') %}
-                <a href="{{ app_url }}" class="ad-nav-link{% if request.endpoint in app_endpoints %} is-active{% endif %}" {% if request.endpoint in app_endpoints %}aria-current="page"{% endif %}>
-                    {{ ad.icon('applications') }}<span>{{ 'My application' if supplier_application else 'Apply now' }}</span>
-                </a>
-                {% if user.active %}
-                    {% set inv = request.endpoint in ['inventory', 'product_form'] %}
-                    <a href="{{ url_for('inventory') }}" class="ad-nav-link{% if inv %} is-active{% endif %}" {% if inv %}aria-current="page"{% endif %}>
-                        {{ ad.icon('box') }}<span>Inventory</span>
-                    </a>
-                {% endif %}
-                <a href="{{ url_for('notifications') }}" class="ad-nav-link{% if request.endpoint == 'notifications' %} is-active{% endif %}" {% if request.endpoint == 'notifications' %}aria-current="page"{% endif %}>
-                    {{ ad.icon('bell') }}<span>Notifications</span>
-                    {% if unread_notifications > 0 %}<span class="ad-nav-count">{{ unread_notifications }}</span>{% endif %}
-                </a>
-                <a href="{{ url_for('supplier_settings') }}" class="ad-nav-link{% if request.endpoint == 'supplier_settings' %} is-active{% endif %}" {% if request.endpoint == 'supplier_settings' %}aria-current="page"{% endif %}>
-                    {{ ad.icon('settings') }}<span>Settings</span>
-                </a>
-            </nav>
+            <button type="button" class="ad-menu-toggle" data-menu-toggle aria-controls="ad-menu" aria-expanded="false">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+                <span>Menu</span>
+            </button>
 
-            <div class="ad-account">
-                <div class="ad-avatar" aria-hidden="true">{{ ((user.contact_name or user.company_name or 'S')[:1])|upper }}</div>
-                <div class="ad-account-text">
-                    <strong>{{ user.company_name }}</strong>
-                    <span>{{ user.supplier_id or user.email }}</span>
+            <div class="ad-sidebar-menu" id="ad-menu">
+                <nav class="ad-nav" aria-label="Supplier">
+                    <a href="{{ url_for('dashboard') }}" class="ad-nav-link{% if request.endpoint == 'dashboard' %} is-active{% endif %}" {% if request.endpoint == 'dashboard' %}aria-current="page"{% endif %}>
+                        {{ ad.icon('dashboard') }}<span>Dashboard</span>
+                    </a>
+                    {% set app_url = url_for('application_detail', application_id=supplier_application.id) if supplier_application else url_for('onboarding_profile') %}
+                    <a href="{{ app_url }}" class="ad-nav-link{% if request.endpoint in app_endpoints %} is-active{% endif %}" {% if request.endpoint in app_endpoints %}aria-current="page"{% endif %}>
+                        {{ ad.icon('applications') }}<span>{{ 'My application' if supplier_application else 'Apply now' }}</span>
+                    </a>
+                    {% if supplier_application and supplier_application.status != 'draft' %}
+                        <a href="{{ url_for('supplier_certificates') }}" class="ad-nav-link{% if request.endpoint == 'supplier_certificates' %} is-active{% endif %}" {% if request.endpoint == 'supplier_certificates' %}aria-current="page"{% endif %}>
+                            {{ ad.icon('file') }}<span>Certificates</span>
+                        </a>
+                    {% endif %}
+                    {% if user.active %}
+                        {% set inv = request.endpoint in ['inventory', 'product_form'] %}
+                        <a href="{{ url_for('inventory') }}" class="ad-nav-link{% if inv %} is-active{% endif %}" {% if inv %}aria-current="page"{% endif %}>
+                            {{ ad.icon('box') }}<span>Inventory</span>
+                        </a>
+                    {% endif %}
+                    <a href="{{ url_for('supplier_settings') }}" class="ad-nav-link{% if request.endpoint == 'supplier_settings' %} is-active{% endif %}" {% if request.endpoint == 'supplier_settings' %}aria-current="page"{% endif %}>
+                        {{ ad.icon('settings') }}<span>Settings</span>
+                    </a>
+                </nav>
+
+                <div class="ad-account">
+                    <div class="ad-avatar" aria-hidden="true">{{ ((user.contact_name or user.company_name or 'S')[:1])|upper }}</div>
+                    <div class="ad-account-text">
+                        <strong>{{ user.company_name }}</strong>
+                        <span>{{ user.supplier_id or user.email }}</span>
+                    </div>
+                    <a href="{{ url_for('logout') }}" class="ad-logout">{{ ad.icon('logout') }}<span>Log out</span></a>
                 </div>
-                <a href="{{ url_for('logout') }}" class="ad-logout" title="Log out" aria-label="Log out">{{ ad.icon('logout') }}</a>
             </div>
         </aside>
 
@@ -58,7 +66,10 @@
                     <h1>{% block page_title %}{% endblock %}</h1>
                     <p class="ad-subtitle">{% block page_subtitle %}{% endblock %}</p>
                 </div>
-                <div class="ad-page-actions">{% block page_actions %}{% endblock %}</div>
+                <div class="ad-page-tools">
+                    <div class="ad-page-actions">{% block page_actions %}{% endblock %}</div>
+                    {{ ad.notification_bell(url_for('notifications'), unread_notifications, request.endpoint == 'notifications') }}
+                </div>
             </header>
 
             {% with messages = get_flashed_messages(with_categories=true) %}
@@ -72,6 +83,7 @@
             <p class="ad-disclaimer">NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
         </main>
     </div>
+    <script src="{{ url_for('static', filename='js/shell.js') }}"></script>
     <script src="{{ url_for('static', filename='js/portal.js') }}"></script>
     <script src="{{ url_for('static', filename='js/pdf-viewer.js') }}"></script>
     {% block scripts %}{% endblock %}

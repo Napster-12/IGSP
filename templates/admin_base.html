@@ -6,7 +6,6 @@
     ('admin_suppliers', 'Suppliers', 'suppliers', ['admin_suppliers']),
     ('admin_catalogue', 'Catalogue', 'box', ['admin_catalogue']),
     ('admin_reports', 'Reports', 'reports', ['admin_reports', 'admin_report']),
-    ('admin_notifications', 'Notifications', 'bell', ['admin_notifications']),
 ] %}
 <!DOCTYPE html>
 <html lang="en">
@@ -25,26 +24,30 @@
                 <span>Supplier Portal Admin</span>
             </a>
 
-            <nav class="ad-nav" aria-label="Admin">
-                {% for endpoint, label, icon_name, active_for in nav %}
-                    <a href="{{ url_for(endpoint) }}" class="ad-nav-link{% if request.endpoint in active_for %} is-active{% endif %}"
-                       {% if request.endpoint in active_for %}aria-current="page"{% endif %}>
-                        {{ ad.icon(icon_name) }}
-                        <span>{{ label }}</span>
-                        {% if endpoint == 'admin_notifications' and unread_notifications > 0 %}
-                            <span class="ad-nav-count">{{ unread_notifications }}</span>
-                        {% endif %}
-                    </a>
-                {% endfor %}
-            </nav>
+            <button type="button" class="ad-menu-toggle" data-menu-toggle aria-controls="ad-menu" aria-expanded="false">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+                <span>Menu</span>
+            </button>
 
-            <div class="ad-account">
-                <div class="ad-avatar" aria-hidden="true">{{ ((admin.name or admin.email)[:1])|upper }}</div>
-                <div class="ad-account-text">
-                    <strong>{{ admin.name or 'Administrator' }}</strong>
-                    <span>{{ admin.email }}</span>
+            <div class="ad-sidebar-menu" id="ad-menu">
+                <nav class="ad-nav" aria-label="Admin">
+                    {% for endpoint, label, icon_name, active_for in nav %}
+                        <a href="{{ url_for(endpoint) }}" class="ad-nav-link{% if request.endpoint in active_for %} is-active{% endif %}"
+                           {% if request.endpoint in active_for %}aria-current="page"{% endif %}>
+                            {{ ad.icon(icon_name) }}
+                            <span>{{ label }}</span>
+                        </a>
+                    {% endfor %}
+                </nav>
+
+                <div class="ad-account">
+                    <div class="ad-avatar" aria-hidden="true">{{ ((admin.name or admin.email)[:1])|upper }}</div>
+                    <div class="ad-account-text">
+                        <strong>{{ admin.name or 'Administrator' }}</strong>
+                        <span>{{ admin.email }}</span>
+                    </div>
+                    <a href="{{ url_for('admin_logout') }}" class="ad-logout">{{ ad.icon('logout') }}<span>Log out</span></a>
                 </div>
-                <a href="{{ url_for('admin_logout') }}" class="ad-logout" title="Log out" aria-label="Log out">{{ ad.icon('logout') }}</a>
             </div>
         </aside>
 
@@ -55,7 +58,10 @@
                     <h1>{% block page_title %}{% endblock %}</h1>
                     <p class="ad-subtitle">{% block page_subtitle %}{% endblock %}</p>
                 </div>
-                <div class="ad-page-actions">{% block page_actions %}{% endblock %}</div>
+                <div class="ad-page-tools">
+                    <div class="ad-page-actions">{% block page_actions %}{% endblock %}</div>
+                    {{ ad.notification_bell(url_for('admin_notifications'), unread_notifications, request.endpoint == 'admin_notifications') }}
+                </div>
             </header>
 
             {% with messages = get_flashed_messages(with_categories=true) %}
@@ -67,6 +73,7 @@
             {% block content %}{% endblock %}
         </main>
     </div>
+    <script src="{{ url_for('static', filename='js/shell.js') }}"></script>
     {% block scripts %}{% endblock %}
     <script src="{{ url_for('static', filename='js/pdf-viewer.js') }}"></script>
 </body>

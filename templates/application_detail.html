@@ -91,6 +91,7 @@
                     <div class="ad-doc-text">
                         <strong>{{ doc.document_type }}</strong>
                         <span>{{ doc.original_filename }}{% if doc.uploaded_at %} · {{ doc.uploaded_at.strftime('%d %b %Y') }}{% endif %}</span>
+                                    {{ ad.document_dates(doc) }}
                     </div>
                     <div class="ad-doc-actions">
                         <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" target="_blank" rel="noopener" class="ad-btn ad-btn--ghost ad-btn--sm">View</a>

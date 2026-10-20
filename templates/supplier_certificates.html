@@ -1,0 +1,51 @@
+{% extends "supplier_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+{% import "form_macros.html" as f with context %}
+
+{% block title %}Certificates{% endblock %}
+{% block page_title %}Certificates{% endblock %}
+{% block page_subtitle %}Keep your SARS VAT and B-BBEE certificates current · we remind you {{ EXPIRY_REMINDER_DAYS|join(' and ') }} days before they expire{% endblock %}
+
+{% block content %}
+    {% if application.expiry_suspended %}
+        <div class="ad-callout ad-callout--danger">
+            <strong>Your supplier account is deactivated</strong> because a certificate expired. Upload the renewed certificate below and it will be reactivated automatically.
+        </div>
+    {% endif %}
+
+    {% if registration %}
+        <section class="ad-card">
+            <div class="ad-card-head">
+                <div><h2>Supplier registration certificate</h2><p>Issued by Icebolethu Group when your application was approved</p></div>
+                <a href="{{ url_for('supplier_registration_certificate') }}" class="ad-btn ad-btn--primary">{{ ad.icon('download') }} View &amp; download</a>
+            </div>
+            <dl class="ad-fields">
+                <div class="ad-field"><dt>Supplier No.</dt><dd class="ad-mono">{{ registration.supplier_number }}</dd></div>
+                <div class="ad-field"><dt>Goods / Services</dt><dd>{{ registration.services }}</dd></div>
+                <div class="ad-field"><dt>Date registered</dt><dd>{{ registration.registered.strftime('%d %b %Y') }}</dd></div>
+                <div class="ad-field"><dt>Valid until</dt><dd>{{ registration.valid_until.strftime('%d %b %Y') }}</dd></div>
+            </dl>
+        </section>
+    {% endif %}
+
+    <form class="ad-form ad-stack" method="post" action="{{ url_for('supplier_certificates') }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <section class="ad-card">
+            <div class="ad-card-head">
+                <div><h2>Dated certificates</h2><p>Choose the renewed PDF and enter its issue and expiry dates</p></div>
+            </div>
+            <div class="ad-slots">
+                {% for field, doc_type in slots.items() %}
+                    {% set doc = documents.get(doc_type) %}
+                    {% set help %}{% if doc %}{{ ad.document_dates(doc) }}{% endif %}{% endset %}
+                    {{ f.document_slot(field, doc_type, doc, number=loop.index, help=help, renewal=true) }}
+                {% endfor %}
+            </div>
+        </section>
+
+        <div class="ad-form-actions">
+            <a href="{{ url_for('dashboard') }}" class="ad-btn ad-btn--ghost">Cancel</a>
+            <button type="submit" class="ad-btn ad-btn--primary">Upload renewed certificate</button>
+        </div>
+    </form>
+{% endblock %}

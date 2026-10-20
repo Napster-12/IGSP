@@ -80,6 +80,11 @@
                     <li data-rule="match">Passwords match</li>
                 </ul>
 
+                <label class="tc-accept sg-field--full">
+                    <input type="checkbox" name="accept_terms" value="1" required oninvalid="this.setCustomValidity('Please accept our Terms &amp; Conditions.')" onchange="this.setCustomValidity('')">
+                    <span>I have read and accept the <a href="{{ url_for('terms') }}" target="_blank" rel="noopener">Terms and Conditions</a>, and I am authorised to accept them on behalf of my company.</span>
+                </label>
+
                 <button type="submit" class="adm-login-btn">Create account</button>
             </form>
 
