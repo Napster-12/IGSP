@@ -1,5 +1,6 @@
 {% extends "supplier_base.html" %}
 {% import "form_macros.html" as f with context %}
+{% import "admin_macros.html" as ad with context %}
 
 {% macro field(label, value, wide=false) -%}
     <div class="rv-field{% if wide %} rv-field-wide{% endif %}">
@@ -111,6 +112,7 @@
                                 <div class="rv-doc-text">
                                     <strong>{{ doc_type }}</strong>
                                     <span>{% if doc %}{{ doc.original_filename }}{% else %}Required — not uploaded{% endif %}</span>
+                                    {% if doc %}{{ ad.document_dates(doc) }}{% endif %}
                                 </div>
                                 {% if doc %}
                                     <a class="rv-doc-view" href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" data-pdf-view data-pdf-title="{{ doc_type }}">View</a>

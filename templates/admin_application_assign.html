@@ -1,0 +1,62 @@
+{% extends "admin_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+
+{% block title %}{{ application.company_name }}{% endblock %}
+{% block breadcrumb %}<a href="{{ url_for('admin_applications') }}" class="ad-crumb">{{ ad.icon('back') }} Applications</a>{% endblock %}
+{% block page_title %}{{ application.company_name }} {{ ad.status_badge(application.status) }}{% endblock %}
+{% block page_subtitle %}
+    {% if supplier and supplier.supplier_id %}<span class="ad-mono">{{ supplier.supplier_id }}</span> · {% endif %}
+    Submitted {{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}
+{% endblock %}
+
+{% block content %}
+    {% set owner = application.assigned_admin %}
+    <div class="ad-assign">
+        <section class="ad-card ad-assign-card">
+            <span class="ad-assign-icon" aria-hidden="true">{{ ad.icon('alert') }}</span>
+            {% if owner %}
+                <h2>Assigned to {{ owner.name or owner.email }}</h2>
+                <p>
+                    {{ owner.name or owner.email }} has been reviewing this application since
+                    {{ application.assigned_at.strftime('%d %b %Y, %H:%M') if application.assigned_at else 'earlier' }}.
+                    To view its details or documents you need to take it over. They'll be notified, and the takeover is recorded in the audit trail.
+                </p>
+                <form method="post" action="{{ url_for('assign_application', application_id=application.id) }}" class="ad-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <label for="reason">Reason for taking over <span class="req">*</span></label>
+                    <textarea id="reason" name="reason" rows="3" required maxlength="500"
+                              placeholder="e.g. {{ (owner.name or 'Colleague').split()[0] }} is on leave this week"></textarea>
+                    <div class="ad-form-actions">
+                        <a href="{{ url_for('admin_applications') }}" class="ad-btn ad-btn--ghost">Back to applications</a>
+                        <button type="submit" class="ad-btn ad-btn--primary">Take over application</button>
+                    </div>
+                </form>
+            {% else %}
+                <h2>Assign this application to yourself</h2>
+                <p>
+                    Applications must be assigned before anyone can view their details, open documents or record a decision.
+                    This keeps a clear record of who reviewed what. You can release it again at any time.
+                </p>
+                <form method="post" action="{{ url_for('assign_application', application_id=application.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="ad-form-actions ad-form-actions--start">
+                        <button type="submit" class="ad-btn ad-btn--primary ad-btn--lg">Assign to me</button>
+                        <a href="{{ url_for('admin_applications') }}" class="ad-btn ad-btn--ghost ad-btn--lg">Back to applications</a>
+                    </div>
+                </form>
+            {% endif %}
+        </section>
+
+        <section class="ad-card">
+            <div class="ad-card-head"><h2>Summary</h2></div>
+            <dl class="ad-fields ad-fields--1">
+                <div class="ad-field"><dt>Company</dt><dd>{{ application.company_name }}</dd></div>
+                <div class="ad-field"><dt>Category</dt><dd>{{ application.category_names|join(', ') or '—' }}</dd></div>
+                <div class="ad-field"><dt>Status</dt><dd>{{ ad.status_badge(application.status) }}</dd></div>
+                <div class="ad-field"><dt>Documents</dt><dd>{{ (application.documents_status or 'pending')|title }}</dd></div>
+                <div class="ad-field"><dt>Province</dt><dd>{{ application.province or '—' }}</dd></div>
+            </dl>
+            <p class="ad-hint ad-mt">Contact details, directors' ID numbers and documents are shown once the application is assigned to you.</p>
+        </section>
+    </div>
+{% endblock %}

@@ -36,8 +36,26 @@
     </ol>
 {%- endmacro %}
 
-{# One document upload slot: shows what's uploaded and lets the supplier pick a (replacement) PDF. #}
-{% macro document_slot(field, title, doc=none, number='', required=true, help='') -%}
+{# Issue and expiry date fields for a dated certificate (VAT, B-BBEE). Named after the upload field. #}
+{% macro document_dates(field, doc=none, required=false, prefill=true) -%}
+    {% set doc = doc if prefill else none %}
+    <div class="ad-slot-dates" data-document-dates>
+        <label>
+            <span>Issue date <span class="ad-required">*</span></span>
+            <input type="date" name="{{ field }}_issue_date" value="{{ doc.issue_date.isoformat() if doc and doc.issue_date else '' }}"
+                   min="{{ EARLIEST_ISSUE_DATE.isoformat() }}" max="{{ TODAY.isoformat() }}"{% if required %} required{% endif %}>
+        </label>
+        <label>
+            <span>Expiry date <span class="ad-required">*</span></span>
+            <input type="date" name="{{ field }}_expiry_date" value="{{ doc.expiry_date.isoformat() if doc and doc.expiry_date else '' }}"
+                   min="{{ TODAY.isoformat() }}" max="{{ LATEST_EXPIRY_DATE.isoformat() }}"{% if required %} required{% endif %}>
+        </label>
+    </div>
+{%- endmacro %}
+
+{# One document upload slot: shows what's uploaded and lets the supplier pick a (replacement) PDF.
+   Dated certificates (VAT, B-BBEE) also get mandatory issue and expiry dates. #}
+{% macro document_slot(field, title, doc=none, number='', required=true, help='', renewal=false) -%}
     <div class="ad-slot{% if doc %} is-uploaded{% elif required %} is-missing{% endif %}">
         <span class="ad-slot-num">{% if doc %}{{ ad.icon('check') }}{% else %}{{ number }}{% endif %}</span>
         <div class="ad-slot-body">
@@ -54,6 +72,8 @@
         </div>
         <label class="ad-btn ad-btn--ghost ad-btn--sm ad-slot-btn" for="{{ field }}">{{ ad.icon('upload') }} {{ 'Replace' if doc else 'Choose PDF' }}</label>
         <input type="file" id="{{ field }}" name="{{ field }}" accept="application/pdf,.pdf" class="ad-sr" data-file-input>
+        {#- On the renewal page the dates start empty and become required once a file is chosen. -#}
+        {% if title in DATED_DOCUMENTS %}{{ document_dates(field, doc, required=doc is not none and not renewal, prefill=not renewal) }}{% endif %}
     </div>
 {%- endmacro %}
 

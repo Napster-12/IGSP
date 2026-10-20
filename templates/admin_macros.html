@@ -23,6 +23,26 @@
     {%- endif -%}
     </svg>
 {%- endmacro %}
+{#- Top-right bell on every signed-in page; it flashes while there are unread notifications. -#}
+{% macro notification_bell(url, count, active=False) -%}
+    <a href="{{ url }}" class="ad-bell{% if count > 0 %} has-unread{% endif %}{% if active %} is-active{% endif %}"
+       title="Notifications" aria-label="Notifications{% if count > 0 %}, {{ count }} unread{% endif %}"{% if active %} aria-current="page"{% endif %}>
+        <span class="ad-bell-icon">{{ icon('bell') }}</span>
+        <span class="ad-bell-count{% if count == 0 %} is-zero{% endif %}" aria-hidden="true">{{ count if count < 100 else '99+' }}</span>
+    </a>
+{%- endmacro %}
+
+{#- Own line under a dated certificate (VAT, B-BBEE): issue and expiry, flagged when expired or expiring soon. -#}
+{% macro document_dates(doc) -%}
+    {%- if doc.issue_date and doc.expiry_date -%}
+        <span class="ad-doc-dates">Issued {{ doc.issue_date.strftime('%d %b %Y') }} · Expires {{ doc.expiry_date.strftime('%d %b %Y') }}
+            {%- if doc.expiry_state == 'expired' %} <span class="ad-expiry ad-expiry--expired">Expired</span>
+            {%- elif doc.expiry_state == 'expiring' %} <span class="ad-expiry ad-expiry--expiring">Expires soon</span>{% endif %}</span>
+    {%- elif doc.document_type in DATED_DOCUMENTS -%}
+        <span class="ad-doc-dates"><span class="ad-expiry ad-expiry--expiring">Issue and expiry dates not captured</span></span>
+    {%- endif -%}
+{%- endmacro %}
+
 {% macro status_badge(status) -%}
     <span class="ad-badge ad-badge--{{ status }}">{{ status_label(status) }}</span>
 {%- endmacro %}

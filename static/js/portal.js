@@ -32,6 +32,8 @@
         if (!label || !input.files || !input.files[0]) { return; }
         label.textContent = 'Selected: ' + input.files[0].name + ' (uploads when you continue)';
         slot.classList.add('is-selected');
+        // A certificate that has been chosen needs its issue and expiry dates.
+        slot.querySelectorAll('[data-document-dates] input').forEach(function (date) { date.required = true; });
     }
 
     var nextDirectorIndex = 0;

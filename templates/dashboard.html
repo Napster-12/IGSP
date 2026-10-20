@@ -32,7 +32,7 @@
         <div class="ad-stat">
             <span class="ad-stat-label">Account</span>
             <span class="ad-stat-value ad-stat-value--sm">{% if user.active %}<span class="ad-badge ad-badge--active">Active</span>{% else %}<span class="ad-badge ad-badge--inactive">Inactive</span>{% endif %}</span>
-            <span class="ad-stat-sub">{{ 'You can trade with Icebolethu Group' if user.active else 'Activated once your application is approved' }}</span>
+            <span class="ad-stat-sub">{{ 'You can trade with Icebolethu Group' if user.active else ('Your details are on file; we will contact you' if supplier_application and supplier_application.status == 'on_file' else 'Activated once your application is approved') }}</span>
         </div>
         <a class="ad-stat" href="{{ url_for('notifications') }}">
             <span class="ad-stat-label">Notifications</span>
@@ -57,7 +57,7 @@
         </section>
     {% else %}
         {% set flow = ['submitted', 'under_review', 'decision'] %}
-        {% set stage = 2 if application.status in ['approved', 'declined'] else (1 if application.status in ['under_review', 'returned_for_update'] else 0) %}
+        {% set stage = 2 if application.status in ['approved', 'on_file', 'declined'] else (1 if application.status in ['under_review', 'returned_for_update'] else 0) %}
         <div class="ad-grid ad-grid--2-1">
             <section class="ad-card">
                 <div class="ad-card-head">
@@ -71,15 +71,28 @@
                 <ol class="ad-track">
                     <li class="{{ 'is-done' if stage > 0 else 'is-current' }}"><strong>Submitted</strong><span>{{ application.created_at.strftime('%d %b %Y') if application.created_at else '' }}</span></li>
                     <li class="{{ 'is-done' if stage > 1 else ('is-current' if stage == 1 else '') }}"><strong>In review</strong><span>Our procurement team checks your details and documents</span></li>
-                    <li class="{{ 'is-current is-' ~ application.status if stage == 2 else '' }}"><strong>Decision</strong><span>{% if application.status == 'approved' %}Approved{% elif application.status == 'declined' %}Declined{% else %}Approved or declined{% endif %}</span></li>
+                    <li class="{{ 'is-current is-' ~ application.status if stage == 2 else '' }}"><strong>Decision</strong><span>{% if application.status == 'approved' %}Approved{% elif application.status == 'on_file' %}On file{% elif application.status == 'declined' %}Declined{% else %}Approved, on file or declined{% endif %}</span></li>
                 </ol>
 
+                {% for doc in certificate_alerts %}
+                    <div class="ad-callout {{ 'ad-callout--danger' if doc.expiry_state == 'expired' else 'ad-callout--attention' }}">
+                        {% if doc.expiry_state == 'expired' %}
+                            <strong>Certificate expired:</strong> your {{ DATED_DOCUMENTS[doc.document_type] }} expired on {{ doc.expiry_date.strftime('%d %b %Y') }}.{% if application.expiry_suspended %} Your supplier account is deactivated until you upload the renewed certificate.{% endif %}
+                        {% else %}
+                            <strong>Certificate expiring soon:</strong> your {{ DATED_DOCUMENTS[doc.document_type] }} expires on {{ doc.expiry_date.strftime('%d %b %Y') }}.{% if user.active %} Upload the renewed one before then to keep your account active.{% endif %}
+                        {% endif %}
+                        <a href="{{ url_for('supplier_certificates') }}" class="ad-link">Upload renewed certificate →</a>
+                    </div>
+                {% endfor %}
                 {% if application.status == 'returned_for_update' %}
                     <div class="ad-callout ad-callout--attention">
                         <strong>Action needed:</strong> we've returned your application for changes. Please update it and resubmit.
                     </div>
+                {% elif application.status == 'on_file' %}
+                    <div class="ad-callout ad-callout--onfile"><strong>Thank you!</strong> Your application has been received and all your documents and information are in order. We will keep your details on file and contact you when we need your services.</div>
                 {% elif application.status == 'approved' %}
-                    <div class="ad-callout ad-callout--success"><strong>Congratulations!</strong> Your application has been approved and your supplier account is active.</div>
+                    <div class="ad-callout ad-callout--success"><strong>Congratulations!</strong> Your application has been approved and your supplier account is active.
+                        <a href="{{ url_for('supplier_certificates') }}" class="ad-link">View your supplier certificate →</a></div>
                     {% if user.active %}
                         <div class="ad-callout ad-callout--attention">
                             <strong>Next step:</strong> add the products and services you supply so Icebolethu Group can see your prices and availability.

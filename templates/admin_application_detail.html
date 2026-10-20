@@ -1,5 +1,6 @@
 {% extends "admin_base.html" %}
 {% import "admin_macros.html" as ad with context %}
+{% import "form_macros.html" as f with context %}
 
 {% macro field(label, value, wide=false, mono=false) -%}
     <div class="ad-field{% if wide %} ad-field--wide{% endif %}">
@@ -19,6 +20,9 @@
 {% block page_actions %}
     <a href="{{ url_for('admin_application_history', application_id=application.id) }}" class="ad-btn ad-btn--ghost">{{ ad.icon('clock') }} History <span class="ad-count">{{ history_count }}</span></a>
     <a href="{{ url_for('download_all_documents', application_id=application.id) }}" class="ad-btn ad-btn--ghost">{{ ad.icon('download') }} Download all</a>
+    {% if application.status == 'approved' %}
+        <a href="{{ url_for('admin_registration_certificate', application_id=application.id) }}" class="ad-btn ad-btn--ghost">{{ ad.icon('download') }} Certificate</a>
+    {% endif %}
 {% endblock %}
 
 {% block content %}
@@ -115,10 +119,21 @@
                                 <div class="ad-doc-text">
                                     <strong>{{ doc.document_type }}</strong>
                                     <span>{{ doc.original_filename }}{% if doc.uploaded_at %} · {{ doc.uploaded_at.strftime('%d %b %Y') }}{% endif %}</span>
+                                    {{ ad.document_dates(doc) }}
                                 </div>
                                 <div class="ad-doc-actions">
                                     <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" data-pdf-view data-pdf-title="{{ doc.document_type }}" class="ad-btn ad-btn--ghost ad-btn--sm">View</a>
-                                    {% if is_mine %}
+                                    {% if is_mine and doc.document_type in DATED_DOCUMENTS %}
+                                    <details class="ad-doc-replace">
+                                        <summary class="ad-btn ad-btn--ghost ad-btn--sm">Replace</summary>
+                                        <form method="post" action="{{ url_for('replace_admin_document', application_id=application.id, document_id=doc.id) }}" enctype="multipart/form-data" class="ad-doc-replace-panel">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <input type="file" name="document_file" accept="application/pdf,.pdf" required aria-label="New PDF">
+                                            {{ f.document_dates('document_file', doc, required=true) }}
+                                            <button type="submit" class="ad-btn ad-btn--primary ad-btn--sm">Upload replacement</button>
+                                        </form>
+                                    </details>
+                                    {% elif is_mine %}
                                     <form method="post" action="{{ url_for('replace_admin_document', application_id=application.id, document_id=doc.id) }}" enctype="multipart/form-data">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <label class="ad-btn ad-btn--ghost ad-btn--sm" for="replace_doc_{{ doc.id }}">Replace</label>
@@ -192,6 +207,8 @@
 
                     <div class="ad-decision-actions">
                         <button type="submit" name="status" value="approved" class="ad-btn ad-btn--success ad-btn--block">Approve</button>
+                        <button type="submit" name="status" value="on_file" class="ad-btn ad-btn--onfile ad-btn--block"
+                                title="Everything is in order. The supplier is told their details are kept on file and that we'll contact them when needed.">Accept &amp; keep on file</button>
                         <button type="submit" name="status" value="under_review" class="ad-btn ad-btn--ghost ad-btn--block">Mark under review</button>
                         <button type="submit" name="status" value="returned_for_update" class="ad-btn ad-btn--warning ad-btn--block" data-needs-comment>Return to supplier</button>
                         <button type="submit" name="status" value="declined" class="ad-btn ad-btn--danger ad-btn--block" data-needs-comment>Decline</button>
@@ -252,6 +269,9 @@
             return;
         }
         if (button && button.value === 'declined' && !confirm('Decline this application? The supplier will be notified.')) {
+            e.preventDefault();
+        }
+        if (button && button.value === 'on_file' && !confirm('Keep this application on file? The supplier will be told everything is in order and that we will contact them when we need their services.')) {
             e.preventDefault();
         }
     });

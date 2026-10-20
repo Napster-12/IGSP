@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Terms and Conditions | IGSP</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+</head>
+<body class="terms-page">
+    <header class="terms-header">
+        <a href="{{ url_for('home') }}"><img class="terms-logo" src="{{ url_for('static', filename='images/logo.png') }}" alt="Icebolethu Group"></a>
+    </header>
+
+    <main class="terms-main">
+        <h1>Icebolethu Group Supplier Portal – Terms and Conditions</h1>
+        <div class="terms-body">
+            {% include "terms_content.html" %}
+        </div>
+    </main>
+
+    <footer class="adm-login-foot">
+        <p><strong>Call Centre:</strong> 031 208 9102</p>
+        <p><strong>Email:</strong> supplier_onboarding@icebolethu.co.za</p>
+    </footer>
+</body>
+</html>

@@ -46,6 +46,11 @@
                     </div>
                     <a class="adm-login-forgot" href="{{ url_for('forgot_password') }}">Forgot password?</a>
 
+                    <label class="tc-accept">
+                        <input type="checkbox" name="accept_terms" value="1" required oninvalid="this.setCustomValidity('Please accept our Terms &amp; Conditions.')" onchange="this.setCustomValidity('')">
+                        <span>I accept the <a href="{{ url_for('terms') }}" target="_blank" rel="noopener">Terms and Conditions</a></span>
+                    </label>
+
                     <button type="submit" class="adm-login-btn">Login</button>
                 </form>
 
