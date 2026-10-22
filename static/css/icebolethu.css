@@ -5398,8 +5398,9 @@ a.ad-stat:hover{
 .adm-login-foot p{ margin:0; }
 .adm-login-foot strong{ color:#EF4444; }
 @media(max-width:900px){
-    .adm-login{ grid-template-columns:1fr; grid-template-rows:1fr auto; }
+    .adm-login{ grid-template-columns:1fr; grid-template-rows:1fr auto; min-height:100dvh; }
     .adm-login-photo{ display:none; }
+    .adm-login-foot{ position:sticky; bottom:0; z-index:5; padding:10px 16px; gap:2px 16px; font-size:12px; }
     .adm-login-side{ min-height:0; }
     .adm-login-main h1{ font-size:24px; }
 }
