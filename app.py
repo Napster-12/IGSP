@@ -281,6 +281,8 @@ RESEND_COOLDOWN_SECONDS = 30
 # Bump when templates/terms_content.html changes materially; each acceptance records the version agreed to.
 TERMS_VERSION = "2026-10"
 TERMS_REQUIRED_MESSAGE = "Please accept our Terms & Conditions."
+# Bump when templates/application_terms_content.html changes materially; each application records the version accepted.
+APPLICATION_TERMS_VERSION = "2026-10"
 PASSWORD_RESET_MAX_AGE = 3600
 
 
@@ -350,6 +352,9 @@ class SupplierApplication(DB.Model):
     expiry_suspended = DB.Column(DB.Boolean, nullable=False, default=False)
     # Set each time the application is approved; the registration certificate is dated from it.
     approved_at = DB.Column(DB.DateTime, nullable=True)
+    # Supplier Application Terms accepted when the application was submitted.
+    terms_version = DB.Column(DB.String(20), nullable=True)
+    terms_accepted_at = DB.Column(DB.DateTime, nullable=True)
     company_profile = DB.Column(DB.Text, nullable=False)
     documents_status = DB.Column(DB.String(50), default="pending")
     status = DB.Column(DB.String(50), default="submitted")
@@ -602,6 +607,27 @@ class User(DB.Model):
         self.verification_code_expires = None
 
 
+# Admin roles and the sections of the admin portal each one can open.
+ADMIN_ROLES = {
+    "super": "Procurement Team Lead",
+    "applications": "Procurement Officer",
+    "reports": "Procurement Manager",
+}
+ROLE_SECTIONS = {
+    "super": {"dashboard", "applications", "suppliers", "catalogue", "reports"},
+    "applications": {"applications", "suppliers"},
+    "reports": {"reports"},
+}
+# Where each section starts, in sidebar order; an admin lands on the first one they can open.
+SECTION_HOMES = [
+    ("dashboard", "admin_dashboard"),
+    ("applications", "admin_applications"),
+    ("suppliers", "admin_suppliers"),
+    ("catalogue", "admin_catalogue"),
+    ("reports", "admin_reports"),
+]
+
+
 class Admin(DB.Model):
     __tablename__ = "admins"
 
@@ -609,7 +635,23 @@ class Admin(DB.Model):
     email = DB.Column(DB.String(120), unique=True, nullable=False)
     password_hash = DB.Column(DB.String(256), nullable=False)
     name = DB.Column(DB.String(100), nullable=False, default="")
+    role = DB.Column(DB.String(20), nullable=False, default="super")
     created_at = DB.Column(DB.DateTime, default=utcnow)
+
+    @property
+    def role_label(self):
+        return ADMIN_ROLES.get(self.role, "Admin")
+
+    @property
+    def is_super(self):
+        return self.role == "super"
+
+    def can(self, section):
+        return section in ROLE_SECTIONS.get(self.role, set())
+
+    @property
+    def home_endpoint(self):
+        return next((endpoint for section, endpoint in SECTION_HOMES if self.can(section)), "admin_logout")
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -769,7 +811,7 @@ def notify_admins(title, message, application=None):
         url_for("admin_application_detail", application_id=application.id, _external=True)
         if application else None
     )
-    for admin in Admin.query.all():
+    for admin in Admin.query.filter(Admin.role.in_([r for r, s in ROLE_SECTIONS.items() if "applications" in s])):
         DB.session.add(Notification(
             admin_id=admin.id,
             title=title,
@@ -820,6 +862,30 @@ def admin_required(view_func):
             session.pop("admin_id", None)
             return redirect(url_for("admin_login"))
         g.is_admin_view = True
+        return view_func(*args, **kwargs)
+    return wrapper
+
+
+def admin_section(section):
+    """Limit an admin view to the roles that can open `section` (stack under @admin_required)."""
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapper(*args, **kwargs):
+            admin = get_current_admin()
+            if not admin.can(section):
+                flash("You don't have access to that page.", "error")
+                return redirect(url_for(admin.home_endpoint))
+            return view_func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def super_admin_required(view_func):
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if not get_current_admin().is_super:
+            flash("Only a Procurement Team Lead can do that.", "error")
+            return redirect(url_for(get_current_admin().home_endpoint))
         return view_func(*args, **kwargs)
     return wrapper
 
@@ -1354,6 +1420,55 @@ def replace_directors(application, directors):
         application.directors.append(SupplierDirector(**director))
 
 
+# A director, shareholder or owner should be linked to one supplier only. Applications that break this still go
+# through, but are flagged to admins. Any application that has been submitted (whatever its outcome since) counts;
+# unsubmitted drafts don't.
+def director_conflicts(directors, email):
+    """Directors (dicts with id_number) already on another supplier's application.
+
+    Returns [(director, other_application, other_director), ...]. The applicant's own applications don't count.
+    """
+    by_id = {d["id_number"]: d for d in directors}
+    if not by_id:
+        return []
+    rows = (DB.session.query(SupplierDirector, SupplierApplication)
+            .join(SupplierApplication, SupplierDirector.application_id == SupplierApplication.id)
+            .filter(SupplierApplication.status != "draft", SupplierDirector.id_number.in_(by_id),
+                    func.lower(SupplierApplication.email) != normalize_email(email))
+            .order_by(SupplierApplication.created_at).all())
+    return [(by_id[other_d.id_number], other, other_d) for other_d, other in rows]
+
+
+def director_matches(applications):
+    """For the admin view: directors of `applications` who were already on another supplier's earlier application.
+
+    Only the later application is flagged; the first one stands.
+    Returns {application_id: [(director, other_application, other_director)]}.
+    """
+    matches = {}
+    for application in applications:
+        directors = [{"id_number": d.id_number, "obj": d} for d in application.directors]
+        found = [(d["obj"], other, other_d) for d, other, other_d in director_conflicts(directors, application.email)
+                 if other.id < application.id]
+        if found:
+            matches[application.id] = found
+    return matches
+
+
+def flag_director_matches(application):
+    """Tell admins (once) that a submitted application lists a director already on another supplier."""
+    found = director_matches([application]).get(application.id)
+    if not found:
+        return
+    title = f"Director match: {application.company_name}"
+    message = (f"{application.company_name} ({application.email}) lists "
+               + "; ".join(f"{d.initials_surname} ({d.role}, {d.id_number}), already {other_d.role} at "
+                           f"{other.company_name}" for d, other, other_d in found)
+               + ". The application can only be declined.")
+    if not Notification.query.filter_by(title=title, message=message).first():
+        notify_admins(title, message, application)
+
+
 # ---------------------------------------------------------------------------
 # Public pages and authentication
 # ---------------------------------------------------------------------------
@@ -1483,6 +1598,12 @@ def login():
 @app.route("/terms")
 def terms():
     return render_template("terms.html")
+
+
+@app.route("/application-terms")
+def application_terms():
+    return render_template("terms.html", page_title="Supplier Application Terms and Conditions",
+                           content_template="application_terms_content.html", version=APPLICATION_TERMS_VERSION)
 
 
 @app.route("/logout")
@@ -1832,8 +1953,8 @@ def onboarding_review():
         if missing:
             flash("Please upload all required documents. Missing: " + ", ".join(missing), "error")
             return redirect(url_for("onboarding_documents"))
-        if not request.form.get("confirm"):
-            flash("Please confirm that the information you provided is correct.", "error")
+        if not request.form.get("accept_terms"):
+            flash("Please accept the Terms & Conditions.", "error")
             return redirect(url_for("onboarding_review"))
 
         application = SupplierApplication(
@@ -1844,6 +1965,8 @@ def onboarding_review():
             company_profile="",
             documents_status="complete",
             status="pending_review",
+            terms_version=APPLICATION_TERMS_VERSION,
+            terms_accepted_at=utcnow(),
             **{field: draft.get(field, "") for field in PROFILE_FIELDS},
         )
         replace_categories(application, draft["supplier_categories"], draft.get("supplier_category_details", {}))
@@ -1855,7 +1978,7 @@ def onboarding_review():
             document.application_id = application.id
 
         log_event(application, "submitted", to_status="pending_review",
-                  summary=f"Submitted with {len(documents)} document(s)")
+                  summary=f"Submitted with {len(documents)} document(s); accepted Application Terms {APPLICATION_TERMS_VERSION}")
         notify_admins(
             "New Supplier Application",
             f"New application submitted by {user.company_name} ({user.contact_name}) for {application.supplier_category}.",
@@ -1868,6 +1991,7 @@ def onboarding_review():
             "We'll notify you when its status changes.",
             application,
         )
+        flag_director_matches(application)
         DB.session.commit()
 
         session.pop("supplier_onboarding", None)
@@ -2063,6 +2187,7 @@ def edit_application(application_id):
             f"{'resubmitted' if resubmitted else 'updated'} their application.",
             application,
         )
+        flag_director_matches(application)
         DB.session.commit()
 
         flash("Application resubmitted for review." if resubmitted else "Application updated successfully.", "success")
@@ -2196,7 +2321,7 @@ def serve_upload(filepath):
     if not owns_file:
         # Any admin may open documents attached to an application; every view is logged.
         application = DB.session.get(SupplierApplication, document.application_id) if document and document.application_id else None
-        if not admin or not application:
+        if not admin or not admin.can("applications") or not application:
             abort(404)
         log_event(application, "document_viewed", summary=f"Viewed {document.document_type}",
                   changes=[{"field": document.document_type, "old": "", "new": document.original_filename}], actor=admin)
@@ -2213,7 +2338,7 @@ def serve_upload(filepath):
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     if get_current_admin():
-        return redirect(url_for("admin_dashboard"))
+        return redirect(url_for(get_current_admin().home_endpoint))
 
     if request.method == "POST":
         email = normalize_email(request.form.get("email"))
@@ -2233,7 +2358,7 @@ def admin_login():
         login_limiter.reset(limiter_key)
         session["admin_id"] = admin.id
         session.permanent = True
-        return redirect(url_for("admin_dashboard"))
+        return redirect(url_for(admin.home_endpoint))
 
     return render_template("admin_login.html", step="start")
 
@@ -2241,7 +2366,7 @@ def admin_login():
 @app.route("/admin/login/options")
 def admin_login_options():
     if get_current_admin():
-        return redirect(url_for("admin_dashboard"))
+        return redirect(url_for(get_current_admin().home_endpoint))
     return render_template("admin_login.html", step="options")
 
 
@@ -2278,7 +2403,7 @@ def admin_login_microsoft_callback():
     session["admin_id"] = admin.id
     session.permanent = True
     flash(f"Welcome, {admin.name or admin.email}", "success")
-    return redirect(url_for("admin_dashboard"))
+    return redirect(url_for(admin.home_endpoint))
 
 
 @app.route("/admin/logout")
@@ -2293,6 +2418,8 @@ AWAITING_REVIEW_STATUSES = ["submitted", "pending_review", "under_review"]
 @app.route("/admin")
 @admin_required
 def admin_dashboard():
+    if not get_current_admin().can("dashboard"):
+        return redirect(url_for(get_current_admin().home_endpoint))
     status_counts = {status: 0 for status in STATUSES}
     for status, count in DB.session.query(SupplierApplication.status, func.count()).group_by(SupplierApplication.status):
         if status in status_counts:
@@ -2324,6 +2451,7 @@ def admin_dashboard():
 
 @app.route("/admin/suppliers")
 @admin_required
+@admin_section("suppliers")
 def admin_suppliers():
     search = request.args.get("search", "").strip()
     account_filter = request.args.get("account", "").strip()
@@ -2394,6 +2522,7 @@ def admin_suppliers():
 
 @app.route("/admin/suppliers/<int:supplier_id>/toggle", methods=["POST"])
 @admin_required
+@admin_section("suppliers")
 def toggle_supplier(supplier_id):
     supplier = DB.get_or_404(User, supplier_id)
     supplier.active = not supplier.active
@@ -2412,6 +2541,7 @@ def toggle_supplier(supplier_id):
 
 @app.route("/admin/applications")
 @admin_required
+@admin_section("applications")
 def admin_applications():
     search = request.args.get("search", "").strip()
     status_filter = request.args.get("status", "").strip()
@@ -2464,6 +2594,7 @@ def admin_applications():
         "admin_applications.html",
         admin=admin,
         applications=pagination.items,
+        flagged_ids=set(director_matches(pagination.items)),
         pagination=pagination,
         search=search,
         status_filter=status_filter,
@@ -2494,6 +2625,7 @@ def assigned_application_or_redirect(application_id):
 
 @app.route("/admin/applications/<int:application_id>/assign", methods=["POST"])
 @admin_required
+@admin_section("applications")
 def assign_application(application_id):
     admin = get_current_admin()
     application = DB.get_or_404(SupplierApplication, application_id)
@@ -2516,8 +2648,50 @@ def assign_application(application_id):
     return redirect(detail_url)
 
 
+def application_admins():
+    """Admins a super admin can hand an application to."""
+    return Admin.query.filter_by(role="applications").order_by(Admin.name, Admin.email).all()
+
+
+@app.route("/admin/applications/<int:application_id>/assign-to", methods=["POST"])
+@admin_required
+@admin_section("applications")
+@super_admin_required
+def assign_application_to(application_id):
+    application = DB.get_or_404(SupplierApplication, application_id)
+    detail_url = url_for("admin_application_detail", application_id=application.id)
+    assignee = DB.session.get(Admin, request.form.get("admin_id", type=int) or 0)
+    if not assignee or assignee.role != "applications":
+        flash("Choose a Procurement Officer to assign this application to.", "error")
+        return redirect(detail_url)
+
+    owner = application.assigned_admin
+    if owner and owner.id == assignee.id:
+        flash(f"This application is already assigned to {assignee.name or assignee.email}.", "info")
+        return redirect(detail_url)
+
+    me = get_current_admin()
+    previous = owner.name or owner.email if owner else ""
+    new = assignee.name or assignee.email
+    application.assigned_admin_id = assignee.id
+    application.assigned_at = utcnow()
+    log_event(application, "assigned", summary=f"Assigned to {new} by {me.name or me.email}",
+              changes=[{"field": "Assigned to", "old": previous, "new": new}])
+    title = "Application assigned to you"
+    message = f"{me.name or me.email} assigned {application.company_name}'s application to you."
+    DB.session.add(Notification(admin_id=assignee.id, title=title, message=message,
+                                related_application_id=application.id))
+    send_notification_email(assignee.email, title, message, recipient_name=assignee.name or "Admin",
+                            application=application, action_url=url_for("admin_application_detail", application_id=application.id, _external=True),
+                            action_label="Review application")
+    DB.session.commit()
+    flash(f"{application.company_name} is now assigned to {new}.", "success")
+    return redirect(detail_url)
+
+
 @app.route("/admin/applications/<int:application_id>/release", methods=["POST"])
 @admin_required
+@admin_section("applications")
 def release_application(application_id):
     application, blocked = assigned_application_or_redirect(application_id)
     if blocked:
@@ -2534,6 +2708,7 @@ def release_application(application_id):
 
 @app.route("/admin/applications/<int:application_id>")
 @admin_required
+@admin_section("applications")
 def admin_application_detail(application_id):
     application = DB.get_or_404(SupplierApplication, application_id)
     supplier = get_application_supplier(application)
@@ -2548,12 +2723,15 @@ def admin_application_detail(application_id):
         missing_documents=missing_required_documents(documents),
         statuses=STATUSES,
         is_mine=is_assigned_to_me(application),
+        director_flags=director_matches([application]).get(application.id, []),
         history_count=len(application_history(application)),
+        assignable_admins=application_admins() if get_current_admin().is_super else [],
     )
 
 
 @app.route("/admin/applications/<int:application_id>/history")
 @admin_required
+@admin_section("applications")
 def admin_application_history(application_id):
     application = DB.get_or_404(SupplierApplication, application_id)
     return render_template(
@@ -2581,6 +2759,7 @@ def application_history(application):
 
 @app.route("/admin/applications/<int:application_id>/history.csv")
 @admin_required
+@admin_section("applications")
 def admin_application_history_export(application_id):
     application = DB.get_or_404(SupplierApplication, application_id)
     output = io.StringIO()
@@ -2607,6 +2786,7 @@ def admin_application_history_export(application_id):
 
 @app.route("/admin/applications/<int:application_id>/update", methods=["POST"])
 @admin_required
+@admin_section("applications")
 def update_application(application_id):
     application, blocked = assigned_application_or_redirect(application_id)
     if blocked:
@@ -2618,6 +2798,9 @@ def update_application(application_id):
     new_doc_status = request.form.get("documents_status", application.documents_status)
     if new_status not in STATUSES or new_doc_status not in DOCUMENT_STATUSES:
         flash("Invalid status selected.", "error")
+        return redirect(url_for("admin_application_detail", application_id=application.id))
+    if new_status != "declined" and director_matches([application]):
+        flash("This application can only be declined: a director, shareholder or owner is already linked to another supplier.", "error")
         return redirect(url_for("admin_application_detail", application_id=application.id))
     if new_status in {"declined", "returned_for_update"} and not request.form.get("review_comments", "").strip():
         flash("Please add a comment explaining to the supplier why the application is "
@@ -2702,6 +2885,7 @@ def update_application(application_id):
 
 @app.route("/admin/applications/<int:application_id>/documents/<int:document_id>/replace", methods=["POST"])
 @admin_required
+@admin_section("applications")
 def replace_admin_document(application_id, document_id):
     application, blocked = assigned_application_or_redirect(application_id)
     if blocked:
@@ -2746,6 +2930,7 @@ def replace_admin_document(application_id, document_id):
 
 @app.route("/admin/applications/<int:application_id>/download-all")
 @admin_required
+@admin_section("applications")
 def download_all_documents(application_id):
     application = DB.get_or_404(SupplierApplication, application_id)
     supplier = get_application_supplier(application)
@@ -2894,6 +3079,7 @@ def users_by_email(applications):
 
 @app.route("/admin/reports")
 @admin_required
+@admin_section("reports")
 def admin_reports():
     filters = report_filters(request.args)
     base_query = filtered_applications_query(filters)
@@ -2996,6 +3182,21 @@ REPORT_PERIODS = [("30d", "Last 30 days"), ("90d", "Last 90 days"), ("12m", "Las
 
 
 def report_period(args):
+    """The report window: a preset period, or a custom From/To date range (which wins when given).
+
+    Returns a dict with `period` ("custom" for a date range), `start` and `end` (exclusive; None = open),
+    the cleaned `date_from`/`date_to`, and `args` to carry the window in links.
+    """
+    dates = report_filters(args)
+    date_from, date_to = dates["date_from"], dates["date_to"]
+    if date_from or date_to:
+        return {
+            "period": "custom",
+            "start": datetime.strptime(date_from, "%Y-%m-%d") if date_from else None,
+            "end": datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1) if date_to else None,
+            "date_from": date_from, "date_to": date_to,
+            "args": {k: v for k, v in (("date_from", date_from), ("date_to", date_to)) if v},
+        }
     period = args.get("period", "12m")
     if period not in dict(REPORT_PERIODS):
         period = "12m"
@@ -3007,10 +3208,10 @@ def report_period(args):
         "ytd": datetime(now.year, 1, 1),
         "all": None,
     }[period]
-    return period, start
+    return {"period": period, "start": start, "end": None, "date_from": "", "date_to": "", "args": {"period": period}}
 
 
-def monthly_series(pairs, start):
+def monthly_series(pairs, start, end=None):
     """pairs: iterable of (datetime, value). Returns (labels, values) with every month in range, gaps as 0."""
     totals = defaultdict(lambda: Decimal("0"))
     for when, value in pairs:
@@ -3019,7 +3220,8 @@ def monthly_series(pairs, start):
     if not totals:
         return [], []
     first = start.strftime("%Y-%m") if start else min(totals)
-    months = month_range(min(first, min(totals)), utcnow().strftime("%Y-%m"))
+    last = (end - timedelta(days=1)).strftime("%Y-%m") if end else utcnow().strftime("%Y-%m")
+    months = month_range(min(first, min(totals)), max(last, max(totals)))
     return months, [float(totals.get(m, 0)) for m in months]
 
 
@@ -3033,10 +3235,12 @@ def cell(text, href=None, badge=None, num=False, mono=False, money=None):
             "money": money}
 
 
-def suppliers_report(start):
+def suppliers_report(start, end=None):
     query = User.query
     if start:
         query = query.filter(User.created_at >= start)
+    if end:
+        query = query.filter(User.created_at < end)
     suppliers = query.order_by(User.created_at.desc()).all()
     apps = users_by_email_applications(suppliers)
     ids = [u.id for u in suppliers]
@@ -3050,7 +3254,7 @@ def suppliers_report(start):
             for c in application.category_names:
                 by_category[c] += 1
             by_province[application.province or "Not given"] += 1
-    months, monthly = monthly_series(((u.created_at, 1) for u in suppliers), start)
+    months, monthly = monthly_series(((u.created_at, 1) for u in suppliers), start, end)
     active = sum(1 for u in suppliers if u.active)
     applied = sum(1 for u in suppliers if normalize_email(u.email) in apps)
 
@@ -3094,7 +3298,7 @@ def users_by_email_applications(users):
     return {normalize_email(a.email): a for a in SupplierApplication.query.filter(func.lower(SupplierApplication.email).in_(emails))}
 
 
-def inventory_report(_start):
+def inventory_report(_start, _end=None):
     products = (Product.query.join(User, Product.user_id == User.id)
                 .filter(Product.is_archived.is_(False)).order_by(Product.category, Product.name).all())
     live = [p for p in products if p.supplier.active]
@@ -3139,10 +3343,12 @@ def inventory_report(_start):
 ACTIVITY_LABELS = EVENT_LABELS
 
 
-def activity_report(start):
+def activity_report(start, end=None):
     app_events = ApplicationEvent.query.filter(ApplicationEvent.actor_type == "admin")
     if start:
         app_events = app_events.filter(ApplicationEvent.created_at >= start)
+    if end:
+        app_events = app_events.filter(ApplicationEvent.created_at < end)
     events = [("application", e) for e in app_events.all()]
     events.sort(key=lambda pair: pair[1].created_at or datetime.min, reverse=True)
 
@@ -3153,7 +3359,7 @@ def activity_report(start):
     for _, e in events:
         per_admin[e.actor_name or "Unknown"] += 1
         per_action[ACTIVITY_LABELS.get(e.action, e.action.replace("_", " ").capitalize())] += 1
-    months, monthly = monthly_series(((e.created_at, 1) for _, e in events), start)
+    months, monthly = monthly_series(((e.created_at, 1) for _, e in events), start, end)
     applications = {a.id: a for a in SupplierApplication.query.filter(
         SupplierApplication.id.in_({e.application_id for kind, e in events if kind == "application"})).all()} if events else {}
 
@@ -3200,32 +3406,37 @@ REPORT_DESCRIPTIONS = {
 
 @app.route("/admin/reports/<kind>")
 @admin_required
+@admin_section("reports")
 def admin_report(kind):
     if kind == "applications":
         return redirect(url_for("admin_reports", **request.args))
     if kind not in REPORT_BUILDERS:
         abort(404)
-    period, start = report_period(request.args)
-    report = REPORT_BUILDERS[kind](start)
+    window = report_period(request.args)
+    report = REPORT_BUILDERS[kind](window["start"], window["end"])
     return render_template(
         "admin_report.html", admin=get_current_admin(), kind=kind, report=report,
         title=dict(REPORT_KINDS)[kind], description=REPORT_DESCRIPTIONS[kind],
-        period=period, periods=REPORT_PERIODS, report_kinds=REPORT_KINDS,
+        period=window["period"], periods=REPORT_PERIODS, report_kinds=REPORT_KINDS,
+        date_from=window["date_from"], date_to=window["date_to"], range_args=window["args"],
     )
 
 
 @app.route("/admin/reports/<kind>/export")
 @admin_required
+@admin_section("reports")
 def admin_report_export(kind):
     if kind not in REPORT_BUILDERS:
         abort(404)
-    period, start = report_period(request.args)
-    report = REPORT_BUILDERS[kind](start)
+    window = report_period(request.args)
+    report = REPORT_BUILDERS[kind](window["start"], window["end"])
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(report["columns"])
     for row in report["rows"]:
         writer.writerow([f"{c['money']:.2f}" if c.get("money") is not None else c["text"] for c in row])
+    period = (f"{window['date_from'] or 'start'}_to_{window['date_to'] or 'today'}"
+              if window["period"] == "custom" else window["period"])
     filename = f"{kind}_report_{period}_{datetime.now().strftime('%Y%m%d')}.csv"
     return Response("﻿" + output.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": f"attachment; filename={filename}"})
@@ -3233,6 +3444,7 @@ def admin_report_export(kind):
 
 @app.route("/admin/reports/export")
 @admin_required
+@admin_section("reports")
 def admin_reports_export():
     applications = filtered_applications_query(report_filters(request.args)).order_by(SupplierApplication.created_at.asc()).all()
     suppliers = users_by_email(applications)
@@ -3412,12 +3624,21 @@ def catalogue_query():
             .filter(Product.is_listed.is_(True), Product.is_archived.is_(False), User.active.is_(True)))
 
 
+def supplier_locations_query():
+    """(user id, city, province) for suppliers, taken from their approved application."""
+    return (DB.session.query(User.id, SupplierApplication.city, SupplierApplication.province)
+            .join(SupplierApplication, func.lower(SupplierApplication.email) == func.lower(User.email))
+            .filter(SupplierApplication.status == "approved"))
+
+
 @app.route("/admin/catalogue")
 @admin_required
+@admin_section("catalogue")
 def admin_catalogue():
     search = request.args.get("search", "").strip()
     category = request.args.get("category", "").strip()
     supplier_id = request.args.get("supplier", type=int)
+    province = request.args.get("province", "").strip()
     query = catalogue_query()
     if search:
         like = f"%{search}%"
@@ -3426,18 +3647,25 @@ def admin_catalogue():
         query = query.filter(Product.category == category)
     if supplier_id:
         query = query.filter(Product.user_id == supplier_id)
+    if province:
+        in_province = supplier_locations_query().filter(SupplierApplication.province == province)
+        query = query.filter(User.id.in_(in_province.with_entities(User.id)))
     page = request.args.get("page", 1, type=int)
     pagination = query.order_by(Product.name).paginate(page=page, per_page=24, error_out=False)
 
     base = catalogue_query()
+    base_user_ids = base.with_entities(Product.user_id).distinct()
     categories = sorted({c for (c,) in base.with_entities(Product.category).distinct() if c})
-    suppliers = (User.query.filter(User.id.in_(base.with_entities(Product.user_id).distinct()))
-                 .order_by(User.company_name).all())
-    page_args = {k: v for k, v in {"search": search, "category": category, "supplier": supplier_id}.items() if v}
+    suppliers = User.query.filter(User.id.in_(base_user_ids)).order_by(User.company_name).all()
+    supplier_locations = supplier_locations_query().filter(User.id.in_(base_user_ids)).all()
+    provinces = [p for p in PROVINCES if any(row.province == p for row in supplier_locations)]
+    locations = {row.id: ", ".join(part for part in (row.city, row.province) if part) for row in supplier_locations}
+    page_args = {k: v for k, v in {"search": search, "category": category, "supplier": supplier_id,
+                                   "province": province}.items() if v}
     return render_template(
         "admin_catalogue.html", admin=get_current_admin(), products=pagination.items, pagination=pagination,
         search=search, category_filter=category, supplier_filter=supplier_id, categories=categories,
-        suppliers=suppliers, page_args=page_args,
+        suppliers=suppliers, province_filter=province, provinces=provinces, locations=locations, page_args=page_args,
     )
 
 
@@ -3639,6 +3867,7 @@ def supplier_registration_certificate():
 
 @app.route("/admin/applications/<int:application_id>/certificate")
 @admin_required
+@admin_section("applications")
 def admin_registration_certificate(application_id):
     application = DB.get_or_404(SupplierApplication, application_id)
     detail_url = url_for("admin_application_detail", application_id=application.id)
@@ -3781,12 +4010,16 @@ def migrate_mysql_schema():
     if name_col is not None and name_col[4] is None:
         DB.session.execute(text("ALTER TABLE users MODIFY COLUMN name VARCHAR(100) NOT NULL DEFAULT ''"))
 
+    _add_missing_columns("admins", {"role": "VARCHAR(20) NOT NULL DEFAULT 'super'"})
+
     _add_missing_columns("supplier_applications", {
         "assigned_admin_id": "INT NULL",
         "assigned_at": "DATETIME NULL",
         "supplier_category_detail": "VARCHAR(255) NOT NULL DEFAULT ''",
         "expiry_suspended": "BOOLEAN NOT NULL DEFAULT FALSE",
         "approved_at": "DATETIME NULL",
+        "terms_version": "VARCHAR(20) NULL",
+        "terms_accepted_at": "DATETIME NULL",
         **{field: f"VARCHAR({SupplierApplication.__table__.c[field].type.length}) DEFAULT ''" for field in PROFILE_FIELDS},
     })
 
@@ -3859,22 +4092,41 @@ def init_db_command():
 @app.cli.command("create-admin")
 @click.option("--email", prompt=True)
 @click.option("--name", prompt=True, default="")
+@click.option("--role", type=click.Choice(list(ADMIN_ROLES)), default=None,
+              help="super (Procurement Team Lead): everything; applications (Procurement Officer): applications and suppliers; "
+                   "reports (Procurement Manager): reports only. "
+                   "New admins default to super; existing admins keep their role unless this is given.")
 @click.password_option()
-def create_admin_command(email, name, password):
-    """Create an admin account, or reset the password of an existing one."""
+def create_admin_command(email, name, role, password):
+    """Create an admin account, or reset the password (and optionally the role) of an existing one."""
     email = normalize_email(email)
     admin = find_admin_by_email(email)
     if admin:
         admin.set_password(password)
         if name:
             admin.name = name
-        click.echo(f"Updated admin {email}.")
+        if role:
+            admin.role = role
+        click.echo(f"Updated admin {email} ({admin.role_label}).")
     else:
-        admin = Admin(email=email, name=name)
+        admin = Admin(email=email, name=name, role=role or "super")
         admin.set_password(password)
         DB.session.add(admin)
-        click.echo(f"Created admin {email}.")
+        click.echo(f"Created admin {email} ({admin.role_label}).")
     DB.session.commit()
+
+
+@app.cli.command("set-admin-role")
+@click.argument("email")
+@click.argument("role", type=click.Choice(list(ADMIN_ROLES)))
+def set_admin_role_command(email, role):
+    """Change an existing admin's role without touching their password."""
+    admin = find_admin_by_email(email)
+    if not admin:
+        raise click.ClickException(f"No admin with email {email}.")
+    admin.role = role
+    DB.session.commit()
+    click.echo(f"{admin.email} is now a {admin.role_label}.")
 
 
 @app.cli.command("release-application")
@@ -4003,7 +4255,8 @@ def seed_demo_command(count, months, remove, seed):
         return
     if User.query.filter(User.email.like(f"%@{DEMO_EMAIL_DOMAIN}")).first():
         raise click.ClickException("Demo data already exists. Run `flask --app app seed-demo --remove` first to replace it.")
-    admins = Admin.query.order_by(Admin.id).all()
+    # Only admins who can work on applications get demo applications assigned to them.
+    admins = [a for a in Admin.query.order_by(Admin.id).all() if a.can("applications")]
     if not admins:
         raise click.ClickException("Create an admin first: flask --app app create-admin")
 

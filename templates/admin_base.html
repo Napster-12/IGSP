@@ -1,11 +1,11 @@
 {#- Shared layout for every signed-in admin page. -#}
 {% import "admin_macros.html" as ad with context %}
 {% set nav = [
-    ('admin_dashboard', 'Dashboard', 'dashboard', ['admin_dashboard']),
-    ('admin_applications', 'Applications', 'applications', ['admin_applications', 'admin_application_detail']),
-    ('admin_suppliers', 'Suppliers', 'suppliers', ['admin_suppliers']),
-    ('admin_catalogue', 'Catalogue', 'box', ['admin_catalogue']),
-    ('admin_reports', 'Reports', 'reports', ['admin_reports', 'admin_report']),
+    ('dashboard', 'admin_dashboard', 'Dashboard', 'dashboard', ['admin_dashboard']),
+    ('applications', 'admin_applications', 'Applications', 'applications', ['admin_applications', 'admin_application_detail']),
+    ('suppliers', 'admin_suppliers', 'Suppliers', 'suppliers', ['admin_suppliers']),
+    ('catalogue', 'admin_catalogue', 'Catalogue', 'box', ['admin_catalogue']),
+    ('reports', 'admin_reports', 'Reports', 'reports', ['admin_reports', 'admin_report']),
 ] %}
 <!DOCTYPE html>
 <html lang="en">
@@ -19,7 +19,7 @@
 <body class="ad-body">
     <div class="ad-shell">
         <aside class="ad-sidebar">
-            <a class="ad-brand" href="{{ url_for('admin_dashboard') }}">
+            <a class="ad-brand" href="{{ url_for(admin.home_endpoint) }}">
                 <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Icebolethu Group">
                 <span>Supplier Portal Admin</span>
             </a>
@@ -31,7 +31,7 @@
 
             <div class="ad-sidebar-menu" id="ad-menu">
                 <nav class="ad-nav" aria-label="Admin">
-                    {% for endpoint, label, icon_name, active_for in nav %}
+                    {% for section, endpoint, label, icon_name, active_for in nav if admin.can(section) %}
                         <a href="{{ url_for(endpoint) }}" class="ad-nav-link{% if request.endpoint in active_for %} is-active{% endif %}"
                            {% if request.endpoint in active_for %}aria-current="page"{% endif %}>
                             {{ ad.icon(icon_name) }}
@@ -45,6 +45,7 @@
                     <div class="ad-account-text">
                         <strong>{{ admin.name or 'Administrator' }}</strong>
                         <span>{{ admin.email }}</span>
+                        <span class="ad-account-role">{{ admin.role_label }}</span>
                     </div>
                     <a href="{{ url_for('admin_logout') }}" class="ad-logout">{{ ad.icon('logout') }}<span>Log out</span></a>
                 </div>

@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import date, timedelta
 
 import app as igsp
 from conftest import DOC_DATES, PASSWORD, PROFILE, Client, pdf, submit_application
@@ -555,10 +556,19 @@ def test_review_page_shows_all_sections_and_requires_confirmation(client):
         assert text in page, text
     assert "Required — not uploaded" not in page
 
-    resp = client.post("/onboarding/review")  # no confirmation tick
+    assert 'name="accept_terms"' in page and 'href="/application-terms"' in page and 'name="confirm"' not in page
+    resp = client.post("/onboarding/review")  # terms not accepted
     assert resp.headers["Location"].endswith("/onboarding/review")
-    resp = client.post("/onboarding/review", {"confirm": "1"})
+    with client.app.app_context():
+        assert igsp.SupplierApplication.query.count() == 0
+    resp = client.post("/onboarding/review", {"accept_terms": "1"})
     assert resp.headers["Location"].endswith("/dashboard")
+    with client.app.app_context():
+        application = igsp.SupplierApplication.query.one()
+        assert application.terms_version == igsp.APPLICATION_TERMS_VERSION and application.terms_accepted_at
+
+    terms = client.get("/application-terms").data.decode()
+    assert "Supplier Application Terms and Conditions" in terms and "Certificates with expiry dates" in terms
 
 
 def test_admin_pages_share_layout_and_decline_needs_comment(client):
@@ -849,6 +859,12 @@ def test_catalogue_shows_listed_products_and_supplier_contact(client):
     catalogue = admin.get("/admin/catalogue").data.decode()
     assert "Pine casket" in catalogue and "Hidden casket" not in catalogue and "R 4 500.00" in catalogue
     assert "mailto:supplier@example.com" in catalogue  # admins order outside the portal
+    assert "Durban, KwaZulu-Natal" in catalogue  # supplier location from the approved application
+
+    # Location filter: only provinces that have listed products are offered.
+    assert '<option value="KwaZulu-Natal"' in catalogue and '<option value="Gauteng"' not in catalogue
+    assert "Pine casket" in admin.get("/admin/catalogue?province=KwaZulu-Natal").data.decode()
+    assert "Pine casket" not in admin.get("/admin/catalogue?province=Gauteng").data.decode()
     assert "/request" not in catalogue and "Requests" not in admin.get("/admin").data.decode()
     assert "Requests" not in client.get("/inventory").data.decode()
 
@@ -977,3 +993,248 @@ def test_supplier_slicer_cards_count_and_filter(client):
 
     page = client.get("/admin/suppliers?account=inactive&application=none").data.decode()
     assert "Charlie" in page and "Bravo" not in page and "Delta" not in page
+
+
+def add_admin(app, email, name, role):
+    with app.app_context():
+        admin = igsp.Admin(email=email, name=name, role=role)
+        admin.set_password(PASSWORD)
+        igsp.DB.session.add(admin)
+        igsp.DB.session.commit()
+        return admin.id
+
+
+def login_as(app, email):
+    c = Client(app)
+    resp = c.post("/admin/login", {"email": email, "password": PASSWORD})
+    return c, resp
+
+
+def test_applications_admin_only_sees_applications_and_suppliers(client):
+    client.signup_and_login()
+    app_id = submit_application(client)
+    with client.app.app_context():
+        doc_path = igsp.SupplierDocument.query.filter_by(application_id=app_id).first().file_path
+    add_admin(client.app, "apps@icebolethu.co.za", "Apps Admin", "applications")
+    apps, resp = login_as(client.app, "apps@icebolethu.co.za")
+    assert resp.headers["Location"].endswith("/admin/applications")
+
+    page = apps.get("/admin/applications").data.decode()
+    assert "Procurement Officer" in page and 'href="/admin/reports"' not in page and 'href="/admin"' not in page
+    assert apps.get("/admin/suppliers").status_code == 200
+    assert apps.get(f"/admin/applications/{app_id}").status_code == 200
+    assert apps.get(f"/uploads/{doc_path}").status_code == 200
+    for url in ["/admin/reports", "/admin/reports/export", "/admin/catalogue"]:
+        resp = apps.get(url)
+        assert resp.status_code == 302 and resp.headers["Location"].endswith("/admin/applications"), url
+    assert apps.get("/admin").headers["Location"].endswith("/admin/applications")
+
+
+def test_reports_admin_only_sees_reports(client):
+    client.signup_and_login()
+    app_id = submit_application(client)
+    with client.app.app_context():
+        doc_path = igsp.SupplierDocument.query.filter_by(application_id=app_id).first().file_path
+    add_admin(client.app, "reports@icebolethu.co.za", "Reports Admin", "reports")
+    rep, resp = login_as(client.app, "reports@icebolethu.co.za")
+    assert resp.headers["Location"].endswith("/admin/reports")
+
+    page = rep.get("/admin/reports").data.decode()
+    assert "Procurement Manager" in page and 'href="/admin/applications"' not in page and 'href="/admin/suppliers"' not in page
+    assert rep.get("/admin/reports/export").status_code == 200
+    for url in ["/admin/applications", f"/admin/applications/{app_id}", "/admin/suppliers", "/admin/catalogue", "/admin"]:
+        resp = rep.get(url)
+        assert resp.status_code == 302 and resp.headers["Location"].endswith("/admin/reports"), url
+    assert rep.post(f"/admin/applications/{app_id}/assign").status_code == 302
+    assert rep.get(f"/uploads/{doc_path}").status_code == 404
+    with client.app.app_context():
+        assert igsp.DB.session.get(igsp.SupplierApplication, app_id).assigned_admin_id is None
+
+
+def test_super_admin_assigns_applications_to_applications_admin(client):
+    client.signup_and_login()
+    app_id = submit_application(client)
+    apps_id = add_admin(client.app, "apps@icebolethu.co.za", "Apps Admin", "applications")
+    other_id = add_admin(client.app, "apps2@icebolethu.co.za", "Second Apps", "applications")
+    reports_id = add_admin(client.app, "reports@icebolethu.co.za", "Reports Admin", "reports")
+
+    boss = Client(client.app)
+    boss.admin_login()
+    page = boss.get(f"/admin/applications/{app_id}").data.decode()
+    assert 'name="admin_id"' in page and "Apps Admin" in page and "Reports Admin" not in page
+
+    def assignee():
+        with client.app.app_context():
+            return igsp.DB.session.get(igsp.SupplierApplication, app_id).assigned_admin_id
+
+    # Only applications admins can be chosen.
+    boss.post(f"/admin/applications/{app_id}/assign-to", {"admin_id": reports_id})
+    assert assignee() is None
+
+    boss.post(f"/admin/applications/{app_id}/assign-to", {"admin_id": apps_id})
+    assert assignee() == apps_id
+    with client.app.app_context():
+        assert igsp.Notification.query.filter_by(admin_id=apps_id, related_application_id=app_id).count() >= 1
+
+    # A super admin can reassign even when someone else holds it.
+    boss.post(f"/admin/applications/{app_id}/assign-to", {"admin_id": other_id})
+    assert assignee() == other_id
+
+    # Applications admins can't hand applications to others.
+    apps, _ = login_as(client.app, "apps@icebolethu.co.za")
+    apps.post(f"/admin/applications/{app_id}/assign-to", {"admin_id": apps_id})
+    assert assignee() == other_id
+    assert 'name="admin_id"' not in apps.get(f"/admin/applications/{app_id}").data.decode()
+
+
+def test_cli_admin_roles(app):
+    runner = app.test_cli_runner()
+    result = runner.invoke(args=["create-admin", "--email", "r@icebolethu.co.za", "--name", "R", "--role", "reports", "--password", "Xx123456!"])
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(args=["set-admin-role", "r@icebolethu.co.za", "applications"])
+    assert result.exit_code == 0, result.output
+    with app.app_context():
+        assert igsp.find_admin_by_email("r@icebolethu.co.za").role == "applications"
+        assert igsp.find_admin_by_email("admin@icebolethu.co.za").role == "super"
+
+
+def test_supplier_report_custom_date_range(client):
+    client.signup_and_login()
+    client.signup_and_login("old@example.com")
+    with client.app.app_context():
+        old = igsp.find_user_by_email("old@example.com")
+        old.company_name = "Old Timers"
+        old.created_at = igsp.utcnow() - timedelta(days=400)
+        igsp.DB.session.commit()
+    admin = Client(client.app)
+    admin.admin_login()
+
+    recent_from = (date.today() - timedelta(days=7)).isoformat()
+    page = admin.get(f"/admin/reports/suppliers?date_from={recent_from}").data.decode()
+    assert "Acme Caskets" in page and "Old Timers" not in page and 'name="date_from"' in page
+
+    span_from = (date.today() - timedelta(days=410)).isoformat()
+    span_to = (date.today() - timedelta(days=390)).isoformat()
+    page = admin.get(f"/admin/reports/suppliers?date_from={span_from}&date_to={span_to}").data.decode()
+    assert "Old Timers" in page and "Acme Caskets" not in page
+    assert f"date_from={span_from}" in page  # carried into the export and report tabs
+
+    resp = admin.get(f"/admin/reports/suppliers/export?date_from={span_from}&date_to={span_to}")
+    body = resp.data.decode("utf-8-sig")
+    assert "Old Timers" in body and "Acme Caskets" not in body
+    assert f"{span_from}_to_{span_to}" in resp.headers["Content-Disposition"]
+
+    # A reversed range is swapped rather than returning nothing.
+    page = admin.get(f"/admin/reports/suppliers?date_from={span_to}&date_to={span_from}").data.decode()
+    assert "Old Timers" in page
+
+
+
+def test_director_on_another_supplier_is_flagged_not_blocked(client):
+    # J. Dube (8001015009087) is director of the first supplier.
+    client.signup_and_login("first@example.com")
+    first_id = submit_application(client)
+    with client.app.app_context():
+        igsp.DB.session.get(igsp.SupplierApplication, first_id).company_name = "Bongi Funerals"
+        igsp.DB.session.commit()
+
+    # A different company lists the same person: the application still goes through, with no error shown.
+    second = Client(client.app)
+    second.signup_and_login("second@example.com")
+    second_id = submit_application(second)
+    assert "already linked" not in second.get("/dashboard").data.decode()
+
+    # Admins are told once, naming both suppliers.
+    with client.app.app_context():
+        admin_id = igsp.find_admin_by_email("admin@icebolethu.co.za").id
+        notes = igsp.Notification.query.filter(igsp.Notification.admin_id == admin_id,
+                                               igsp.Notification.title.like("Director match%")).all()
+        assert len(notes) == 1 and notes[0].related_application_id == second_id
+        assert "8001015009087" in notes[0].message and "Bongi Funerals" in notes[0].message
+
+    # Saving the application again doesn't repeat the notification.
+    with client.app.app_context():
+        igsp.DB.session.get(igsp.SupplierApplication, second_id).status = "returned_for_update"
+        igsp.DB.session.commit()
+    second.post(f"/applications/{second_id}/edit", {**PROFILE, "company_name": "Acme Caskets", "contact_name": "Jane Dube",
+                                                    "phone": "0820000000", "categories": "Caskets and Tombstones",
+                                                    **DOC_DATES}, content_type="multipart/form-data")
+    with client.app.app_context():
+        assert igsp.DB.session.get(igsp.SupplierApplication, second_id).status == "pending_review"
+        assert igsp.Notification.query.filter(igsp.Notification.admin_id == admin_id,
+                                              igsp.Notification.title.like("Director match%")).count() == 1
+
+    # The first supplier is not flagged by the later duplicate.
+    with client.app.app_context():
+        assert igsp.director_matches([igsp.DB.session.get(igsp.SupplierApplication, first_id)]) == {}
+
+
+def test_admin_sees_duplicates_that_predate_the_rule(client):
+    client.signup_and_login("first@example.com")
+    first_id = submit_application(client)
+    second = Client(client.app)
+    second.signup_and_login("second@example.com")
+    with client.app.app_context():  # simulate one that got in before the check existed
+        user = igsp.find_user_by_email("second@example.com")
+        app_ = igsp.SupplierApplication(company_name="Second Co", contact_name="X", email=user.email, phone="1", supplier_category="Caskets and Tombstones", company_profile="",
+                                        status="pending_review")
+        app_.directors.append(igsp.SupplierDirector(initials_surname="J. Dube", id_number="8001015009087",
+                                                    role="Shareholder", nationality="South Africa"))
+        igsp.DB.session.add(app_)
+        igsp.DB.session.commit()
+        second_id = app_.id
+    admin = Client(client.app)
+    admin.admin_login()
+    page = admin.get(f"/admin/applications/{second_id}").data.decode()
+    assert "Already linked to another supplier" in page and f"/admin/applications/{first_id}" in page
+    assert "Director match" in admin.get("/admin/applications").data.decode()
+
+
+def test_flagged_application_can_only_be_declined(client):
+    client.signup_and_login("first@example.com")
+    first_id = submit_application(client)
+    with client.app.app_context():
+        igsp.DB.session.get(igsp.SupplierApplication, first_id).company_name = "Bongi Funerals"
+        user = igsp.User(email="second@example.com", company_name="Second Co", contact_name="X", phone="1")
+        user.set_password(PASSWORD)
+        app_ = igsp.SupplierApplication(company_name="Second Co", contact_name="X", email=user.email, phone="1",
+                                        supplier_category="Caskets and Tombstones", company_profile="", status="pending_review")
+        app_.directors.append(igsp.SupplierDirector(initials_surname="J. Dube", id_number="8001015009087",
+                                                    role="Shareholder", nationality="South Africa"))
+        igsp.DB.session.add_all([user, app_])
+        igsp.DB.session.commit()
+        second_id = app_.id
+
+    admin = Client(client.app)
+    admin.admin_login()
+    admin.assign(second_id)
+    page = admin.get(f"/admin/applications/{second_id}").data.decode()
+    assert "This application can only be declined" in page and "J. Dube" in page and "Bongi Funerals" in page
+    for value in ["approved", "on_file", "under_review", "returned_for_update"]:
+        button = re.search(rf'<button[^>]*value="{value}"[^>]*>', page).group(0)
+        assert "disabled" in button, value
+    assert "disabled" not in re.search(r'<button[^>]*value="declined"[^>]*>', page).group(0)
+    # Decline comment is pre-filled for the supplier, naming the person but not the other company.
+    comment = re.search(r'<textarea name="review_comments"[^>]*>(.*?)</textarea>', page, re.S).group(1)
+    assert "J. Dube" in comment and "Bongi" not in comment
+
+    def status():
+        with client.app.app_context():
+            return igsp.DB.session.get(igsp.SupplierApplication, second_id).status
+
+    admin.post(f"/admin/applications/{second_id}/update", {"status": "approved", "documents_status": "complete"})
+    assert status() == "pending_review"
+    admin.post(f"/admin/applications/{second_id}/update", {"status": "declined", "documents_status": "complete",
+                                                          "review_comments": "Director already linked."})
+    assert status() == "declined"
+
+
+def test_supplier_account_card_only_after_onboarding(client):
+    client.signup_and_login()
+    app_id = submit_application(client)
+    admin = Client(client.app)
+    admin.admin_login()
+    admin.assign(app_id)
+    assert "Supplier account" not in admin.get(f"/admin/applications/{app_id}").data.decode()
+    admin.post(f"/admin/applications/{app_id}/update", {"status": "approved", "documents_status": "complete"})
+    assert "Supplier account" in admin.get(f"/admin/applications/{app_id}").data.decode()
