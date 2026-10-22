@@ -5399,7 +5399,7 @@ a.ad-stat:hover{
 .adm-login-foot strong{ color:#EF4444; }
 @media(max-width:900px){
     .adm-login{ grid-template-columns:1fr; grid-template-rows:auto; }
-    .adm-login-photo{ height:220px; }
+    .adm-login-photo{ display:none; }
     .adm-login-side{ min-height:0; }
     .adm-login-main h1{ font-size:24px; }
 }
