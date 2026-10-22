@@ -27,11 +27,29 @@
         log.scrollTop = log.scrollHeight;
     }
 
+    // The conversation starts over when the user hasn't sent a message for an hour.
+    var IDLE_RESET_MS = 60 * 60 * 1000;
+    var lastUserAt = 0;
+
     function load() {
-        try { turns = JSON.parse(sessionStorage.getItem(storeKey) || '[]') || []; } catch (e) { turns = []; }
+        try {
+            var saved = JSON.parse(sessionStorage.getItem(storeKey) || '{}') || {};
+            turns = Array.isArray(saved.turns) ? saved.turns : [];
+            lastUserAt = saved.lastUserAt || 0;
+        } catch (e) { turns = []; lastUserAt = 0; }
     }
     function save() {
-        try { sessionStorage.setItem(storeKey, JSON.stringify(turns.slice(-30))); } catch (e) { /* storage unavailable */ }
+        try {
+            sessionStorage.setItem(storeKey, JSON.stringify({ turns: turns.slice(-30), lastUserAt: lastUserAt }));
+        } catch (e) { /* storage unavailable */ }
+    }
+    function resetIfIdle() {
+        if (turns.length && !busy && Date.now() - lastUserAt >= IDLE_RESET_MS) {
+            turns = [];
+            lastUserAt = 0;
+            save();
+            render();
+        }
     }
 
     // Escape everything, then allow **bold**, "- " bullets, line breaks and links to portal paths.
@@ -123,6 +141,7 @@
         busy = true;
         log.querySelectorAll('.cb-chips').forEach(function (el) { el.remove(); });
         turns.push({ role: 'user', content: text });
+        lastUserAt = Date.now();
         addMessage('user', text);
         fetch(root.dataset.chatUrl, {
             method: 'POST',
@@ -147,7 +166,7 @@
         });
     }
 
-    launcher.addEventListener('click', function () { setOpen(panel.hidden); });
+    launcher.addEventListener('click', function () { resetIfIdle(); setOpen(panel.hidden); });
     root.querySelector('[data-chat-close]').addEventListener('click', function () { setOpen(false); });
     root.querySelector('[data-chat-reset]').addEventListener('click', function () {
         turns = [];
@@ -190,7 +209,10 @@
     });
 
     load();
+    resetIfIdle();
     render();
+    setInterval(resetIfIdle, 60 * 1000);  // also clears a chat left open
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) { resetIfIdle(); } });
     var wasOpen = false;
     try { wasOpen = !!sessionStorage.getItem(storeKey + ':open'); } catch (e) { /* ignore */ }
     if (wasOpen && !phone.matches) { setOpen(true); }
