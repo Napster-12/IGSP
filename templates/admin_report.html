@@ -5,7 +5,7 @@
 {% block page_title %}Reports{% endblock %}
 {% block page_subtitle %}{{ description }}{% endblock %}
 {% block page_actions %}
-    <a href="{{ url_for('admin_report_export', kind=kind, period=period) }}" class="ad-btn ad-btn--primary">{{ ad.icon('download') }} Export CSV</a>
+    <a href="{{ url_for('admin_report_export', kind=kind, **range_args) }}" class="ad-btn ad-btn--primary">{{ ad.icon('download') }} Export CSV</a>
 {% endblock %}
 {% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>{% endblock %}
 
@@ -15,11 +15,19 @@
     {% if report.snapshot %}
         <p class="ad-snapshot">{{ ad.icon('clock') }} Live snapshot of the current inventory — period filters don't apply.</p>
     {% else %}
-        <nav class="ad-tabs" aria-label="Period">
-            {% for key, label in periods %}
-                <a href="{{ url_for('admin_report', kind=kind, period=key) }}" class="ad-tab{% if key == period %} is-active{% endif %}">{{ label }}</a>
-            {% endfor %}
-        </nav>
+        <div class="ad-period">
+            <nav class="ad-tabs" aria-label="Period">
+                {% for key, label in periods %}
+                    <a href="{{ url_for('admin_report', kind=kind, period=key) }}" class="ad-tab{% if key == period %} is-active{% endif %}">{{ label }}</a>
+                {% endfor %}
+            </nav>
+            <form method="get" class="ad-period-range{% if period == 'custom' %} is-active{% endif %}" aria-label="Custom date range">
+                <label><span>From</span><input type="date" name="date_from" value="{{ date_from }}" max="{{ date_to or '' }}"></label>
+                <label><span>To</span><input type="date" name="date_to" value="{{ date_to }}" min="{{ date_from or '' }}"></label>
+                <button type="submit" class="ad-btn ad-btn--primary ad-btn--sm">Apply</button>
+                {% if period == 'custom' %}<a href="{{ url_for('admin_report', kind=kind) }}" class="ad-btn ad-btn--ghost ad-btn--sm">Clear</a>{% endif %}
+            </form>
+        </div>
     {% endif %}
 
     <section class="ad-stats ad-stats--5" aria-label="Key figures">
@@ -70,7 +78,7 @@
                 </table>
             </div>
         {% else %}
-            <div class="ad-empty"><strong>Nothing to show</strong><span>Try a longer period.</span></div>
+            <div class="ad-empty"><strong>Nothing to show</strong><span>Try a longer period or a wider date range.</span></div>
         {% endif %}
     </section>
 

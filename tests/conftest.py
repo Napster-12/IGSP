@@ -135,4 +135,4 @@ def submit_application(client):
     resp = client.post("/onboarding/review", {"confirm": "1"})
     assert resp.headers["Location"].endswith("/dashboard")
     with client.app.app_context():
-        return igsp.SupplierApplication.query.one().id
+        return igsp.SupplierApplication.query.order_by(igsp.SupplierApplication.id.desc()).first().id

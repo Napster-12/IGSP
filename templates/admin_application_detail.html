@@ -80,17 +80,35 @@
                     <h2>Directors &amp; shareholders</h2>
                     <span class="ad-muted">{{ application.directors|length }}</span>
                 </div>
+                {% if director_flags %}
+                    <div class="ad-director-alert" role="alert">
+                        <span class="ad-assign-icon" aria-hidden="true">{{ ad.icon('alert') }}</span>
+                        <div>
+                            <strong>Already linked to another supplier</strong>
+                            {% set n = director_flags|map(attribute=0)|unique|list|length %}
+                            <p>{{ n }} {{ 'person' if n == 1 else 'people' }} listed below {{ 'is' if n == 1 else 'are' }} already a director, shareholder or owner
+                               on another supplier's application. A person may only be part of one supplier, so this application should be declined.</p>
+                        </div>
+                    </div>
+                {% endif %}
                 {% if application.directors %}
                     <div class="ad-table-wrap">
                         <table class="ad-table ad-table--compact">
-                            <thead><tr><th>Name</th><th>ID / passport</th><th>Role</th><th>Nationality</th></tr></thead>
+                            <thead><tr><th>Name</th><th>ID / passport</th><th>Role</th><th>Nationality</th><th>Also linked to</th></tr></thead>
                             <tbody>
                                 {% for director in application.directors %}
-                                    <tr>
+                                    {% set links = director_flags|selectattr(0, 'equalto', director)|list %}
+                                    <tr{% if links %} class="is-flagged"{% endif %}>
                                         <td>{{ director.initials_surname }}</td>
                                         <td class="ad-mono">{{ director.id_number }}</td>
                                         <td>{{ director.role }}</td>
                                         <td>{{ director.nationality }}</td>
+                                        <td>
+                                            {% for _, other, other_director in links %}
+                                                <a class="ad-row-link" href="{{ url_for('admin_application_detail', application_id=other.id) }}">{{ other.company_name }}</a>
+                                                <span class="ad-cell-sub">{{ other_director.role }} · {{ status_label(other.status) }}</span>
+                                            {% else %}<span class="ad-muted">—</span>{% endfor %}
+                                        </td>
                                     </tr>
                                 {% endfor %}
                             </tbody>
@@ -183,6 +201,19 @@
                         <button type="submit" class="ad-btn ad-btn--primary ad-btn--block">Assign to me</button>
                     </form>
                 {% endif %}
+                {% if assignable_admins %}
+                    <form method="post" action="{{ url_for('assign_application_to', application_id=application.id) }}" class="ad-form ad-assign-to ad-mt">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <label for="assign_admin_id">{{ 'Reassign to' if owner else 'Assign to' }}</label>
+                        <select name="admin_id" id="assign_admin_id" required>
+                            <option value="">Choose an applications admin</option>
+                            {% for a in assignable_admins if not owner or a.id != owner.id %}
+                                <option value="{{ a.id }}">{{ a.name or a.email }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="ad-btn ad-btn--ghost ad-btn--block ad-mt">{{ 'Reassign' if owner else 'Assign' }}</button>
+                    </form>
+                {% endif %}
             </section>
 {% if is_mine %}
             <section class="ad-card ad-decision">
@@ -191,7 +222,25 @@
                     {{ ad.status_badge(application.status) }}
                 </div>
 
-                <form method="post" action="{{ url_for('update_application', application_id=application.id) }}" id="reviewForm" class="ad-form">
+                {% set decline_only = director_flags|length > 0 %}
+                {% set flagged_names = director_flags|map(attribute=0)|unique|map(attribute='initials_surname')|list %}
+                {% if decline_only %}
+                    <div class="ad-director-alert ad-director-alert--decision" role="alert">
+                        <span class="ad-assign-icon" aria-hidden="true">{{ ad.icon('alert') }}</span>
+                        <div>
+                            <strong>This application can only be declined</strong>
+                            <ul class="ad-director-list">
+                                {% for director, other, other_director in director_flags %}
+                                    <li><strong>{{ director.initials_surname }}</strong> ({{ director.role }}, <span class="ad-mono">{{ director.id_number }}</span>)
+                                        is already {{ other_director.role|lower }} at
+                                        <a href="{{ url_for('admin_application_detail', application_id=other.id) }}">{{ other.company_name }}</a>.</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </div>
+                {% endif %}
+
+                <form method="post" action="{{ url_for('update_application', application_id=application.id) }}" id="reviewForm" class="ad-form{% if decline_only %} is-decline-only{% endif %}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                     <label for="documents_status">Documents</label>
@@ -202,18 +251,22 @@
                     </select>
 
                     <label for="review_comments">Comments to supplier</label>
-                    <textarea name="review_comments" id="review_comments" rows="5" placeholder="Required when declining or returning an application. The supplier sees this.">{{ application.review_comments or '' }}</textarea>
+                    <textarea name="review_comments" id="review_comments" rows="5" placeholder="Required when declining or returning an application. The supplier sees this.">
+{%- if decline_only and not application.review_comments -%}
+Your application cannot be accepted because {{ flagged_names|join(', ') }} {{ 'is' if flagged_names|length == 1 else 'are' }} already linked to another supplier registered on this portal. A director, shareholder or owner may only be part of one supplier.
+{%- else -%}{{ application.review_comments or '' }}{%- endif -%}</textarea>
                     <p class="ad-form-error" id="commentError" hidden>Please add a comment so the supplier knows what to fix.</p>
 
                     <div class="ad-decision-actions">
-                        <button type="submit" name="status" value="approved" class="ad-btn ad-btn--success ad-btn--block">Approve</button>
+                        {% set off = ' disabled aria-disabled="true" title="Not available: a director/shareholder is already linked to another supplier"'|safe if decline_only else '' %}
+                        <button type="submit" name="status" value="approved" class="ad-btn ad-btn--success ad-btn--block"{{ off }}>Approve</button>
                         <button type="submit" name="status" value="on_file" class="ad-btn ad-btn--onfile ad-btn--block"
-                                title="Everything is in order. The supplier is told their details are kept on file and that we'll contact them when needed.">Accept &amp; keep on file</button>
-                        <button type="submit" name="status" value="under_review" class="ad-btn ad-btn--ghost ad-btn--block">Mark under review</button>
-                        <button type="submit" name="status" value="returned_for_update" class="ad-btn ad-btn--warning ad-btn--block" data-needs-comment>Return to supplier</button>
+                                {% if not decline_only %}title="Everything is in order. The supplier is told their details are kept on file and that we'll contact them when needed."{% endif %}{{ off }}>Accept &amp; keep on file</button>
+                        <button type="submit" name="status" value="under_review" class="ad-btn ad-btn--ghost ad-btn--block"{{ off }}>Mark under review</button>
+                        <button type="submit" name="status" value="returned_for_update" class="ad-btn ad-btn--warning ad-btn--block" data-needs-comment{{ off }}>Return to supplier</button>
                         <button type="submit" name="status" value="declined" class="ad-btn ad-btn--danger ad-btn--block" data-needs-comment>Decline</button>
                     </div>
-                    <button type="submit" name="status" value="{{ application.status }}" class="ad-link ad-link--block">Save comments only</button>
+                    <button type="submit" name="status" value="{{ application.status }}" class="ad-link ad-link--block"{{ off }}>Save comments only</button>
                 </form>
             </section>
 {% else %}
@@ -230,7 +283,8 @@
             </section>
 {% endif %}
 
-            {% if supplier %}
+            {#- The account only matters once the supplier has been onboarded; before that there's nothing to activate. -#}
+            {% if supplier and application.status in ['approved', 'on_file'] %}
                 <section class="ad-card">
                     <div class="ad-card-head">
                         <h2>Supplier account</h2>

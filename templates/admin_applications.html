@@ -63,6 +63,7 @@
                             <tr>
                                 <td>
                                     <a class="ad-row-link" href="{{ url_for('admin_application_detail', application_id=application.id) }}">{{ application.company_name }}</a>
+                                    {% if application.id in flagged_ids %}<span class="ad-flag" title="A director, shareholder or owner is already linked to another supplier">{{ ad.icon('alert') }} Director match</span>{% endif %}
                                     <span class="ad-cell-sub">{{ application.email }}</span>
                                 </td>
                                 <td>{{ application.contact_name }}</td>

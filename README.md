@@ -22,6 +22,18 @@ Without email settings, verification codes and password-reset links are printed 
 | `flask --app app create-admin` | Create an admin (or reset an existing admin's password) |
 | `flask --app app seed-demo --count 30` | Insert demo suppliers (dev only; password `Password123!`) |
 
+## Test admin accounts
+
+The local development database has five test admins for each role. They all use the password `Password123!`. These accounts are for local development only; never create them on staging or production with this password.
+
+| Role | Can open | Logins |
+| --- | --- | --- |
+| Super admin | Everything | `super1@icebolethu.co.za` … `super5@icebolethu.co.za` |
+| Applications admin | Applications and suppliers | `applications1@icebolethu.co.za` … `applications5@icebolethu.co.za` |
+| Reports admin | Reports only | `reports1@icebolethu.co.za` … `reports5@icebolethu.co.za` |
+
+To create them in another local database, run `flask --app app create-admin --email <email> --name "<name>" --role <super|applications|reports> --password 'Password123!'` for each account.
+
 ## Production
 
 ```bash
