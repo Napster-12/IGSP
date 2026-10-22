@@ -281,6 +281,8 @@ RESEND_COOLDOWN_SECONDS = 30
 # Bump when templates/terms_content.html changes materially; each acceptance records the version agreed to.
 TERMS_VERSION = "2026-10"
 TERMS_REQUIRED_MESSAGE = "Please accept our Terms & Conditions."
+# Bump when templates/application_terms_content.html changes materially; each application records the version accepted.
+APPLICATION_TERMS_VERSION = "2026-10"
 PASSWORD_RESET_MAX_AGE = 3600
 
 
@@ -350,6 +352,9 @@ class SupplierApplication(DB.Model):
     expiry_suspended = DB.Column(DB.Boolean, nullable=False, default=False)
     # Set each time the application is approved; the registration certificate is dated from it.
     approved_at = DB.Column(DB.DateTime, nullable=True)
+    # Supplier Application Terms accepted when the application was submitted.
+    terms_version = DB.Column(DB.String(20), nullable=True)
+    terms_accepted_at = DB.Column(DB.DateTime, nullable=True)
     company_profile = DB.Column(DB.Text, nullable=False)
     documents_status = DB.Column(DB.String(50), default="pending")
     status = DB.Column(DB.String(50), default="submitted")
@@ -604,9 +609,9 @@ class User(DB.Model):
 
 # Admin roles and the sections of the admin portal each one can open.
 ADMIN_ROLES = {
-    "super": "Super admin",
-    "applications": "Applications admin",
-    "reports": "Reports admin",
+    "super": "Procurement Team Lead",
+    "applications": "Procurement Officer",
+    "reports": "Procurement Manager",
 }
 ROLE_SECTIONS = {
     "super": {"dashboard", "applications", "suppliers", "catalogue", "reports"},
@@ -879,7 +884,7 @@ def super_admin_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
         if not get_current_admin().is_super:
-            flash("Only a super admin can do that.", "error")
+            flash("Only a Procurement Team Lead can do that.", "error")
             return redirect(url_for(get_current_admin().home_endpoint))
         return view_func(*args, **kwargs)
     return wrapper
@@ -1415,8 +1420,9 @@ def replace_directors(application, directors):
         application.directors.append(SupplierDirector(**director))
 
 
-# A director, shareholder or owner may be linked to one supplier only. Any application that has been
-# submitted (whatever its outcome since) counts; unsubmitted drafts don't.
+# A director, shareholder or owner should be linked to one supplier only. Applications that break this still go
+# through, but are flagged to admins. Any application that has been submitted (whatever its outcome since) counts;
+# unsubmitted drafts don't.
 def director_conflicts(directors, email):
     """Directors (dicts with id_number) already on another supplier's application.
 
@@ -1433,38 +1439,10 @@ def director_conflicts(directors, email):
     return [(by_id[other_d.id_number], other, other_d) for other_d, other in rows]
 
 
-def director_conflict_message(conflicts):
-    """What the supplier sees. Never names the other supplier."""
-    names = list(dict.fromkeys(d["initials_surname"] for d, _, _ in conflicts))
-    who = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-    return (f"{who} {'is' if len(names) == 1 else 'are'} already linked to another supplier on this portal. "
-            "A director, shareholder or owner may only be part of one supplier application. "
-            "If you believe this is a mistake, contact the Call Centre on 031 208 9102 or "
-            "supplier_onboarding@icebolethu.co.za.")
-
-
-def reject_director_conflicts(user, directors):
-    """Return an error message if any director is already on another supplier, telling admins once per attempt."""
-    conflicts = director_conflicts(directors, user.email)
-    if not conflicts:
-        return None
-    title = "Blocked application: director already linked to another supplier"
-    message = (f"{user.company_name} ({user.email}) tried to apply with "
-               + "; ".join(f"{d['initials_surname']} ({d['role']}, {d['id_number']}), already {other_d.role} at "
-                           f"{other.company_name}" for d, other, other_d in conflicts)
-               + ". The application was not accepted.")
-    already_told = Notification.query.filter_by(title=title, message=message).first()
-    if not already_told:
-        notify_admins(title, message)
-        DB.session.commit()
-    return director_conflict_message(conflicts)
-
-
 def director_matches(applications):
     """For the admin view: directors of `applications` who were already on another supplier's earlier application.
 
-    Submissions are blocked when this happens, so a match here means it got in before the rule or
-    the details were changed by hand. Only the later application is flagged; the first one stands.
+    Only the later application is flagged; the first one stands.
     Returns {application_id: [(director, other_application, other_director)]}.
     """
     matches = {}
@@ -1475,6 +1453,20 @@ def director_matches(applications):
         if found:
             matches[application.id] = found
     return matches
+
+
+def flag_director_matches(application):
+    """Tell admins (once) that a submitted application lists a director already on another supplier."""
+    found = director_matches([application]).get(application.id)
+    if not found:
+        return
+    title = f"Director match: {application.company_name}"
+    message = (f"{application.company_name} ({application.email}) lists "
+               + "; ".join(f"{d.initials_surname} ({d.role}, {d.id_number}), already {other_d.role} at "
+                           f"{other.company_name}" for d, other, other_d in found)
+               + ". The application can only be declined.")
+    if not Notification.query.filter_by(title=title, message=message).first():
+        notify_admins(title, message, application)
 
 
 # ---------------------------------------------------------------------------
@@ -1606,6 +1598,12 @@ def login():
 @app.route("/terms")
 def terms():
     return render_template("terms.html")
+
+
+@app.route("/application-terms")
+def application_terms():
+    return render_template("terms.html", page_title="Supplier Application Terms and Conditions",
+                           content_template="application_terms_content.html", version=APPLICATION_TERMS_VERSION)
 
 
 @app.route("/logout")
@@ -1832,10 +1830,6 @@ def onboarding_profile():
         if director_error:
             flash(director_error, "error")
             return redirect(url_for("onboarding_profile"))
-        conflict_error = reject_director_conflicts(user, directors)
-        if conflict_error:
-            flash(conflict_error, "error")
-            return redirect(url_for("onboarding_profile"))
 
         try:
             uploads = collect_uploads(request.files, {"document_file_company_profile": COMPANY_PROFILE_DOC})
@@ -1959,13 +1953,9 @@ def onboarding_review():
         if missing:
             flash("Please upload all required documents. Missing: " + ", ".join(missing), "error")
             return redirect(url_for("onboarding_documents"))
-        if not request.form.get("confirm"):
-            flash("Please confirm that the information you provided is correct.", "error")
+        if not request.form.get("accept_terms"):
+            flash("Please accept the Terms & Conditions.", "error")
             return redirect(url_for("onboarding_review"))
-        conflict_error = reject_director_conflicts(user, draft["directors"])
-        if conflict_error:
-            flash(conflict_error, "error")
-            return redirect(url_for("onboarding_profile"))
 
         application = SupplierApplication(
             company_name=user.company_name,
@@ -1975,6 +1965,8 @@ def onboarding_review():
             company_profile="",
             documents_status="complete",
             status="pending_review",
+            terms_version=APPLICATION_TERMS_VERSION,
+            terms_accepted_at=utcnow(),
             **{field: draft.get(field, "") for field in PROFILE_FIELDS},
         )
         replace_categories(application, draft["supplier_categories"], draft.get("supplier_category_details", {}))
@@ -1986,7 +1978,7 @@ def onboarding_review():
             document.application_id = application.id
 
         log_event(application, "submitted", to_status="pending_review",
-                  summary=f"Submitted with {len(documents)} document(s)")
+                  summary=f"Submitted with {len(documents)} document(s); accepted Application Terms {APPLICATION_TERMS_VERSION}")
         notify_admins(
             "New Supplier Application",
             f"New application submitted by {user.company_name} ({user.contact_name}) for {application.supplier_category}.",
@@ -1999,6 +1991,7 @@ def onboarding_review():
             "We'll notify you when its status changes.",
             application,
         )
+        flag_director_matches(application)
         DB.session.commit()
 
         session.pop("supplier_onboarding", None)
@@ -2130,8 +2123,6 @@ def edit_application(application_id):
         error = ("Please complete the required fields: " + ", ".join(missing) + ".") if missing else validate_profile_values(values)
         directors, director_error = parse_directors(request.form)
         categories, details, category_error = parse_categories(request.form)
-        if directors and not director_error:
-            director_error = reject_director_conflicts(user, directors)
         for problem in (error, director_error, category_error):
             if problem:
                 flash(problem, "error")
@@ -2196,6 +2187,7 @@ def edit_application(application_id):
             f"{'resubmitted' if resubmitted else 'updated'} their application.",
             application,
         )
+        flag_director_matches(application)
         DB.session.commit()
 
         flash("Application resubmitted for review." if resubmitted else "Application updated successfully.", "success")
@@ -2670,7 +2662,7 @@ def assign_application_to(application_id):
     detail_url = url_for("admin_application_detail", application_id=application.id)
     assignee = DB.session.get(Admin, request.form.get("admin_id", type=int) or 0)
     if not assignee or assignee.role != "applications":
-        flash("Choose an applications admin to assign this application to.", "error")
+        flash("Choose a Procurement Officer to assign this application to.", "error")
         return redirect(detail_url)
 
     owner = application.assigned_admin
@@ -3632,6 +3624,13 @@ def catalogue_query():
             .filter(Product.is_listed.is_(True), Product.is_archived.is_(False), User.active.is_(True)))
 
 
+def supplier_locations_query():
+    """(user id, city, province) for suppliers, taken from their approved application."""
+    return (DB.session.query(User.id, SupplierApplication.city, SupplierApplication.province)
+            .join(SupplierApplication, func.lower(SupplierApplication.email) == func.lower(User.email))
+            .filter(SupplierApplication.status == "approved"))
+
+
 @app.route("/admin/catalogue")
 @admin_required
 @admin_section("catalogue")
@@ -3639,6 +3638,7 @@ def admin_catalogue():
     search = request.args.get("search", "").strip()
     category = request.args.get("category", "").strip()
     supplier_id = request.args.get("supplier", type=int)
+    province = request.args.get("province", "").strip()
     query = catalogue_query()
     if search:
         like = f"%{search}%"
@@ -3647,18 +3647,25 @@ def admin_catalogue():
         query = query.filter(Product.category == category)
     if supplier_id:
         query = query.filter(Product.user_id == supplier_id)
+    if province:
+        in_province = supplier_locations_query().filter(SupplierApplication.province == province)
+        query = query.filter(User.id.in_(in_province.with_entities(User.id)))
     page = request.args.get("page", 1, type=int)
     pagination = query.order_by(Product.name).paginate(page=page, per_page=24, error_out=False)
 
     base = catalogue_query()
+    base_user_ids = base.with_entities(Product.user_id).distinct()
     categories = sorted({c for (c,) in base.with_entities(Product.category).distinct() if c})
-    suppliers = (User.query.filter(User.id.in_(base.with_entities(Product.user_id).distinct()))
-                 .order_by(User.company_name).all())
-    page_args = {k: v for k, v in {"search": search, "category": category, "supplier": supplier_id}.items() if v}
+    suppliers = User.query.filter(User.id.in_(base_user_ids)).order_by(User.company_name).all()
+    supplier_locations = supplier_locations_query().filter(User.id.in_(base_user_ids)).all()
+    provinces = [p for p in PROVINCES if any(row.province == p for row in supplier_locations)]
+    locations = {row.id: ", ".join(part for part in (row.city, row.province) if part) for row in supplier_locations}
+    page_args = {k: v for k, v in {"search": search, "category": category, "supplier": supplier_id,
+                                   "province": province}.items() if v}
     return render_template(
         "admin_catalogue.html", admin=get_current_admin(), products=pagination.items, pagination=pagination,
         search=search, category_filter=category, supplier_filter=supplier_id, categories=categories,
-        suppliers=suppliers, page_args=page_args,
+        suppliers=suppliers, province_filter=province, provinces=provinces, locations=locations, page_args=page_args,
     )
 
 
@@ -4011,6 +4018,8 @@ def migrate_mysql_schema():
         "supplier_category_detail": "VARCHAR(255) NOT NULL DEFAULT ''",
         "expiry_suspended": "BOOLEAN NOT NULL DEFAULT FALSE",
         "approved_at": "DATETIME NULL",
+        "terms_version": "VARCHAR(20) NULL",
+        "terms_accepted_at": "DATETIME NULL",
         **{field: f"VARCHAR({SupplierApplication.__table__.c[field].type.length}) DEFAULT ''" for field in PROFILE_FIELDS},
     })
 
@@ -4084,7 +4093,8 @@ def init_db_command():
 @click.option("--email", prompt=True)
 @click.option("--name", prompt=True, default="")
 @click.option("--role", type=click.Choice(list(ADMIN_ROLES)), default=None,
-              help="super: everything; applications: applications and suppliers; reports: reports only. "
+              help="super (Procurement Team Lead): everything; applications (Procurement Officer): applications and suppliers; "
+                   "reports (Procurement Manager): reports only. "
                    "New admins default to super; existing admins keep their role unless this is given.")
 @click.password_option()
 def create_admin_command(email, name, role, password):

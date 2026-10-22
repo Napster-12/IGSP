@@ -16,6 +16,7 @@
     {% if supplier and supplier.supplier_id %}<span class="ad-mono">{{ supplier.supplier_id }}</span> · {% endif %}
     Submitted {{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}
     {% if application.updated_at and application.created_at and application.updated_at > application.created_at %} · Updated {{ application.updated_at.strftime('%d %b %Y') }}{% endif %}
+    {% if application.terms_accepted_at %} · Application Terms {{ application.terms_version }} accepted {{ application.terms_accepted_at.strftime('%d %b %Y') }}{% endif %}
 {% endblock %}
 {% block page_actions %}
     <a href="{{ url_for('admin_application_history', application_id=application.id) }}" class="ad-btn ad-btn--ghost">{{ ad.icon('clock') }} History <span class="ad-count">{{ history_count }}</span></a>
@@ -206,7 +207,7 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <label for="assign_admin_id">{{ 'Reassign to' if owner else 'Assign to' }}</label>
                         <select name="admin_id" id="assign_admin_id" required>
-                            <option value="">Choose an applications admin</option>
+                            <option value="">Choose a Procurement Officer</option>
                             {% for a in assignable_admins if not owner or a.id != owner.id %}
                                 <option value="{{ a.id }}">{{ a.name or a.email }}</option>
                             {% endfor %}

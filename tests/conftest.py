@@ -132,7 +132,7 @@ def submit_application(client):
     files = {f"document_file_{i}": pdf(f"doc{i}.pdf") for i in range(1, 8)}
     resp = client.post("/onboarding/documents", {**files, **DOC_DATES}, content_type="multipart/form-data")
     assert resp.headers["Location"].endswith("/onboarding/review")
-    resp = client.post("/onboarding/review", {"confirm": "1"})
+    resp = client.post("/onboarding/review", {"accept_terms": "1"})
     assert resp.headers["Location"].endswith("/dashboard")
     with client.app.app_context():
         return igsp.SupplierApplication.query.order_by(igsp.SupplierApplication.id.desc()).first().id

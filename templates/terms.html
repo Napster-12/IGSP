@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Terms and Conditions | IGSP</title>
+    <title>{{ page_title or "Terms and Conditions" }} | IGSP</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap">
@@ -15,9 +15,10 @@
     </header>
 
     <main class="terms-main">
-        <h1>Icebolethu Group Supplier Portal – Terms and Conditions</h1>
+        <h1>Icebolethu Group Supplier Portal – {{ page_title or "Terms and Conditions" }}</h1>
+        {% if version %}<p class="terms-version">Version {{ version }}</p>{% endif %}
         <div class="terms-body">
-            {% include "terms_content.html" %}
+            {% include content_template or "terms_content.html" %}
         </div>
     </main>
 

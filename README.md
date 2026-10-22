@@ -28,11 +28,11 @@ The local development database has five test admins for each role. They all use 
 
 | Role | Can open | Logins |
 | --- | --- | --- |
-| Super admin | Everything | `super1@icebolethu.co.za` … `super5@icebolethu.co.za` |
-| Applications admin | Applications and suppliers | `applications1@icebolethu.co.za` … `applications5@icebolethu.co.za` |
-| Reports admin | Reports only | `reports1@icebolethu.co.za` … `reports5@icebolethu.co.za` |
+| Procurement Team Lead (`super`) | Everything | `teamlead1@icebolethu.co.za` … `teamlead5@icebolethu.co.za` |
+| Procurement Officer (`applications`) | Applications and suppliers | `officer1@icebolethu.co.za` … `officer5@icebolethu.co.za` |
+| Procurement Manager (`reports`) | Reports only | `manager1@icebolethu.co.za` … `manager5@icebolethu.co.za` |
 
-To create them in another local database, run `flask --app app create-admin --email <email> --name "<name>" --role <super|applications|reports> --password 'Password123!'` for each account.
+To create them in another local database, run `flask --app app create-admin --email <email> --name "<name>" --role <super|applications|reports> --password 'Password123!'` for each account. The role key in brackets is what `--role` takes.
 
 ## Production
 
