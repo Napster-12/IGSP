@@ -208,9 +208,6 @@ UPLOAD_SLOTS["document_file_company_profile"] = COMPANY_PROFILE_DOC
 STATUSES = ["draft", "submitted", "pending_review", "under_review", "approved", "on_file", "declined", "returned_for_update"]
 DOCUMENT_STATUSES = ["pending", "complete"]
 EDITABLE_STATUSES = {"draft", "submitted", "pending_review", "under_review", "returned_for_update", "declined"}
-# "On file": everything checked and in order, but no supplier account yet. Kept for when the services are needed.
-ON_FILE_MESSAGE = ("Your application has been received and all your documents and information are in order. "
-                   "We will keep your details on file and contact you when we need your services.")
 
 PROVINCES = [
     "Eastern Cape", "Free State", "Gauteng", "KwaZulu-Natal", "Limpopo",
@@ -787,93 +784,91 @@ EMAIL_TEMPLATES = {
     "verification_code": {
         "name": "Verification code",
         "description": "Sent when a supplier signs up or logs in.",
-        "subject": "Your IGSP Verification Code",
-        "body": "Your verification code is {code}. It expires in 10 minutes. "
-                "If you did not try to sign in, you can ignore this email.",
-        "placeholders": {"code": ("The 6-digit code", "482915")},
+        "subject": "Your IGSP verification code",
+        "body": "Use this code to sign in. It expires in 10 minutes.\n\nDidn't try to sign in? Ignore this email.",
+        "placeholders": {"code": ("The 6-digit code (it's also shown large in the email)", "482915")},
     },
     "password_reset": {
         "name": "Password reset",
         "description": "Sent when a supplier asks to reset their password. The email has a reset button.",
         "subject": "Reset your IGSP password",
-        "body": "We received a request to reset your password. The link below is valid for one hour. "
-                "If you didn't ask for this, you can ignore this email.",
+        "body": "Use the button below to choose a new password. The link expires in 1 hour.\n\n"
+                "Didn't ask for this? Ignore this email.",
         "placeholders": {},
     },
     "application_received": {
         "name": "Application received",
         "description": "Sent when a supplier submits their application.",
-        "subject": "Application Received",
-        "body": "Thank you — your supplier application has been received and is awaiting review. "
-                "We'll notify you when its status changes.",
+        "subject": "Application received",
+        "body": "Thanks, we've received your application. We'll email you when its status changes.",
         "placeholders": {"company_name": ("The supplier's company name", "Acme Caskets")},
     },
     "application_status_updated": {
         "name": "Application status changed",
         "description": "Sent when an admin moves an application to under review, returned for update or declined.",
-        "subject": "Application Status Updated",
-        "body": "Your application for {company_name} has been updated to: {status}.",
+        "subject": "Application update: {status}",
+        "body": "Your application for {company_name} is now: {status}.",
         "placeholders": {"company_name": ("The supplier's company name", "Acme Caskets"),
                          "status": ("The new status", "Returned for update")},
     },
     "application_on_file": {
         "name": "Application kept on file",
         "description": "Sent when an admin accepts an application and keeps it on file.",
-        "subject": "Application Received – On File",
-        "body": "Thank you for applying to become a supplier for {company_name}. " + ON_FILE_MESSAGE,
+        "subject": "Application kept on file",
+        "body": "Your documents and information are in order. We'll keep {company_name} on file and contact you "
+                "when we need your services.",
         "placeholders": {"company_name": ("The supplier's company name", "Acme Caskets")},
     },
     "application_approved": {
         "name": "Application approved (welcome)",
         "description": "Sent when an application is approved. The email links to the supplier's registration certificate.",
-        "subject": "Welcome to Icebolethu Group",
-        "body": "Congratulations! Your application has been approved and {company_name} is now registered "
-                "as an Approved Supplier of Icebolethu Group. Your supplier account is active: sign in to list the "
-                "products and services you offer and keep your VAT and B-BBEE certificates up to date. "
-                "Your Certificate of Supplier Registration is ready to view, print or save as PDF (valid until {valid_until}).",
+        "subject": "You're an approved supplier",
+        "body": "Congratulations, {company_name} is now an approved Icebolethu Group supplier and your account is "
+                "active.\n\nSign in to list your products and services, and keep your VAT and B-BBEE certificates up "
+                "to date. Your registration certificate is valid until {valid_until}.",
         "placeholders": {"company_name": ("The supplier's company name", "Acme Caskets"),
                          "valid_until": ("Date the registration certificate expires", "22 Oct 2027")},
     },
     "review_comments_added": {
         "name": "Review comments added",
         "description": "Sent when an admin adds or changes the comments to the supplier.",
-        "subject": "Review Comments Added",
-        "body": "An administrator added review comments to your application: {comments}",
+        "subject": "New comment on your application",
+        "body": "The procurement team commented on your application:\n\n{comments}",
         "placeholders": {"comments": ("The admin's comments", "Please upload a bank letter not older than 3 months.")},
     },
     "account_deactivated_decision": {
         "name": "Account deactivated (declined or on file)",
         "description": "Sent when an active supplier's application is declined or put on file.",
-        "subject": "Account Deactivated",
-        "body": "Your supplier account has been deactivated because your application was {reason}.",
+        "subject": "Supplier account deactivated",
+        "body": "Your supplier account was deactivated because your application was {reason}.",
         "placeholders": {"reason": ("\"declined\" or \"put on file\"", "declined")},
     },
     "account_status_changed": {
         "name": "Account activated or deactivated by an admin",
         "description": "Sent when an admin switches a supplier account on or off.",
-        "subject": "Account Status Updated",
-        "body": "Your supplier account has been {state} by the administrator.",
+        "subject": "Supplier account {state}",
+        "body": "Your supplier account has been {state}.",
         "placeholders": {"state": ("\"activated\" or \"deactivated\"", "deactivated")},
     },
     "certificate_expiring": {
         "name": "Certificate expiring soon",
         "description": "Sent 30 and 7 days before a VAT or B-BBEE certificate expires.",
-        "subject": "Certificate expiring soon",
-        "body": "Your {certificate} for {company_name} expires {when} ({expiry_date}). "
-                "Please upload the renewed certificate in the supplier portal.{consequence}",
+        "subject": "Your {certificate} expires {when}",
+        "body": "Your {certificate} for {company_name} expires on {expiry_date}. Please upload the renewed "
+                "certificate.{consequence}",
         "placeholders": {"certificate": ("Which certificate", "SARS VAT certificate"),
                          "company_name": ("The supplier's company name", "Acme Caskets"),
                          "when": ("\"in 7 days\", \"today\" etc.", "in 7 days"),
                          "expiry_date": ("The expiry date", "29 Oct 2026"),
                          "consequence": ("A warning that the account will be deactivated (only for active accounts)",
-                                         " If it expires before you do, your supplier account will be deactivated until it is renewed.")},
+                                         " If it expires first, your account will be deactivated until you renew it.")},
     },
     "certificate_expired_deactivated": {
         "name": "Certificate expired – account deactivated",
         "description": "Sent when a certificate expires and the supplier's account is deactivated.",
-        "subject": "Certificate expired – account deactivated",
-        "body": "Your {certificate} for {company_name} expired on {expiry_date}. "
-                "Your supplier account has been deactivated until you upload the renewed certificate.",
+        "subject": "Certificate expired: account deactivated",
+        "body": "Your {certificate} for {company_name} expired on {expiry_date}, so your supplier account is "
+                "deactivated. Upload the renewed certificate to reactivate it.",
         "placeholders": {"certificate": ("Which certificate", "SARS VAT certificate"),
                          "company_name": ("The supplier's company name", "Acme Caskets"),
                          "expiry_date": ("The expiry date", "22 Oct 2026")},
@@ -881,9 +876,8 @@ EMAIL_TEMPLATES = {
     "certificate_expired": {
         "name": "Certificate expired (account not active)",
         "description": "Sent when a certificate expires for a supplier whose account isn't active.",
-        "subject": "Certificate expired",
-        "body": "Your {certificate} for {company_name} expired on {expiry_date}. "
-                "Please upload the renewed certificate to keep your application up to date.",
+        "subject": "Your {certificate} has expired",
+        "body": "Your {certificate} for {company_name} expired on {expiry_date}. Please upload the renewed certificate.",
         "placeholders": {"certificate": ("Which certificate", "SARS VAT certificate"),
                          "company_name": ("The supplier's company name", "Acme Caskets"),
                          "expiry_date": ("The expiry date", "22 Oct 2026")},
@@ -892,7 +886,7 @@ EMAIL_TEMPLATES = {
         "name": "Account reactivated after renewal",
         "description": "Sent when renewed certificates reactivate a supplier's account.",
         "subject": "Account reactivated",
-        "body": "Thank you for uploading your renewed certificate. Your supplier account is active again.",
+        "body": "Thanks for renewing your certificate. Your supplier account is active again.",
         "placeholders": {},
     },
 }
@@ -912,11 +906,13 @@ def email_text(key, **values):
     return fill_placeholders(subject, values), fill_placeholders(body, values)
 
 
-def render_email(subject, message, recipient_name, application=None, action_url=None, action_label=None):
+def render_email(subject, message, recipient_name, application=None, action_url=None, action_label=None, code=None):
+    """`code`, if given, is shown large on its own (the verification code)."""
     return render_template(
         "email/notification.html",
         subject=subject,
         recipient_name=recipient_name,
+        code=code,
         message=message,
         application=application,
         action_url=action_url,
@@ -931,7 +927,7 @@ def send_verification_email(to_email, code):
         app.logger.warning("Email not configured. Verification code for %s: %s", to_email, code)
         return True
     subject, message = email_text("verification_code", code=code)
-    body = render_email(subject, message, "Supplier")
+    body = render_email(subject, message, "", code=code)
     try:
         _deliver(to_email, subject, body, "html")
         return True
@@ -964,7 +960,7 @@ def notify_supplier(supplier, title, message, application=None, action_url=None,
         recipient_name=supplier.contact_name or supplier.company_name,
         application=application,
         action_url=action_url or url_for("dashboard", _external=True),
-        action_label=action_label or "Open your dashboard",
+        action_label=action_label or "Open dashboard",
     )
 
 
@@ -985,7 +981,7 @@ def notify_admins(title, message, application=None):
             recipient_name=admin.name or "Admin",
             application=application,
             action_url=action_url,
-            action_label="Review application" if action_url else None,
+            action_label="Open application" if action_url else None,
         )
 
 
@@ -2189,8 +2185,8 @@ def onboarding_review():
         log_event(application, "submitted", to_status="pending_review",
                   summary=f"Submitted with {len(documents)} document(s); accepted Application Terms {APPLICATION_TERMS_VERSION}")
         notify_admins(
-            "New Supplier Application",
-            f"New application submitted by {user.company_name} ({user.contact_name}) for {application.supplier_category}.",
+            f"New application: {user.company_name}",
+            f"{user.company_name} ({user.contact_name}) applied for {application.supplier_category}.",
             application,
         )
         notify_supplier(user, *email_text("application_received", company_name=application.company_name), application)
@@ -2385,9 +2381,8 @@ def edit_application(application_id):
             changes=changes,
         )
         notify_admins(
-            "Application Resubmitted" if resubmitted else "Application Updated",
-            f"Supplier {application.company_name} ({application.contact_name}) "
-            f"{'resubmitted' if resubmitted else 'updated'} their application.",
+            f"Application {'resubmitted' if resubmitted else 'updated'}: {application.company_name}",
+            f"{application.company_name} {'resubmitted' if resubmitted else 'updated'} their application.",
             application,
         )
         flag_director_matches(application)
@@ -2894,12 +2889,12 @@ def assign_application_to(application_id):
     log_event(application, "assigned", summary=f"Assigned to {new} by {me.name or me.email}",
               changes=[{"field": "Assigned to", "old": previous, "new": new}])
     title = "Application assigned to you"
-    message = f"{me.name or me.email} assigned {application.company_name}'s application to you."
+    message = f"{me.name or me.email} assigned {application.company_name} to you."
     DB.session.add(Notification(admin_id=assignee.id, title=title, message=message,
                                 related_application_id=application.id))
     send_notification_email(assignee.email, title, message, recipient_name=assignee.name or "Admin",
                             application=application, action_url=url_for("admin_application_detail", application_id=application.id, _external=True),
-                            action_label="Review application")
+                            action_label="Open application")
     DB.session.commit()
     flash(f"{application.company_name} is now assigned to {new}.", "success")
     return redirect(detail_url)
@@ -3055,7 +3050,7 @@ def update_application(application_id):
                                 application)
             elif application.status != "approved":  # approval sends the welcome email below instead
                 notify_supplier(supplier, *email_text("application_status_updated", company_name=application.company_name,
-                                                      status=status_label(application.status)), application)
+                                                      status=status_label(application.status).capitalize()), application)
             if application.status != "approved" or not supplier.active:
                 application.expiry_suspended = False  # an admin decision replaces any automatic suspension
             if application.status == "approved":
@@ -3068,7 +3063,7 @@ def update_application(application_id):
                 notify_supplier(
                     supplier, *email_text("application_approved", company_name=application.company_name, valid_until=valid_until),
                     application, action_url=url_for("supplier_registration_certificate", _external=True),
-                    action_label="View your supplier certificate",
+                    action_label="View certificate",
                 )
             elif application.status in {"declined", "on_file"} and supplier.active:
                 reason = "declined" if application.status == "declined" else "put on file"
@@ -4066,7 +4061,8 @@ def admin_email_template_edit(key):
             return redirect(url_for("admin_email_template_edit", key=key))
 
     samples = {name: example for name, (_, example) in template["placeholders"].items()}
-    preview = render_email(fill_placeholders(subject, samples), fill_placeholders(body, samples), "Jane Dube")
+    preview = render_email(fill_placeholders(subject, samples), fill_placeholders(body, samples), "Jane Dube",
+                           code=samples.get("code") if key == "verification_code" else None)
     return render_template(
         "admin_email_template_edit.html", admin=get_current_admin(), key=key, template=template, saved=saved,
         subject=subject, body=body, preview=preview,
@@ -4189,12 +4185,12 @@ def check_certificate_expiry(today=None):
         if notice != "expired":
             days_left = (document.expiry_date - today).days
             when = "today" if days_left == 0 else f"in {days_left} day{'' if days_left == 1 else 's'}"
-            consequence = (" If it expires before you do, your supplier account will be deactivated until it is renewed."
+            consequence = (" If it expires first, your account will be deactivated until you renew it."
                            if supplier and supplier.active else "")
             if supplier:
                 notify_supplier(supplier, *email_text("certificate_expiring", certificate=name, company_name=application.company_name,
                                                       when=when, expiry_date=expires, consequence=consequence),
-                                application, action_url=renew_url, action_label="Upload renewed certificate")
+                                application, action_url=renew_url, action_label="Upload certificate")
             log_event(application, "certificate_reminder", summary=f"{document.document_type}: expires {expires} ({notice}-day reminder)",
                       actor="system")
             reminders += 1
@@ -4212,10 +4208,10 @@ def check_certificate_expiry(today=None):
             notify_supplier(
                 supplier, *email_text("certificate_expired_deactivated" if was_active else "certificate_expired",
                                       certificate=name, company_name=application.company_name, expiry_date=expires),
-                application, action_url=renew_url, action_label="Upload renewed certificate")
+                application, action_url=renew_url, action_label="Upload certificate")
         notify_admins(f"Certificate expired: {application.company_name}",
                       f"{application.company_name}'s {name} expired on {expires}."
-                      + (" Their supplier account was deactivated automatically." if was_active else ""), application)
+                      + (" Their account was deactivated." if was_active else ""), application)
     DB.session.commit()
     return reminders, deactivated
 

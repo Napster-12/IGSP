@@ -144,13 +144,13 @@ def test_full_onboarding_and_admin_review(client, monkeypatch):
         assert user.active is True
         titles = {n.title for n in igsp.Notification.query.filter_by(user_id=user.id)}
         # Approval sends one welcome email (linking to the certificate) rather than separate status/activation emails.
-        assert {"Welcome to Icebolethu Group", "Review Comments Added"} <= titles
-        assert not {"Application Status Updated", "Account Activated"} & titles
+        assert {"You're an approved supplier", "New comment on your application"} <= titles
+        assert not any(t.startswith("Application update") or t == "Account Activated" for t in titles)
         supplier_id, approved_at = user.supplier_id, igsp.DB.session.get(igsp.SupplierApplication, app_id).approved_at
     assert approved_at is not None
 
-    welcome = next(kw for subject, kw in emails if subject == "Welcome to Icebolethu Group")
-    assert welcome["action_url"].endswith("/certificate") and welcome["action_label"] == "View your supplier certificate"
+    welcome = next(kw for subject, kw in emails if subject == "You're an approved supplier")
+    assert welcome["action_url"].endswith("/certificate") and welcome["action_label"] == "View certificate"
 
     # Approval issues a registration certificate, listed on the supplier's Certificates tab.
     tab = client.get("/certificates").data
@@ -301,11 +301,11 @@ def test_certificate_expiry_reminders_deactivation_and_renewal(client):
             return [n.title for n in igsp.Notification.query.filter_by(user_id=supplier_id).order_by(igsp.Notification.id)]
 
     assert check(-31) == (0, 0)  # 31 days out: nothing yet
-    assert check(-30) == (1, 0) and titles().count("Certificate expiring soon") == 1
+    assert check(-30) == (1, 0) and titles().count("Your SARS VAT certificate expires in 30 days") == 1
     assert check(-29) == (0, 0)  # already reminded at 30 days
-    assert check(-7) == (1, 0) and titles().count("Certificate expiring soon") == 2
+    assert check(-7) == (1, 0) and titles().count("Your SARS VAT certificate expires in 7 days") == 1
     with client.app.app_context():
-        note = igsp.Notification.query.filter_by(user_id=supplier_id, title="Certificate expiring soon").first()
+        note = igsp.Notification.query.filter_by(user_id=supplier_id, title="Your SARS VAT certificate expires in 7 days").first()
         assert "SARS VAT certificate" in note.message and "will be deactivated" in note.message
 
     # Expired without a renewal: the account is deactivated, supplier and admins are told, once.
@@ -318,7 +318,7 @@ def test_certificate_expiry_reminders_deactivation_and_renewal(client):
                                               igsp.Notification.title.like("Certificate expired%")).count() == 1
         actions = [e.action for e in igsp.ApplicationEvent.query.filter_by(application_id=app_id)]
         assert actions.count("certificate_reminder") == 2 and "certificate_expired" in actions
-    assert "Certificate expired – account deactivated" in titles()
+    assert "Certificate expired: account deactivated" in titles()
     page = client.get("/dashboard").data.decode()
     assert "Certificates</span>" in page and "/certificates" in page
 
@@ -807,8 +807,8 @@ def test_on_file_decision(client):
         application = igsp.DB.session.get(igsp.SupplierApplication, app_id)
         supplier = igsp.find_user_by_email("supplier@example.com")
         assert (application.status, application.documents_status, supplier.active) == ("on_file", "complete", False)
-        note = igsp.Notification.query.filter_by(user_id=supplier.id, title="Application Received – On File").one()
-        assert "keep your details on file and contact you when we need your services" in note.message
+        note = igsp.Notification.query.filter_by(user_id=supplier.id, title="Application kept on file").one()
+        assert "on file and contact you when we need your services" in note.message
         assert igsp.ApplicationEvent.query.filter_by(application_id=app_id, to_status="on_file").count() == 1
 
     page = client.get("/dashboard").data.decode()
@@ -1337,7 +1337,7 @@ def test_ict_edits_email_templates(client):
 
     ict.post(f"{url}/reset")
     with client.app.app_context():
-        assert igsp.email_text("application_received", company_name="X")[0] == "Application Received"
+        assert igsp.email_text("application_received", company_name="X")[0] == "Application received"
 
 
 def test_ict_deletes_directors_and_applications(client):
