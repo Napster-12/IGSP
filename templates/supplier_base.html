@@ -7,7 +7,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Supplier Portal{% endblock %} | Icebolethu Supplier Portal</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+    <link rel="stylesheet" href="{{ static_url('css/icebolethu.css') }}">
     {% block head %}{% endblock %}
 </head>
 <body class="ad-body">
@@ -87,5 +87,6 @@
     <script src="{{ url_for('static', filename='js/portal.js') }}"></script>
     <script src="{{ url_for('static', filename='js/pdf-viewer.js') }}"></script>
     {% block scripts %}{% endblock %}
+    {% with chat_url=url_for('supplier_chat') %}{% include "_chatbot.html" %}{% endwith %}
 </body>
 </html>

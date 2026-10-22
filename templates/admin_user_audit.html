@@ -1,0 +1,112 @@
+{% extends "admin_base.html" %}
+{% import "admin_macros.html" as ad with context %}
+{% import "_macros.html" as ui with context %}
+
+{% block title %}User audit{% endblock %}
+{% block page_title %}User audit{% endblock %}
+{% block page_subtitle %}{% if view == 'accounts' %}{{ accounts|length }} admin account{{ '' if accounts|length == 1 else 's' }}{% else %}{{ pagination.total }} admin action{{ '' if pagination.total == 1 else 's' }}{% if selected_admin %} by {{ selected_admin.name or selected_admin.email }}{% endif %} · times in UTC{% endif %}{% endblock %}
+{% block page_actions %}
+    {% if view == 'activity' %}
+        <a href="{{ url_for('admin_user_audit_export', **page_args) }}" class="ad-btn ad-btn--primary">{{ ad.icon('download') }} Export CSV</a>
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+    <nav class="ad-tabs ad-audit-tabs" aria-label="User audit view">
+        <a href="{{ url_for('admin_user_audit') }}" class="ad-tab{% if view == 'activity' %} is-active{% endif %}"{% if view == 'activity' %} aria-current="page"{% endif %}>Activity</a>
+        <a href="{{ url_for('admin_user_audit', view='accounts') }}" class="ad-tab{% if view == 'accounts' %} is-active{% endif %}"{% if view == 'accounts' %} aria-current="page"{% endif %}>Admin accounts</a>
+    </nav>
+
+    {% if view == 'accounts' %}
+        <section class="ad-card">
+            <div class="ad-table-wrap">
+                <table class="ad-table">
+                    <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Created</th><th>Last sign-in</th><th class="ad-num">Application actions</th><th></th></tr></thead>
+                    <tbody>
+                        {% for account, last_login, action_count in accounts %}
+                            <tr>
+                                <td>{{ account.name or '—' }}</td>
+                                <td>{{ account.email }}</td>
+                                <td><span class="ad-role ad-role--{{ account.role }}">{{ account.role_label }}</span></td>
+                                <td class="ad-nowrap">{{ account.created_at.strftime('%d %b %Y') if account.created_at else '—' }}</td>
+                                <td class="ad-nowrap">{{ last_login.strftime('%d %b %Y, %H:%M') if last_login else 'Never' }}</td>
+                                <td class="ad-num">{{ action_count }}</td>
+                                <td><a href="{{ url_for('admin_user_audit', admin=account.id) }}" class="ad-link ad-nowrap">All activity →</a></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    {% else %}
+        <section class="ad-card">
+            <form method="get" class="ad-filters">
+                <label class="ad-filter ad-filter--grow">
+                    <span>Search</span>
+                    <input type="search" name="search" value="{{ filters.search }}" placeholder="Admin, company, detail or IP — press Enter">
+                </label>
+                <label class="ad-filter">
+                    <span>Admin</span>
+                    <select name="admin" onchange="this.form.submit()">
+                        <option value="">All admins</option>
+                        {% for account in admins %}
+                            <option value="{{ account.id }}" {% if filters.admin == account.id %}selected{% endif %}>{{ account.name or account.email }} ({{ account.role_label }})</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="ad-filter">
+                    <span>Action</span>
+                    <select name="action" onchange="this.form.submit()">
+                        <option value="">All actions</option>
+                        {% for value, label in activity_labels|dictsort(by='value') %}
+                            <option value="{{ value }}" {% if filters.action == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="ad-filter">
+                    <span>From</span>
+                    <input type="date" name="date_from" value="{{ filters.date_from }}">
+                </label>
+                <label class="ad-filter">
+                    <span>To</span>
+                    <input type="date" name="date_to" value="{{ filters.date_to }}">
+                </label>
+                <div class="ad-filter-actions">
+                    <button type="submit" class="ad-btn ad-btn--primary">Apply</button>
+                    {% if page_args %}<a href="{{ url_for('admin_user_audit') }}" class="ad-btn ad-btn--ghost">Reset</a>{% endif %}
+                </div>
+            </form>
+        </section>
+
+        <section class="ad-card">
+            {% if entries %}
+                <div class="ad-table-wrap">
+                    <table class="ad-table ad-table--compact">
+                        <thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Application</th><th>Detail</th><th>IP address</th></tr></thead>
+                        <tbody>
+                            {% for entry in entries %}
+                                <tr{% if entry.action.endswith('_failed') or entry.action.endswith('_deleted') or entry.action == 'director_removed' %} class="is-flagged"{% endif %}>
+                                    <td class="ad-nowrap">{{ entry.created_at.strftime('%d %b %Y, %H:%M:%S') if entry.created_at else '' }}</td>
+                                    <td>
+                                        {% if entry.actor_id %}<a href="{{ url_for('admin_user_audit', admin=entry.actor_id) }}" class="ad-row-link">{{ entry.actor_name or entry.actor_email }}</a>{% else %}{{ entry.actor_name or '—' }}{% endif %}
+                                        {% if entry.actor_email %}<span class="ad-cell-sub">{{ entry.actor_email }}</span>{% endif %}
+                                    </td>
+                                    <td class="ad-nowrap">{{ activity_labels.get(entry.action, entry.action|replace('_', ' ')|capitalize) }}</td>
+                                    <td>{% if entry.application_id %}<a href="{{ url_for('admin_application_detail', application_id=entry.application_id) }}" class="ad-link">{{ entry.company_name }}</a> <span class="ad-cell-sub">#{{ entry.application_id }}</span>{% else %}<span class="ad-muted">—</span>{% endif %}</td>
+                                    <td>{{ entry.detail or '—' }}</td>
+                                    <td class="ad-mono ad-nowrap">{{ entry.ip_address or '—' }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {{ ui.render_pagination(pagination, 'admin_user_audit', page_args) }}
+            {% else %}
+                <div class="ad-empty">
+                    <strong>{{ 'No activity matches these filters' if page_args else 'No admin activity recorded yet' }}</strong>
+                    <span>Admin sign-ins, work on applications, document views, exports and ICT actions appear here.</span>
+                </div>
+            {% endif %}
+        </section>
+    {% endif %}
+{% endblock %}

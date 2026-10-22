@@ -6,6 +6,8 @@
     ('suppliers', 'admin_suppliers', 'Suppliers', 'suppliers', ['admin_suppliers']),
     ('catalogue', 'admin_catalogue', 'Catalogue', 'box', ['admin_catalogue']),
     ('reports', 'admin_reports', 'Reports', 'reports', ['admin_reports', 'admin_report']),
+    ('ict', 'admin_user_audit', 'User audit', 'shield', ['admin_user_audit']),
+    ('ict', 'admin_email_templates', 'Email templates', 'mail', ['admin_email_templates', 'admin_email_template_edit']),
 ] %}
 <!DOCTYPE html>
 <html lang="en">
@@ -13,7 +15,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Admin{% endblock %} | IGSP Admin</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/icebolethu.css') }}">
+    <link rel="stylesheet" href="{{ static_url('css/icebolethu.css') }}">
     {% block head %}{% endblock %}
 </head>
 <body class="ad-body">
@@ -77,5 +79,6 @@
     <script src="{{ url_for('static', filename='js/shell.js') }}"></script>
     {% block scripts %}{% endblock %}
     <script src="{{ url_for('static', filename='js/pdf-viewer.js') }}"></script>
+    {% with chat_url=url_for('admin_chat') %}{% include "_chatbot.html" %}{% endwith %}
 </body>
 </html>

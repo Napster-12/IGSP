@@ -40,7 +40,7 @@ from flask import (
 )
 from flask_sqlalchemy import SQLAlchemy
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from sqlalchemy import case, func, text
+from sqlalchemy import case, false, func, literal, null, select, text, union_all
 from sqlalchemy.exc import OperationalError
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash, safe_join
@@ -556,6 +556,32 @@ class Notification(DB.Model):
     application = DB.relationship("SupplierApplication", backref=DB.backref("notifications", lazy=True))
 
 
+class AuditLog(DB.Model):
+    """Append-only log of sign-ins, account security events and ICT admin actions, for the user audit."""
+    __tablename__ = "audit_logs"
+
+    id = DB.Column(DB.Integer, primary_key=True)
+    created_at = DB.Column(DB.DateTime, default=utcnow, nullable=False, index=True)
+    actor_type = DB.Column(DB.String(20), nullable=False, default="system")  # supplier | admin | system
+    actor_id = DB.Column(DB.Integer, nullable=True)
+    actor_name = DB.Column(DB.String(150), nullable=False, default="")
+    actor_email = DB.Column(DB.String(120), nullable=False, default="", index=True)
+    action = DB.Column(DB.String(40), nullable=False, index=True)
+    detail = DB.Column(DB.String(255), nullable=False, default="")
+    ip_address = DB.Column(DB.String(64), nullable=False, default="")
+
+
+class EmailTemplate(DB.Model):
+    """An ICT admin's edited version of one of the EMAIL_TEMPLATES; without a row the default text is used."""
+    __tablename__ = "email_templates"
+
+    key = DB.Column(DB.String(60), primary_key=True)
+    subject = DB.Column(DB.String(200), nullable=False)
+    body = DB.Column(DB.Text, nullable=False)
+    updated_at = DB.Column(DB.DateTime, default=utcnow, onupdate=utcnow)
+    updated_by = DB.Column(DB.String(120), nullable=False, default="")
+
+
 class User(DB.Model):
     __tablename__ = "users"
 
@@ -612,12 +638,19 @@ ADMIN_ROLES = {
     "super": "Procurement Team Lead",
     "applications": "Procurement Officer",
     "reports": "Procurement Manager",
+    "ict": "ICT Admin",
 }
 ROLE_SECTIONS = {
     "super": {"dashboard", "applications", "suppliers", "catalogue", "reports"},
     "applications": {"applications", "suppliers"},
     "reports": {"reports"},
+    # Everything except the dashboard, plus the ICT tools (user audit, email templates, deleting records).
+    "ict": {"applications", "suppliers", "catalogue", "reports", "ict"},
 }
+# Roles that can do what a Procurement Team Lead can (assign applications to others).
+FULL_ACCESS_ROLES = {"super", "ict"}
+# Roles that receive application notifications (ICT can open applications but isn't part of the review workflow).
+NOTIFIED_ROLES = ["super", "applications"]
 # Where each section starts, in sidebar order; an admin lands on the first one they can open.
 SECTION_HOMES = [
     ("dashboard", "admin_dashboard"),
@@ -625,6 +658,7 @@ SECTION_HOMES = [
     ("suppliers", "admin_suppliers"),
     ("catalogue", "admin_catalogue"),
     ("reports", "admin_reports"),
+    ("ict", "admin_user_audit"),
 ]
 
 
@@ -643,8 +677,8 @@ class Admin(DB.Model):
         return ADMIN_ROLES.get(self.role, "Admin")
 
     @property
-    def is_super(self):
-        return self.role == "super"
+    def has_full_access(self):
+        return self.role in FULL_ACCESS_ROLES
 
     def can(self, section):
         return section in ROLE_SECTIONS.get(self.role, set())
@@ -746,6 +780,138 @@ def _deliver_in_background(to_email, subject, body, subtype):
     threading.Thread(target=run, daemon=True).start()
 
 
+# Emails to suppliers that ICT admins can edit (subject and message). Each {placeholder} is filled in when the
+# email is sent; `placeholders` maps each one to (what it is, an example for the preview). The same text is used
+# for the in-portal notification. Emails to admins stay in the code.
+EMAIL_TEMPLATES = {
+    "verification_code": {
+        "name": "Verification code",
+        "description": "Sent when a supplier signs up or logs in.",
+        "subject": "Your IGSP Verification Code",
+        "body": "Your verification code is {code}. It expires in 10 minutes. "
+                "If you did not try to sign in, you can ignore this email.",
+        "placeholders": {"code": ("The 6-digit code", "482915")},
+    },
+    "password_reset": {
+        "name": "Password reset",
+        "description": "Sent when a supplier asks to reset their password. The email has a reset button.",
+        "subject": "Reset your IGSP password",
+        "body": "We received a request to reset your password. The link below is valid for one hour. "
+                "If you didn't ask for this, you can ignore this email.",
+        "placeholders": {},
+    },
+    "application_received": {
+        "name": "Application received",
+        "description": "Sent when a supplier submits their application.",
+        "subject": "Application Received",
+        "body": "Thank you — your supplier application has been received and is awaiting review. "
+                "We'll notify you when its status changes.",
+        "placeholders": {"company_name": ("The supplier's company name", "Acme Caskets")},
+    },
+    "application_status_updated": {
+        "name": "Application status changed",
+        "description": "Sent when an admin moves an application to under review, returned for update or declined.",
+        "subject": "Application Status Updated",
+        "body": "Your application for {company_name} has been updated to: {status}.",
+        "placeholders": {"company_name": ("The supplier's company name", "Acme Caskets"),
+                         "status": ("The new status", "Returned for update")},
+    },
+    "application_on_file": {
+        "name": "Application kept on file",
+        "description": "Sent when an admin accepts an application and keeps it on file.",
+        "subject": "Application Received – On File",
+        "body": "Thank you for applying to become a supplier for {company_name}. " + ON_FILE_MESSAGE,
+        "placeholders": {"company_name": ("The supplier's company name", "Acme Caskets")},
+    },
+    "application_approved": {
+        "name": "Application approved (welcome)",
+        "description": "Sent when an application is approved. The email links to the supplier's registration certificate.",
+        "subject": "Welcome to Icebolethu Group",
+        "body": "Congratulations! Your application has been approved and {company_name} is now registered "
+                "as an Approved Supplier of Icebolethu Group. Your supplier account is active: sign in to list the "
+                "products and services you offer and keep your VAT and B-BBEE certificates up to date. "
+                "Your Certificate of Supplier Registration is ready to view, print or save as PDF (valid until {valid_until}).",
+        "placeholders": {"company_name": ("The supplier's company name", "Acme Caskets"),
+                         "valid_until": ("Date the registration certificate expires", "22 Oct 2027")},
+    },
+    "review_comments_added": {
+        "name": "Review comments added",
+        "description": "Sent when an admin adds or changes the comments to the supplier.",
+        "subject": "Review Comments Added",
+        "body": "An administrator added review comments to your application: {comments}",
+        "placeholders": {"comments": ("The admin's comments", "Please upload a bank letter not older than 3 months.")},
+    },
+    "account_deactivated_decision": {
+        "name": "Account deactivated (declined or on file)",
+        "description": "Sent when an active supplier's application is declined or put on file.",
+        "subject": "Account Deactivated",
+        "body": "Your supplier account has been deactivated because your application was {reason}.",
+        "placeholders": {"reason": ("\"declined\" or \"put on file\"", "declined")},
+    },
+    "account_status_changed": {
+        "name": "Account activated or deactivated by an admin",
+        "description": "Sent when an admin switches a supplier account on or off.",
+        "subject": "Account Status Updated",
+        "body": "Your supplier account has been {state} by the administrator.",
+        "placeholders": {"state": ("\"activated\" or \"deactivated\"", "deactivated")},
+    },
+    "certificate_expiring": {
+        "name": "Certificate expiring soon",
+        "description": "Sent 30 and 7 days before a VAT or B-BBEE certificate expires.",
+        "subject": "Certificate expiring soon",
+        "body": "Your {certificate} for {company_name} expires {when} ({expiry_date}). "
+                "Please upload the renewed certificate in the supplier portal.{consequence}",
+        "placeholders": {"certificate": ("Which certificate", "SARS VAT certificate"),
+                         "company_name": ("The supplier's company name", "Acme Caskets"),
+                         "when": ("\"in 7 days\", \"today\" etc.", "in 7 days"),
+                         "expiry_date": ("The expiry date", "29 Oct 2026"),
+                         "consequence": ("A warning that the account will be deactivated (only for active accounts)",
+                                         " If it expires before you do, your supplier account will be deactivated until it is renewed.")},
+    },
+    "certificate_expired_deactivated": {
+        "name": "Certificate expired – account deactivated",
+        "description": "Sent when a certificate expires and the supplier's account is deactivated.",
+        "subject": "Certificate expired – account deactivated",
+        "body": "Your {certificate} for {company_name} expired on {expiry_date}. "
+                "Your supplier account has been deactivated until you upload the renewed certificate.",
+        "placeholders": {"certificate": ("Which certificate", "SARS VAT certificate"),
+                         "company_name": ("The supplier's company name", "Acme Caskets"),
+                         "expiry_date": ("The expiry date", "22 Oct 2026")},
+    },
+    "certificate_expired": {
+        "name": "Certificate expired (account not active)",
+        "description": "Sent when a certificate expires for a supplier whose account isn't active.",
+        "subject": "Certificate expired",
+        "body": "Your {certificate} for {company_name} expired on {expiry_date}. "
+                "Please upload the renewed certificate to keep your application up to date.",
+        "placeholders": {"certificate": ("Which certificate", "SARS VAT certificate"),
+                         "company_name": ("The supplier's company name", "Acme Caskets"),
+                         "expiry_date": ("The expiry date", "22 Oct 2026")},
+    },
+    "account_reactivated": {
+        "name": "Account reactivated after renewal",
+        "description": "Sent when renewed certificates reactivate a supplier's account.",
+        "subject": "Account reactivated",
+        "body": "Thank you for uploading your renewed certificate. Your supplier account is active again.",
+        "placeholders": {},
+    },
+}
+PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
+
+
+def fill_placeholders(text, values):
+    """Replace {name} with values[name]; anything else in braces is left as typed."""
+    return PLACEHOLDER_RE.sub(lambda m: str(values[m.group(1)]) if m.group(1) in values else m.group(0), text)
+
+
+def email_text(key, **values):
+    """(subject, message) for an editable email: the ICT-edited version if there is one, else the default."""
+    template = EMAIL_TEMPLATES[key]
+    saved = DB.session.get(EmailTemplate, key)
+    subject, body = (saved.subject, saved.body) if saved else (template["subject"], template["body"])
+    return fill_placeholders(subject, values), fill_placeholders(body, values)
+
+
 def render_email(subject, message, recipient_name, application=None, action_url=None, action_label=None):
     return render_template(
         "email/notification.html",
@@ -764,14 +930,10 @@ def send_verification_email(to_email, code):
     if not email_configured():
         app.logger.warning("Email not configured. Verification code for %s: %s", to_email, code)
         return True
-    body = render_email(
-        "Your IGSP Verification Code",
-        f"Your verification code is {code}. It expires in 10 minutes. "
-        "If you did not try to sign in, you can ignore this email.",
-        "Supplier",
-    )
+    subject, message = email_text("verification_code", code=code)
+    body = render_email(subject, message, "Supplier")
     try:
-        _deliver(to_email, "Your IGSP Verification Code", body, "html")
+        _deliver(to_email, subject, body, "html")
         return True
     except Exception as exc:  # noqa: BLE001
         app.logger.error("Failed to send verification email to %s: %s", to_email, exc)
@@ -811,7 +973,7 @@ def notify_admins(title, message, application=None):
         url_for("admin_application_detail", application_id=application.id, _external=True)
         if application else None
     )
-    for admin in Admin.query.filter(Admin.role.in_([r for r, s in ROLE_SECTIONS.items() if "applications" in s])):
+    for admin in Admin.query.filter(Admin.role.in_(NOTIFIED_ROLES)):
         DB.session.add(Notification(
             admin_id=admin.id,
             title=title,
@@ -883,8 +1045,8 @@ def admin_section(section):
 def super_admin_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
-        if not get_current_admin().is_super:
-            flash("Only a Procurement Team Lead can do that.", "error")
+        if not get_current_admin().has_full_access:
+            flash("Only a Procurement Team Lead or ICT Admin can do that.", "error")
             return redirect(url_for(get_current_admin().home_endpoint))
         return view_func(*args, **kwargs)
     return wrapper
@@ -990,6 +1152,8 @@ EVENT_LABELS = {
     "certificate_expired": "Certificate expired",
     "certificates_renewed": "Certificates renewed by supplier",
     "registration_certificate_issued": "Supplier registration certificate issued",
+    "director_removed": "Director removed by ICT",
+    "history_exported": "History exported",
 }
 
 AUDIT_FIELD_LABELS = {
@@ -1022,6 +1186,43 @@ def log_event(application, action, summary="", from_status=None, to_status=None,
         from_status=from_status,
         to_status=to_status,
         changes_json=json.dumps(changes) if changes else None,
+        ip_address=client_ip()[:64] if request else "",
+    ))
+
+
+# Admin activity that isn't tied to one application (sign-ins, exports, ICT actions). Everything admins do on an
+# application is in ApplicationEvent; the user audit shows both together, for admins only.
+AUDIT_ACTIONS = {
+    "admin_login": "Admin signed in",
+    "admin_login_failed": "Admin sign-in failed",
+    "admin_logout": "Admin signed out",
+    "application_deleted": "Application deleted",
+    "director_deleted": "Director deleted",
+    "email_template_updated": "Email template edited",
+    "email_template_reset": "Email template reset to default",
+    "report_exported": "Report exported",
+    "audit_exported": "User audit exported",
+}
+
+
+def audit(action, detail="", actor=None, actor_type=None, email=""):
+    """Add one user-audit entry for an admin (the caller commits). `actor` defaults to the signed-in admin;
+    for a failed sign-in pass `actor_type="admin"` and the `email` that was typed instead."""
+    if actor is None and actor_type is None:
+        actor = get_current_admin()
+    if isinstance(actor, Admin):
+        actor_type, name = "admin", actor.name
+    elif isinstance(actor, User):
+        actor_type, name = "supplier", actor.contact_name or actor.company_name
+    else:
+        name = ""
+    DB.session.add(AuditLog(
+        actor_type=actor_type or "system",
+        actor_id=getattr(actor, "id", None),
+        actor_name=(name or "")[:150],
+        actor_email=(getattr(actor, "email", None) or email or "")[:120],
+        action=action,
+        detail=(detail or "")[:255],
         ip_address=client_ip()[:64] if request else "",
     ))
 
@@ -1107,6 +1308,7 @@ def inject_globals():
         "SUPPLIER_CATEGORIES": cats,
         "CATEGORY_SECTIONS": get_category_sections(),
         "PROVINCES": PROVINCES,
+        "static_url": static_url,
         "COUNTRIES": COUNTRIES,
         "normalize_nationality": normalize_nationality,
         "csrf_token": csrf_token,
@@ -1494,6 +1696,15 @@ def db_status():
         return jsonify({"status": "error"}), 500
 
 
+def static_url(filename):
+    """url_for('static') plus ?v=<modified time>, so browsers don't keep running an old copy after a change."""
+    try:
+        version = int(os.path.getmtime(os.path.join(app.static_folder, filename)))
+    except OSError:
+        version = 0
+    return url_for("static", filename=filename, v=version)
+
+
 def generate_supplier_id():
     for digits in (4, 4, 4, 4, 4, 6, 6, 6, 6, 6):
         candidate = f"IGSP{secrets.randbelow(9 * 10 ** (digits - 1)) + 10 ** (digits - 1)}"
@@ -1692,9 +1903,7 @@ def forgot_password():
             if email_configured():
                 send_notification_email(
                     user.email,
-                    "Reset your IGSP password",
-                    "We received a request to reset your password. The link below is valid for one hour. "
-                    "If you didn't ask for this, you can ignore this email.",
+                    *email_text("password_reset"),
                     recipient_name=user.contact_name or user.company_name,
                     action_url=reset_url,
                     action_label="Reset password",
@@ -1984,13 +2193,7 @@ def onboarding_review():
             f"New application submitted by {user.company_name} ({user.contact_name}) for {application.supplier_category}.",
             application,
         )
-        notify_supplier(
-            user,
-            "Application Received",
-            "Thank you — your supplier application has been received and is awaiting review. "
-            "We'll notify you when its status changes.",
-            application,
-        )
+        notify_supplier(user, *email_text("application_received", company_name=application.company_name), application)
         flag_director_matches(application)
         DB.session.commit()
 
@@ -2353,9 +2556,14 @@ def admin_login():
         admin = find_admin_by_email(email)
         if not admin or not admin.check_password(password):
             login_limiter.hit(limiter_key)
+            audit("admin_login_failed", "Wrong password" if admin else "No admin account with this email",
+                  actor=admin, actor_type="admin", email=email)
+            DB.session.commit()
             return render_template("admin_login.html", step="options", login_error="Invalid email or password.")
 
         login_limiter.reset(limiter_key)
+        audit("admin_login", "Email and password", actor=admin)
+        DB.session.commit()
         session["admin_id"] = admin.id
         session.permanent = True
         return redirect(url_for(admin.home_endpoint))
@@ -2397,9 +2605,13 @@ def admin_login_microsoft_callback():
 
     admin = find_admin_by_email(email)
     if not admin:
+        audit("admin_login_failed", "Microsoft account has no admin account", actor_type="admin", email=email)
+        DB.session.commit()
         flash("No admin account found for this Microsoft account.", "error")
         return redirect(url_for("admin_login_options"))
 
+    audit("admin_login", "Microsoft", actor=admin)
+    DB.session.commit()
     session["admin_id"] = admin.id
     session.permanent = True
     flash(f"Welcome, {admin.name or admin.email}", "success")
@@ -2408,6 +2620,10 @@ def admin_login_microsoft_callback():
 
 @app.route("/admin/logout")
 def admin_logout():
+    admin = get_current_admin()
+    if admin:
+        audit("admin_logout", actor=admin)
+        DB.session.commit()
     session.pop("admin_id", None)
     return redirect(url_for("admin_login"))
 
@@ -2533,7 +2749,7 @@ def toggle_supplier(supplier_id):
         log_event(supplier_application, f"account_{state}", summary=f"Supplier account {state}",
                   changes=[{"field": "Account", "old": "Inactive" if supplier.active else "Active",
                             "new": "Active" if supplier.active else "Inactive"}])
-    notify_supplier(supplier, "Account Status Updated", f"Your supplier account has been {state} by the administrator.")
+    notify_supplier(supplier, *email_text("account_status_changed", state=state))
     DB.session.commit()
     flash(f"Supplier {state} successfully.", "success")
     return redirect(safe_next_url(request.form.get("next"), url_for("admin_suppliers")))
@@ -2725,7 +2941,7 @@ def admin_application_detail(application_id):
         is_mine=is_assigned_to_me(application),
         director_flags=director_matches([application]).get(application.id, []),
         history_count=len(application_history(application)),
-        assignable_admins=application_admins() if get_current_admin().is_super else [],
+        assignable_admins=application_admins() if get_current_admin().has_full_access else [],
     )
 
 
@@ -2762,6 +2978,8 @@ def application_history(application):
 @admin_section("applications")
 def admin_application_history_export(application_id):
     application = DB.get_or_404(SupplierApplication, application_id)
+    log_event(application, "history_exported", summary="History exported to CSV")
+    DB.session.commit()
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Date & time (UTC)", "Actor type", "Actor", "Actor email", "Action", "Summary",
@@ -2833,16 +3051,11 @@ def update_application(application_id):
     if supplier:
         if old_status != application.status:
             if application.status == "on_file":
-                notify_supplier(supplier, "Application Received – On File",
-                                f"Thank you for applying to become a supplier for {application.company_name}. {ON_FILE_MESSAGE}",
+                notify_supplier(supplier, *email_text("application_on_file", company_name=application.company_name),
                                 application)
             elif application.status != "approved":  # approval sends the welcome email below instead
-                notify_supplier(
-                    supplier,
-                    "Application Status Updated",
-                    f"Your application for {application.company_name} has been updated to: {status_label(application.status)}.",
-                    application,
-                )
+                notify_supplier(supplier, *email_text("application_status_updated", company_name=application.company_name,
+                                                      status=status_label(application.status)), application)
             if application.status != "approved" or not supplier.active:
                 application.expiry_suspended = False  # an admin decision replaces any automatic suspension
             if application.status == "approved":
@@ -2853,11 +3066,7 @@ def update_application(application_id):
                 valid_until = certificate_details(application, supplier)["valid_until"].strftime("%d %b %Y")
                 log_event(application, "registration_certificate_issued", summary=f"Valid until {valid_until}")
                 notify_supplier(
-                    supplier, "Welcome to Icebolethu Group",
-                    f"Congratulations! Your application has been approved and {application.company_name} is now registered "
-                    "as an Approved Supplier of Icebolethu Group. Your supplier account is active: sign in to list the "
-                    "products and services you offer and keep your VAT and B-BBEE certificates up to date. "
-                    f"Your Certificate of Supplier Registration is ready to view, print or save as PDF (valid until {valid_until}).",
+                    supplier, *email_text("application_approved", company_name=application.company_name, valid_until=valid_until),
                     application, action_url=url_for("supplier_registration_certificate", _external=True),
                     action_label="View your supplier certificate",
                 )
@@ -2866,17 +3075,9 @@ def update_application(application_id):
                 supplier.active = False
                 log_event(application, "account_deactivated", summary=f"Supplier account deactivated automatically ({reason})",
                           changes=[{"field": "Account", "old": "Active", "new": "Inactive"}])
-                notify_supplier(
-                    supplier, "Account Deactivated",
-                    f"Your supplier account has been deactivated because your application was {reason}.",
-                    application,
-                )
+                notify_supplier(supplier, *email_text("account_deactivated_decision", reason=reason), application)
         if application.review_comments and application.review_comments != old_comments:
-            notify_supplier(
-                supplier, "Review Comments Added",
-                f"An administrator added review comments to your application: {application.review_comments}",
-                application,
-            )
+            notify_supplier(supplier, *email_text("review_comments_added", comments=application.review_comments), application)
 
     DB.session.commit()
     flash("Application updated successfully.", "success")
@@ -3438,6 +3639,8 @@ def admin_report_export(kind):
     period = (f"{window['date_from'] or 'start'}_to_{window['date_to'] or 'today'}"
               if window["period"] == "custom" else window["period"])
     filename = f"{kind}_report_{period}_{datetime.now().strftime('%Y%m%d')}.csv"
+    audit("report_exported", f"{dict(REPORT_KINDS).get(kind, kind)} report ({period})")
+    DB.session.commit()
     return Response("﻿" + output.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": f"attachment; filename={filename}"})
 
@@ -3447,6 +3650,8 @@ def admin_report_export(kind):
 @admin_section("reports")
 def admin_reports_export():
     applications = filtered_applications_query(report_filters(request.args)).order_by(SupplierApplication.created_at.asc()).all()
+    audit("report_exported", f"Applications export ({len(applications)} rows)")
+    DB.session.commit()
     suppliers = users_by_email(applications)
 
     output = io.StringIO()
@@ -3670,6 +3875,268 @@ def admin_catalogue():
 
 
 # ---------------------------------------------------------------------------
+# ICT admin: user audit, email templates, deleting applications and directors
+# ---------------------------------------------------------------------------
+
+# What admins do on applications (recorded in each application's history) that belongs in the user audit.
+ADMIN_EVENT_ACTIONS = ["assigned", "unassigned", "status_changed", "review_updated", "document_viewed",
+                       "document_replaced", "documents_downloaded", "history_exported", "account_activated",
+                       "account_deactivated", "registration_certificate_issued", "director_removed"]
+ADMIN_ACTIVITY_LABELS = {**AUDIT_ACTIONS, **{action: EVENT_LABELS[action] for action in ADMIN_EVENT_ACTIONS}}
+AUDIT_PER_PAGE = 50
+
+
+class ListPagination:
+    """The bits of Flask-SQLAlchemy's Pagination that the pagination macro uses, for a hand-built query."""
+
+    def __init__(self, items, page, per_page, total):
+        self.items, self.page, self.per_page, self.total = items, page, per_page, total
+        self.pages = max(1, -(-total // per_page))
+        self.has_prev, self.has_next = page > 1, page < self.pages
+        self.prev_num, self.next_num = page - 1, page + 1
+
+    def iter_pages(self, left_edge=1, right_edge=1, left_current=2, right_current=2):
+        last = 0
+        for number in range(1, self.pages + 1):
+            if (number <= left_edge or number > self.pages - right_edge
+                    or self.page - left_current <= number <= self.page + right_current):
+                if last + 1 != number:
+                    yield None
+                yield number
+                last = number
+
+
+def audit_filters(args):
+    dates = report_filters(args)
+    return {
+        "search": args.get("search", "").strip(),
+        "admin": args.get("admin", type=int) or "",
+        "action": args.get("action", "") if args.get("action") in ADMIN_ACTIVITY_LABELS else "",
+        "date_from": dates["date_from"],
+        "date_to": dates["date_to"],
+    }
+
+
+def admin_activity_query(filters):
+    """Everything admins have done, newest first: sign-ins, exports and ICT actions (AuditLog) together with their
+    actions on applications (ApplicationEvent). Supplier and system activity is left out."""
+    sign_ins = (select(AuditLog.created_at.label("created_at"), AuditLog.actor_id.label("actor_id"),
+                       AuditLog.actor_name.label("actor_name"), AuditLog.actor_email.label("actor_email"),
+                       AuditLog.action.label("action"), AuditLog.detail.label("detail"),
+                       AuditLog.ip_address.label("ip_address"), null().label("application_id"),
+                       literal("").label("company_name"))
+                .where(AuditLog.actor_type == "admin"))
+    on_applications = (select(ApplicationEvent.created_at, ApplicationEvent.actor_id, ApplicationEvent.actor_name,
+                              ApplicationEvent.actor_email, ApplicationEvent.action, ApplicationEvent.summary,
+                              ApplicationEvent.ip_address, ApplicationEvent.application_id, SupplierApplication.company_name)
+                       .join(SupplierApplication, ApplicationEvent.application_id == SupplierApplication.id)
+                       .where(ApplicationEvent.actor_type == "admin", ApplicationEvent.action.in_(ADMIN_EVENT_ACTIONS)))
+    if filters["search"]:
+        like = f"%{filters['search']}%"
+        sign_ins = sign_ins.where(DB.or_(AuditLog.actor_email.ilike(like), AuditLog.actor_name.ilike(like),
+                                         AuditLog.detail.ilike(like), AuditLog.ip_address.ilike(like)))
+        on_applications = on_applications.where(DB.or_(
+            ApplicationEvent.actor_email.ilike(like), ApplicationEvent.actor_name.ilike(like),
+            ApplicationEvent.summary.ilike(like), ApplicationEvent.ip_address.ilike(like),
+            SupplierApplication.company_name.ilike(like)))
+    if filters["admin"]:
+        sign_ins = sign_ins.where(AuditLog.actor_id == filters["admin"])
+        on_applications = on_applications.where(ApplicationEvent.actor_id == filters["admin"])
+    if filters["action"]:
+        sign_ins = sign_ins.where(AuditLog.action == filters["action"] if filters["action"] in AUDIT_ACTIONS else false())
+        on_applications = on_applications.where(ApplicationEvent.action == filters["action"])
+    if filters["date_from"]:
+        start = datetime.strptime(filters["date_from"], "%Y-%m-%d")
+        sign_ins = sign_ins.where(AuditLog.created_at >= start)
+        on_applications = on_applications.where(ApplicationEvent.created_at >= start)
+    if filters["date_to"]:
+        end = datetime.strptime(filters["date_to"], "%Y-%m-%d") + timedelta(days=1)
+        sign_ins = sign_ins.where(AuditLog.created_at < end)
+        on_applications = on_applications.where(ApplicationEvent.created_at < end)
+    return union_all(sign_ins, on_applications).subquery()
+
+
+def admin_activity_rows(filters, limit, offset=0):
+    activity = admin_activity_query(filters)
+    rows = DB.session.execute(select(activity).order_by(activity.c.created_at.desc()).limit(limit).offset(offset)).all()
+    total = DB.session.execute(select(func.count()).select_from(activity)).scalar()
+    return rows, total
+
+
+@app.route("/admin/ict/audit")
+@admin_required
+@admin_section("ict")
+def admin_user_audit():
+    view = "accounts" if request.args.get("view") == "accounts" else "activity"
+    filters = audit_filters(request.args)
+    page_args = {k: v for k, v in filters.items() if v}
+    page = max(1, request.args.get("page", 1, type=int))
+    rows, total = admin_activity_rows(filters, AUDIT_PER_PAGE, (page - 1) * AUDIT_PER_PAGE)
+    pagination = ListPagination(rows, page, AUDIT_PER_PAGE, total)
+
+    role_order = list(ADMIN_ROLES)
+    admins = sorted(Admin.query.all(), key=lambda a: (role_order.index(a.role) if a.role in role_order else 99,
+                                                      (a.name or a.email).lower()))
+    accounts = []
+    if view == "accounts":
+        last_login = dict(DB.session.query(AuditLog.actor_id, func.max(AuditLog.created_at))
+                          .filter(AuditLog.action == "admin_login").group_by(AuditLog.actor_id))
+        actions = dict(DB.session.query(ApplicationEvent.actor_id, func.count())
+                       .filter(ApplicationEvent.actor_type == "admin", ApplicationEvent.action.in_(ADMIN_EVENT_ACTIONS))
+                       .group_by(ApplicationEvent.actor_id))
+        accounts = [(a, last_login.get(a.id), actions.get(a.id, 0)) for a in admins]
+    selected_admin = next((a for a in admins if a.id == filters["admin"]), None)
+    return render_template(
+        "admin_user_audit.html", admin=get_current_admin(), view=view, entries=rows, pagination=pagination,
+        filters=filters, page_args=page_args, activity_labels=ADMIN_ACTIVITY_LABELS, accounts=accounts,
+        admins=admins, selected_admin=selected_admin,
+    )
+
+
+@app.route("/admin/ict/audit/export")
+@admin_required
+@admin_section("ict")
+def admin_user_audit_export():
+    filters = audit_filters(request.args)
+    rows, _ = admin_activity_rows(filters, 50000)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date & time (UTC)", "Admin", "Email", "Action", "Application", "Detail", "IP address"])
+    for row in rows:
+        writer.writerow([row.created_at.strftime("%Y-%m-%d %H:%M:%S") if row.created_at else "", row.actor_name,
+                         row.actor_email, ADMIN_ACTIVITY_LABELS.get(row.action, row.action),
+                         f"{row.company_name} (#{row.application_id})" if row.application_id else "",
+                         row.detail, row.ip_address])
+    audit("audit_exported", f"{len(rows)} rows")
+    DB.session.commit()
+    return Response("\ufeff" + output.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename=user_audit_{date.today().isoformat()}.csv"})
+
+
+@app.route("/admin/ict/emails")
+@admin_required
+@admin_section("ict")
+def admin_email_templates():
+    saved = {t.key: t for t in EmailTemplate.query.all()}
+    return render_template("admin_email_templates.html", admin=get_current_admin(), templates=EMAIL_TEMPLATES, saved=saved)
+
+
+def unknown_placeholders(key, *texts):
+    allowed = set(EMAIL_TEMPLATES[key]["placeholders"])
+    return sorted({name for text in texts for name in PLACEHOLDER_RE.findall(text)} - allowed)
+
+
+@app.route("/admin/ict/emails/<key>", methods=["GET", "POST"])
+@admin_required
+@admin_section("ict")
+def admin_email_template_edit(key):
+    if key not in EMAIL_TEMPLATES:
+        abort(404)
+    template = EMAIL_TEMPLATES[key]
+    saved = DB.session.get(EmailTemplate, key)
+    subject = saved.subject if saved else template["subject"]
+    body = saved.body if saved else template["body"]
+
+    if request.method == "POST":
+        subject = request.form.get("subject", "").strip()
+        body = request.form.get("body", "").strip()
+        error = None
+        if not subject or not body:
+            error = "Please enter both a subject and a message."
+        elif len(subject) > 200:
+            error = "The subject can be at most 200 characters."
+        elif unknown_placeholders(key, subject, body):
+            unknown = ", ".join("{" + name + "}" for name in unknown_placeholders(key, subject, body))
+            error = f"This email can't use {unknown}. Use only the placeholders listed."
+        if error:
+            flash(error, "error")
+        else:
+            me = get_current_admin()
+            if (subject, body) == (template["subject"], template["body"]):
+                if saved:
+                    DB.session.delete(saved)
+            elif saved:
+                saved.subject, saved.body, saved.updated_by = subject, body, me.email
+                saved.updated_at = utcnow()
+            else:
+                DB.session.add(EmailTemplate(key=key, subject=subject, body=body, updated_by=me.email))
+            audit("email_template_updated", template["name"])
+            DB.session.commit()
+            flash(f"“{template['name']}” saved. New emails use this text straight away.", "success")
+            return redirect(url_for("admin_email_template_edit", key=key))
+
+    samples = {name: example for name, (_, example) in template["placeholders"].items()}
+    preview = render_email(fill_placeholders(subject, samples), fill_placeholders(body, samples), "Jane Dube")
+    return render_template(
+        "admin_email_template_edit.html", admin=get_current_admin(), key=key, template=template, saved=saved,
+        subject=subject, body=body, preview=preview,
+    )
+
+
+@app.route("/admin/ict/emails/<key>/reset", methods=["POST"])
+@admin_required
+@admin_section("ict")
+def admin_email_template_reset(key):
+    if key not in EMAIL_TEMPLATES:
+        abort(404)
+    saved = DB.session.get(EmailTemplate, key)
+    if saved:
+        DB.session.delete(saved)
+        audit("email_template_reset", EMAIL_TEMPLATES[key]["name"])
+        DB.session.commit()
+    flash(f"“{EMAIL_TEMPLATES[key]['name']}” is back to the default text.", "success")
+    return redirect(url_for("admin_email_template_edit", key=key))
+
+
+@app.route("/admin/ict/applications/<int:application_id>/delete", methods=["POST"])
+@admin_required
+@admin_section("ict")
+def admin_delete_application(application_id):
+    application = DB.get_or_404(SupplierApplication, application_id)
+    if request.form.get("confirm_name", "").strip().lower() != (application.company_name or "").strip().lower():
+        flash("Type the company name exactly as shown to confirm the deletion.", "error")
+        return redirect(url_for("admin_application_detail", application_id=application.id))
+
+    supplier = get_application_supplier(application)
+    documents = SupplierDocument.query.filter_by(application_id=application.id).all()
+    detail = (f"{application.company_name} (#{application.id}, {status_label(application.status)}, {application.email}): "
+              f"{len(documents)} document(s), {len(application.directors)} director(s)")
+    for document in documents:
+        remove_upload(document.file_path)
+        DB.session.delete(document)
+    ApplicationEvent.query.filter_by(application_id=application.id).delete()
+    Notification.query.filter_by(related_application_id=application.id).update({"related_application_id": None})
+    DB.session.delete(application)  # directors and categories go with it (cascade)
+    DB.session.flush()
+    # A supplier with no application left can't stay active (their products would stay in the catalogue).
+    if supplier and supplier.active and not supplier_applications_query(supplier).first():
+        supplier.active = False
+        detail += "; supplier account deactivated"
+    audit("application_deleted", detail)
+    DB.session.commit()
+    flash(f"{application.company_name}'s application was deleted.", "success")
+    return redirect(url_for("admin_applications"))
+
+
+@app.route("/admin/ict/applications/<int:application_id>/directors/<int:director_id>/delete", methods=["POST"])
+@admin_required
+@admin_section("ict")
+def admin_delete_director(application_id, director_id):
+    application = DB.get_or_404(SupplierApplication, application_id)
+    director = DB.session.get(SupplierDirector, director_id)
+    if not director or director.application_id != application.id:
+        abort(404)
+    who = f"{director.initials_surname} ({director.role}, {director.id_number})"
+    DB.session.delete(director)
+    log_event(application, "director_removed", summary=f"Removed {director.initials_surname}",
+              changes=[{"field": "Director / shareholder", "old": who, "new": ""}])
+    audit("director_deleted", f"{who} from {application.company_name} (#{application.id})")
+    DB.session.commit()
+    flash(f"{director.initials_surname} was removed from {application.company_name}'s application.", "success")
+    return redirect(url_for("admin_application_detail", application_id=application.id))
+
+
+# ---------------------------------------------------------------------------
 # Certificate expiry: reminders, deactivation and renewal
 # ---------------------------------------------------------------------------
 
@@ -3725,9 +4192,8 @@ def check_certificate_expiry(today=None):
             consequence = (" If it expires before you do, your supplier account will be deactivated until it is renewed."
                            if supplier and supplier.active else "")
             if supplier:
-                notify_supplier(supplier, "Certificate expiring soon",
-                                f"Your {name} for {application.company_name} expires {when} ({expires}). "
-                                f"Please upload the renewed certificate in the supplier portal.{consequence}",
+                notify_supplier(supplier, *email_text("certificate_expiring", certificate=name, company_name=application.company_name,
+                                                      when=when, expiry_date=expires, consequence=consequence),
                                 application, action_url=renew_url, action_label="Upload renewed certificate")
             log_event(application, "certificate_reminder", summary=f"{document.document_type}: expires {expires} ({notice}-day reminder)",
                       actor="system")
@@ -3744,10 +4210,8 @@ def check_certificate_expiry(today=None):
         log_event(application, "certificate_expired", summary=f"{document.document_type} expired on {expires}", actor="system")
         if supplier:
             notify_supplier(
-                supplier, "Certificate expired" + (" – account deactivated" if was_active else ""),
-                f"Your {name} for {application.company_name} expired on {expires}. "
-                + ("Your supplier account has been deactivated until you upload the renewed certificate."
-                   if was_active else "Please upload the renewed certificate to keep your application up to date."),
+                supplier, *email_text("certificate_expired_deactivated" if was_active else "certificate_expired",
+                                      certificate=name, company_name=application.company_name, expiry_date=expires),
                 application, action_url=renew_url, action_label="Upload renewed certificate")
         notify_admins(f"Certificate expired: {application.company_name}",
                       f"{application.company_name}'s {name} expired on {expires}."
@@ -3768,8 +4232,7 @@ def restore_after_renewal(application, supplier):
     supplier.active = True
     log_event(application, "account_activated", summary="Supplier account reactivated after certificate renewal",
               changes=[{"field": "Account", "old": "Inactive", "new": "Active"}])
-    notify_supplier(supplier, "Account reactivated",
-                    "Thank you for uploading your renewed certificate. Your supplier account is active again.", application)
+    notify_supplier(supplier, *email_text("account_reactivated"), application)
     return True
 
 
@@ -4079,6 +4542,895 @@ def init_database():
 
 
 # ---------------------------------------------------------------------------
+# Cebelihle: the portal's built-in assistant, for suppliers and admins
+# ---------------------------------------------------------------------------
+# Rule-based: each question is matched by keywords against a fixed knowledge base about the portal (no AI service).
+# Answers about "my" records are looked up for whoever is signed in: a supplier only ever sees their own account,
+# and an admin only gets answers for the sections their role can open.
+
+CHAT_MAX_MESSAGE_CHARS = 500
+CONTACT_DETAILS = "the Call Centre on 031 208 9102 or supplier_onboarding@icebolethu.co.za"
+REFER = f"The procurement team will need to help you with that. Please contact {CONTACT_DETAILS}."
+chat_limiter = RateLimiter(limit=60, window_seconds=10 * 60)
+
+
+def _fmt_date(value):
+    return value.strftime("%d %b %Y") if value else ""
+
+
+def _bullets(items):
+    return "\n".join(f"- {item}" for item in items)
+
+
+def _chat_words(text):
+    text = (text or "").lower().replace("b-bbee", "bbbee").replace("'", "").replace("’", "")
+    return " " + re.sub(r"[^a-z0-9#]+", " ", text).strip() + " "
+
+
+class Intent:
+    """One thing Cebelihle knows. `answer` is text, or a function of the signed-in user/admin returning text."""
+
+    def __init__(self, key, keywords, answer, section=None, suggestions=(), with_message=False):
+        self.key = key
+        self.with_message = with_message  # answer(who, message) instead of answer(who)
+        self.keywords = [_chat_words(k).strip() for k in keywords]
+        self.answer = answer
+        self.section = section          # admin section the role needs, if any
+        self.suggestions = list(suggestions)
+
+    def score(self, words):
+        # Longer phrases are more specific, so they count for more.
+        return sum(len(k.split()) for k in self.keywords if f" {k} " in words)
+
+    def reply(self, who, message=""):
+        if not callable(self.answer):
+            return self.answer
+        return self.answer(who, message) if self.with_message else self.answer(who)
+
+
+# ---- Supplier answers that read the supplier's own records ----
+
+def _supplier_application(user):
+    return get_user_application(user)
+
+
+def _answer_my_status(user):
+    application = _supplier_application(user)
+    if not application:
+        return ("You haven't submitted an application yet. Start at /onboarding/profile: it takes 4 steps "
+                "(company profile, category, documents, review).")
+    status = application.status
+    lines = [f"Your application for **{application.company_name}** is **{status_label(status)}** "
+             f"(submitted {_fmt_date(application.created_at)})."]
+    next_steps = {
+        "submitted": "It's waiting for the procurement team to review it. You'll be notified when the status changes.",
+        "pending_review": "It's waiting for the procurement team to review it. You'll be notified when the status changes.",
+        "under_review": "The procurement team is reviewing it now. You'll be notified when there's a decision.",
+        "returned_for_update": f"Please fix what the comments ask for, then save and resubmit at /applications/{application.id}/edit.",
+        "approved": "Congratulations, you're an approved supplier. Keep your certificates up to date and list your products at /inventory.",
+        "on_file": "Your documents and information are in order. We'll keep your details on file and contact you when your services are needed.",
+        "declined": f"If your circumstances change, you can edit and resubmit at /applications/{application.id}/edit.",
+    }
+    lines.append(next_steps.get(status, ""))
+    if application.review_comments and status in {"returned_for_update", "declined", "on_file", "under_review", "approved"}:
+        lines.append(f"Comments from the procurement team: “{application.review_comments}”")
+    return "\n".join(line for line in lines if line)
+
+
+def _answer_my_documents(user):
+    application = _supplier_application(user)
+    documents = documents_for_application(application, user) if application else pending_documents(user)
+    missing = missing_required_documents(documents)
+    if not missing:
+        return ("All 7 required documents are uploaded. "
+                + (f"You can replace a document at /applications/{application.id}/edit." if application
+                   else "You can submit your application at /onboarding/review."))
+    where = f"/applications/{application.id}/edit" if application else "/onboarding/documents"
+    return f"You still need to upload {len(missing)} required document(s):\n{_bullets(missing)}\nUpload them at {where} (PDF only)."
+
+
+def _answer_my_certificates(user):
+    application = _supplier_application(user)
+    documents = [d for d in (documents_for_application(application, user) if application else [])
+                 if d.document_type in DATED_DOCUMENTS and d.expiry_date]
+    general = ("Reminders are sent 30 and 7 days before your SARS VAT or B-BBEE certificate expires. If one expires, "
+               "your account is deactivated until you upload the renewed certificate at /certificates, which "
+               "reactivates it automatically.")
+    if not documents:
+        return general
+    state_words = {"expired": "**expired**", "expiring": "expires soon", "valid": "valid"}
+    rows = [f"{DATED_DOCUMENTS[d.document_type][:1].upper()}{DATED_DOCUMENTS[d.document_type][1:]}: {state_words.get(d.expiry_state, '')} "
+            f"(expiry date {_fmt_date(d.expiry_date)})" for d in documents]
+    return "Your certificates:\n" + _bullets(rows) + "\n" + general
+
+
+def _answer_my_account(user):
+    application = _supplier_application(user)
+    if user.active:
+        return (f"Your supplier account ({user.supplier_id}) is **active**. You can manage your products at /inventory "
+                "and view your registration certificate at /certificate.")
+    if application and application.expiry_suspended:
+        return ("Your account is **inactive** because a certificate expired. Upload the renewed certificate at "
+                "/certificates and your account will be reactivated automatically.")
+    if application and application.status in {"submitted", "pending_review", "under_review", "returned_for_update"}:
+        return "Your account becomes active once your application is approved. " + _answer_my_status(user)
+    if not application:
+        return "Your account becomes active once your application is approved. Start your application at /onboarding/profile."
+    return f"Your supplier account is **inactive**. {REFER}"
+
+
+def _answer_registration_certificate(user):
+    application = _supplier_application(user)
+    if application and application.status == "approved":
+        valid = certificate_details(application, user)["valid_until"]
+        return (f"Your Certificate of Supplier Registration is at /certificate (valid until {_fmt_date(valid)}). "
+                "You can print it or save it as a PDF.")
+    return ("The Certificate of Supplier Registration is issued when your application is approved. "
+            "It's valid for 12 months and appears at /certificate.")
+
+
+def _answer_my_products(user):
+    if not user.active:
+        return "Your inventory becomes available once your application is approved and your account is active."
+    total = Product.query.filter_by(user_id=user.id, is_archived=False).count()
+    listed = Product.query.filter_by(user_id=user.id, is_archived=False, is_listed=True).count()
+    return (f"You have {total} product(s) in your inventory, {listed} of them listed for the procurement team. "
+            "Add or update products, prices, stock and lead times at /inventory.")
+
+
+def _answer_why_decision(user):
+    application = _supplier_application(user)
+    comments = (f"The comments from the procurement team are: “{application.review_comments}” "
+                if application and application.review_comments else "")
+    return comments + f"For more detail about a decision, {REFER[0].lower()}{REFER[1:]}"
+
+
+# ---- Admin answers that read live data (only for roles that can open the section) ----
+
+def _answer_admin_counts(_admin):
+    counts = dict(DB.session.query(SupplierApplication.status, func.count()).group_by(SupplierApplication.status).all())
+    unassigned = SupplierApplication.query.filter(SupplierApplication.status.in_(AWAITING_REVIEW_STATUSES),
+                                                  SupplierApplication.assigned_admin_id.is_(None)).count()
+    rows = [f"{status_label(s)}: {counts.get(s, 0)}" for s in STATUSES if s != "draft"]
+    return ("Applications by status:\n" + _bullets(rows)
+            + f"\n**{sum(counts.get(s, 0) for s in AWAITING_REVIEW_STATUSES)}** are awaiting review, "
+              f"{unassigned} of them unassigned. Open them at /admin/applications.")
+
+
+def _answer_admin_expiring(_admin):
+    cutoff = date.today() + timedelta(days=EXPIRY_WARNING_DAYS)
+    rows = (DB.session.query(SupplierDocument, SupplierApplication)
+            .join(SupplierApplication, SupplierDocument.application_id == SupplierApplication.id)
+            .filter(SupplierDocument.document_type.in_(list(DATED_DOCUMENTS)), SupplierDocument.expiry_date.isnot(None),
+                    SupplierDocument.expiry_date <= cutoff, SupplierApplication.status.in_(list(EXPIRY_WATCHED_STATUSES)))
+            .order_by(SupplierDocument.expiry_date).limit(15).all())
+    if not rows:
+        return f"No VAT or B-BBEE certificates have expired or expire in the next {EXPIRY_WARNING_DAYS} days."
+    items = [f"{a.company_name} (#{a.id}): {DATED_DOCUMENTS[d.document_type]} "
+             f"{'expired' if d.expiry_state == 'expired' else 'expires'} {_fmt_date(d.expiry_date)}" for d, a in rows]
+    return f"Expired or expiring within {EXPIRY_WARNING_DAYS} days:\n" + _bullets(items)
+
+
+def _answer_admin_suppliers(_admin):
+    active = User.query.filter_by(active=True).count()
+    return (f"There are **{active}** active supplier accounts out of {User.query.count()} registered. "
+            "See and filter them at /admin/suppliers.")
+
+
+def admin_application_reply(application_id):
+    application = DB.session.get(SupplierApplication, application_id)
+    if not application:
+        return f"There's no application #{application_id}."
+    owner = application.assigned_admin
+    flagged = director_matches([application]).get(application.id)
+    lines = [f"**{application.company_name}** (#{application.id}) is **{status_label(application.status)}**, "
+             f"submitted {_fmt_date(application.created_at)}.",
+             f"Category: {', '.join(application.category_names) or '—'}",
+             f"Assigned to: {(owner.name or owner.email) if owner else 'nobody yet'}",
+             f"Documents: {(application.documents_status or 'pending').title()}"]
+    if flagged:
+        lines.append("**Director match**: someone on this application is already on another supplier, so it can only be declined.")
+    lines.append(f"Open it at /admin/applications/{application.id}")
+    return "\n".join(lines)
+
+
+# Words people use for each supplier category, so "do you need caterers?" finds Catering.
+CATEGORY_WORDS = {
+    "Catering": ["catering", "caterer", "caterers", "food", "meals"],
+    "Body Storage, Cold-Room and other Burial Services": ["body storage", "cold room", "coldroom", "mortuary", "burial services"],
+    "Consulting": ["consulting", "consultant", "consultants", "consultancy"],
+    "Caskets and Tombstones": ["casket", "caskets", "coffin", "coffins", "tombstone", "tombstones"],
+    "Livestock": ["livestock", "cattle", "cows", "goats", "sheep"],
+    "Flowers, crosses and plaques": ["flowers", "florist", "crosses", "plaques", "wreath", "wreaths"],
+    "ICT Equipment, Media and Electronic Devices": ["ict", "computers", "laptops", "electronics", "it equipment", "media"],
+    "Tents, Draping and Décor": ["tents", "tent", "draping", "decor", "decoration", "chairs"],
+    "Funeral Vehicles (Hearse / Family Car)": ["hearse", "hearses", "family car", "funeral vehicles", "vehicles", "cars"],
+    "Lowering Device": ["lowering device", "lowering devices"],
+    "Mobile toilet": ["mobile toilet", "mobile toilets", "toilets", "portable toilets"],
+}
+CATEGORY_KEYWORDS = sorted({word for words in CATEGORY_WORDS.values() for word in words})
+
+
+def _answer_category_question(_user, message):
+    words = _chat_words(message)
+    found = [value for value, keys in CATEGORY_WORDS.items() if any(f" {_chat_words(k).strip()} " in words for k in keys)]
+    if not found:
+        return "Supplier categories:\n" + _bullets(c["value"] for c in SUPPLIER_CATEGORIES)
+    groups = {c["value"]: c["group"].title() for c in SUPPLIER_CATEGORIES}
+    names = " and ".join(f"**{value}** ({groups.get(value, '')})" for value in found)
+    return (f"Yes, {names} {'is a supplier category' if len(found) == 1 else 'are supplier categories'}. Choose it on "
+            "step 2 of your application (/onboarding/category). If what you supply isn't listed, choose **Other** "
+            "and describe it.")
+
+
+def _answer_my_application_page(user):
+    application = _supplier_application(user)
+    if not application:
+        return "You haven't submitted an application yet. Start at /onboarding/profile."
+    return (f"Your submitted application, with all its details and documents, is at /applications/{application.id}. "
+            "All your applications are listed at /apps.")
+
+
+def _answer_admin_my_queue(admin):
+    rows = (SupplierApplication.query.filter(SupplierApplication.assigned_admin_id == admin.id,
+                                             SupplierApplication.status.in_(AWAITING_REVIEW_STATUSES + ["returned_for_update"]))
+            .order_by(SupplierApplication.created_at).limit(15).all())
+    if not rows:
+        return "You have no open applications assigned to you. Unassigned ones are on /admin/applications."
+    return (f"You have {len(rows)} open application(s) assigned to you:\n"
+            + _bullets(f"{a.company_name} (#{a.id}): {status_label(a.status)}" for a in rows))
+
+
+def _answer_admin_unassigned(_admin):
+    rows = (SupplierApplication.query.filter(SupplierApplication.status.in_(AWAITING_REVIEW_STATUSES),
+                                             SupplierApplication.assigned_admin_id.is_(None))
+            .order_by(SupplierApplication.created_at).limit(15).all())
+    if not rows:
+        return "Every application awaiting review is assigned."
+    return ("Awaiting review and unassigned (oldest first):\n"
+            + _bullets(f"{a.company_name} (#{a.id}), submitted {_fmt_date(a.created_at)}" for a in rows))
+
+
+def _answer_admin_recent(_admin):
+    since = utcnow() - timedelta(days=30)
+    submitted = SupplierApplication.query.filter(SupplierApplication.status != "draft",
+                                                 SupplierApplication.created_at >= since).count()
+    approved = SupplierApplication.query.filter(SupplierApplication.approved_at >= since).count()
+    signups = User.query.filter(User.created_at >= since).count()
+    return (f"In the last 30 days: **{submitted}** applications submitted, **{approved}** approved and **{signups}** "
+            "new supplier sign-ups. For other periods, see /admin/reports.")
+
+
+def _answer_admin_catalogue_count(_admin):
+    products = catalogue_query().count()
+    suppliers = catalogue_query().with_entities(Product.user_id).distinct().count()
+    return f"The catalogue has **{products}** listed products from {suppliers} active supplier(s). Browse it at /admin/catalogue."
+
+
+SUPPLIER_SUGGESTIONS = ["What's my application status?", "Which documents are missing?", "When do my certificates expire?",
+                        "How do I add products?"]
+ADMIN_SUGGESTIONS = ["How many applications are waiting?", "How do I assign an application?", "What is a director match?",
+                     "What can each role do?"]
+
+SUPPLIER_INTENTS = [
+    Intent("greeting", ["hi", "hii", "hie", "hai", "hey", "hello", "helo", "hallo", "hola", "yo", "sawubona", "molo", "dumela",
+                        "heita", "howzit", "unjani", "yebo", "hi there", "good day", "good morning", "good afternoon",
+                        "good evening", "morning", "afternoon", "how are you", "how are you doing", "help"],
+           "Hi, I'm Cebelihle, how can I help you?", suggestions=SUPPLIER_SUGGESTIONS),
+    Intent("thanks", ["thanks", "thank you", "ngiyabonga", "enkosi", "great", "perfect"],
+           "You're welcome! Is there anything else I can help with?"),
+    Intent("my_status", ["status", "my application", "application status", "progress", "where is my application",
+                         "approved yet", "any update", "been reviewed", "outcome", "result"],
+           _answer_my_status, suggestions=["Which documents are missing?", "How long does a review take?"]),
+    Intent("missing_documents", ["missing", "outstanding", "documents missing", "documents are missing",
+                                 "which documents are missing", "any documents missing", "still need", "not uploaded",
+                                 "what documents do i need", "my documents"], _answer_my_documents),
+    Intent("required_documents", ["required documents", "which documents", "what documents", "documents required",
+                                  "documents needed", "list of documents", "what must i upload"],
+           "These 7 documents are required (PDF only):\n" + _bullets(REQUIRED_DOCUMENTS)
+           + "\nYou can also add a company profile and other supporting documents. Upload them on step 3, /onboarding/documents.",
+           suggestions=["Which documents are missing?", "Where do I get the declaration form?"]),
+    Intent("certificates", ["certificate", "expire", "expiry", "expired", "expires", "renew", "renewal", "vat certificate",
+                            "bbbee", "bee certificate", "certificate dates", "reminder"],
+           _answer_my_certificates, suggestions=["Is my account active?"]),
+    Intent("account", ["account active", "account inactive", "deactivated", "inactive", "is my account",
+                       "account status", "reactivate", "activate my account", "account disabled", "suspended"],
+           _answer_my_account),
+    Intent("registration_certificate", ["my certificate", "registration certificate", "certificate of registration", "supplier certificate",
+                                        "download certificate", "print certificate", "proof of registration"],
+           _answer_registration_certificate),
+    Intent("how_to_apply", ["how do i apply", "how to apply", "apply", "register as supplier", "start application",
+                            "steps", "onboarding", "become a supplier", "new application"],
+           "Applying takes 4 steps:\n"
+           "- **Company profile** (/onboarding/profile): company details, address, contact person and every director, "
+           "shareholder and owner, plus a company profile PDF or website.\n"
+           "- **Category** (/onboarding/category): what you supply.\n"
+           "- **Documents** (/onboarding/documents): the 7 required PDFs.\n"
+           "- **Review** (/onboarding/review): check everything, accept the Terms & Conditions and submit.",
+           suggestions=["Which documents are required?", "What categories are there?"]),
+    Intent("edit_application", ["edit", "edit my application", "change my application", "update my application", "resubmit", "correct",
+                                "fix my application", "make changes", "replace document", "upload again"],
+           "You can edit your application while it's submitted, pending review, under review, returned for update or "
+           "declined: open it from /apps and choose Edit. If it was returned or declined, saving resubmits it for "
+           "review. Once it's approved or on file, the details are locked. " + REFER),
+    Intent("categories", ["category", "categories", "what do you buy", "goods", "services", "rentals", "what can i supply"],
+           "Supplier categories:\n" + _bullets(c["value"] for c in SUPPLIER_CATEGORIES)
+           + "\nYou choose one on step 2, /onboarding/category."),
+    Intent("inventory", ["inventory", "products", "add products", "add a product", "list products", "prices", "price",
+                         "stock", "catalogue", "catalog", "lead time", "my products"],
+           _answer_my_products, suggestions=["How do orders work?"]),
+    Intent("orders", ["order", "orders", "get an order", "get orders", "get work", "purchase order", "payment", "paid", "invoice", "contract", "tender",
+                      "quote", "quotation", "business from you", "when will i get work"],
+           "Orders aren't placed in the portal. Icebolethu's procurement team uses your listed inventory to compare "
+           "suppliers and contacts you directly when they need your goods or services. For orders, payments, invoices "
+           f"or contracts, please contact {CONTACT_DETAILS}."),
+    Intent("password", ["password", "forgot password", "reset password", "change password", "cant log in",
+                        "can't log in", "cannot login", "login", "log in", "sign in"],
+           "To reset a forgotten password, use /forgot-password: we email you a link that works for one hour. "
+           "If you're signed in, change your password at /settings. Never share your password with anyone, "
+           "including Icebolethu staff."),
+    Intent("verification_code", ["verification code", "code", "otp", "didnt get the code", "no code", "code expired",
+                                 "one time pin"],
+           "Every time you sign in, we email you a 6-digit code that's valid for 10 minutes. If it hasn't arrived, "
+           "check your spam folder and use **Resend code** (you can resend after 30 seconds). After 5 wrong codes "
+           "you'll need to log in again."),
+    Intent("contact_details", ["contact details", "update my details", "change phone", "change email", "phone number",
+                               "contact person", "settings"],
+           "Update your phone number and contact details at /settings. To change your login email, " + REFER[0].lower()
+           + REFER[1:]),
+    Intent("contact", ["contact", "speak to someone", "call", "phone you", "email you", "human", "person", "agent",
+                       "support", "complain", "complaint"],
+           f"You can reach the supplier onboarding team at {CONTACT_DETAILS}."),
+    Intent("terms", ["terms", "conditions", "terms and conditions", "t&c", "ts and cs"],
+           "There are two sets of terms: the Portal Terms (/terms), which you accept when you sign up or log in, and "
+           "the Supplier Application Terms (/application-terms), which you accept before you submit an application."),
+    Intent("declaration", ["declaration", "declaration form", "declaration of interest", "conflict of interest"],
+           "The Declaration of Interest form is one of the 7 required documents. Download it on the documents step "
+           "(/onboarding/documents), fill it in and sign it, then upload it as a PDF. Declare any relationship with "
+           "Icebolethu Group or its staff."),
+    Intent("file_format", ["pdf", "file type", "format", "file size", "too big", "upload error", "upload failed",
+                           "word document", "jpg", "photo", "scan"],
+           "Documents must be PDF files of up to 25 MB each. If you have a photo or Word document, save or scan it as a "
+           "PDF first. Make sure it's clear and complete."),
+    Intent("directors", ["director", "directors", "shareholder", "owner", "id number", "already linked",
+                         "another supplier", "linked to another"],
+           "List every director, shareholder and owner on step 1 with their ID or passport number. A person may only "
+           "be part of one supplier on the portal. If you have a question about a director or shareholder, "
+           + REFER[0].lower() + REFER[1:]),
+    Intent("review_time", ["how long", "when will", "timeline", "how many days", "waiting", "taking long", "still pending"],
+           "Each application is reviewed by the procurement team and there's no fixed timeline. You'll get an email "
+           f"and a notification as soon as the status changes. If you've been waiting a long time, contact {CONTACT_DETAILS}."),
+    Intent("why_decision", ["why declined", "why was i declined", "why was my application declined",
+                            "why was my application rejected", "application declined", "application rejected", "why rejected", "rejected", "declined", "reason",
+                            "why returned", "why on file", "unsuccessful", "appeal", "dispute"], _answer_why_decision),
+    Intent("statuses", ["what does pending review mean", "what does on file mean", "on file", "returned for update",
+                        "under review", "pending review", "meaning", "what does it mean"],
+           "What the statuses mean:\n"
+           "- **Pending review**: waiting for the procurement team.\n"
+           "- **Under review**: being reviewed now.\n"
+           "- **Returned for update**: fix what the comments ask for and resubmit.\n"
+           "- **Approved**: you're a registered supplier, your account is active.\n"
+           "- **On file**: everything is in order; we'll contact you when your services are needed.\n"
+           "- **Declined**: not successful; you may edit and resubmit if things change."),
+    Intent("notifications", ["notification", "notifications", "emails", "didnt get an email", "no email", "messages"],
+           "All updates about your application are emailed to you and shown at /notifications. Check your spam folder "
+           "if you're missing emails from the portal."),
+    Intent("sensitive_banking", ["bank", "banking", "bank details", "bank account", "change bank"],
+           "For your security, banking details can't be discussed or changed here. Upload a new bank confirmation "
+           f"letter (not older than 3 months) only when asked, and contact {CONTACT_DETAILS} to change banking details."),
+    Intent("sensitive_privacy", ["popia", "delete my data", "my information", "privacy", "personal information",
+                                 "close my account", "delete my account"],
+           f"For privacy or data requests, please contact {CONTACT_DETAILS}. You can read how we use your information "
+           "in the Portal Terms at /terms."),
+    Intent("sensitive_security", ["hacked", "fraud", "scam", "someone else", "suspicious", "phishing", "stolen"],
+           "If you think your account has been used by someone else, change your password at /settings straight away "
+           f"and contact {CONTACT_DETAILS}. Icebolethu staff will never ask for your password or verification code."),
+    Intent("other_suppliers", ["other suppliers", "competitor", "who else", "other companies", "how many suppliers"],
+           "I can only help with your own account, so I can't share information about other suppliers."),
+    # ---- Frequently asked questions ----
+    Intent("bot_identity", ["who are you", "are you a robot", "are you human", "are you a bot", "your name",
+                            "what is cebelihle", "who is cebelihle", "bot"],
+           "I'm Cebelihle, the Supplier Portal's assistant. I answer common questions about the portal and about your "
+           f"own application and account. For anything I can't help with, contact {CONTACT_DETAILS}."),
+    Intent("what_can_you_do", ["what can you do", "what can you help", "how can you help", "options", "menu",
+                               "what do you know"],
+           "I can help with:\n- Your application status, missing documents and certificate dates\n- Applying, editing "
+           "and resubmitting\n- Required documents and what counts as each one\n- Your account, password and "
+           "verification codes\n- Your inventory and how orders work\n- Who to contact for anything else",
+           suggestions=SUPPLIER_SUGGESTIONS),
+    Intent("bye", ["bye", "goodbye", "see you", "thats all", "that is all", "no thanks", "cheers"],
+           "Goodbye! Come back any time you have a question about the portal."),
+    Intent("cost", ["cost", "fee", "fees", "free", "pay to register", "registration fee", "how much does it cost",
+                    "charge", "pay anything", "have to pay", "do i pay", "pay", "payment to register"],
+           "There's no fee to register or apply on the Supplier Portal. Icebolethu Group will never ask you to pay to "
+           f"be registered or approved. If anyone asks you for money in Icebolethu's name, please report it to {CONTACT_DETAILS}."),
+    Intent("about_icebolethu", ["who is icebolethu", "about icebolethu", "what does icebolethu do", "icebolethu group",
+                                "about the company", "what is igsp", "what is this portal"],
+           "Icebolethu Group is a South African funeral services and financial services provider (FSP45714). The "
+           "Icebolethu Group Supplier Portal (IGSP) is where businesses register to supply goods and services to the group."),
+    Intent("office_address", ["office", "head office", "where are you", "physical address of icebolethu", "visit you",
+                              "your address", "branch", "johannesburg office", "durban office"],
+           "Icebolethu Group's offices:\n- **Head office**: 277 Umbilo Road, Congella, Durban, 4013\n- **Johannesburg**: "
+           f"387 Surrey Avenue, Ferndale, Randburg, 2194\nFor supplier questions, contact {CONTACT_DETAILS}."),
+    Intent("vat_registration", ["vat", "vat registered", "not vat registered", "no vat", "dont have vat",
+                                "vat number", "vat vendor"],
+           "The SARS VAT certificate is one of the 7 required documents, and you enter its issue and expiry dates "
+           f"when you upload it. If your business isn't VAT registered, please contact {CONTACT_DETAILS} before you apply."),
+    Intent("bbbee", ["bbbee certificate", "no bbbee", "dont have bbbee", "affidavit", "sworn affidavit",
+                     "accountant letter", "letter from accountant", "bee status", "bbbee level", "bee level",
+                     "dont have a bbbee", "no bbbee certificate", "without bbbee"],
+           "For B-BBEE you can upload any one of these: a valid B-BBEE certificate, a letter from your accountant, or "
+           "a sworn affidavit. Enter its issue and expiry dates when you upload it, and renew it before it expires."),
+    Intent("certified_id", ["certified", "certify", "certified copy", "certified copies", "certified id", "id copies",
+                            "id copy", "commissioner of oaths"],
+           "Upload certified copies of the ID documents of **all** directors as one PDF. Copies can be certified at a "
+           "police station or by a commissioner of oaths. Directors who aren't South African can use their passport."),
+    Intent("foreign_directors", ["foreign", "foreigner", "is a foreigner", "foreign director", "foreign national", "not south african", "passport",
+                                 "nationality", "non south african"],
+           "Directors, shareholders and owners who aren't South African can be listed with their passport number and "
+           "nationality on step 1, and you upload certified copies of their passports with the ID documents."),
+    Intent("proof_of_address", ["proof of address", "proof of residence", "utility bill", "municipal account",
+                                "company address proof", "residential address", "lease agreement"],
+           "Upload a document that proves the company's address, such as a municipal or utility account or a lease "
+           "agreement. It must not be older than 3 months."),
+    Intent("bank_letter", ["bank letter", "bank confirmation", "confirmation of bank account", "stamped letter",
+                           "bank confirmation letter"],
+           "Upload a letter from your bank confirming the account is in your business's name. It must not be older "
+           "than 3 months. For your security, I can't discuss banking details: to change them, contact "
+           f"{CONTACT_DETAILS}."),
+    Intent("cipc", ["cipc", "company registration document", "registration document", "cor14", "cor 14",
+                    "sole proprietor", "not a registered company", "registered company", "pty ltd", "close corporation"],
+           "The CIPC company registration document is one of the 7 required documents, and the registration number "
+           f"goes on step 1. If your business isn't registered with CIPC, please contact {CONTACT_DETAILS} before you apply."),
+    Intent("company_profile", ["company profile", "website", "no website", "profile document", "brochure"],
+           "On step 1 you either upload your company profile as a PDF or enter your company website. You need at "
+           "least one of the two."),
+    Intent("one_category", ["more than one category", "multiple categories", "two categories", "several categories",
+                            "change category", "change my category", "wrong category"],
+           "Each application has one supplier category. If yours isn't listed, choose **Other** and describe it. To "
+           "change the category, edit your application from /apps while it can still be edited."),
+    Intent("save_progress", ["save", "continue later", "save my progress", "come back later", "lost my information",
+                             "lost my details", "draft", "start over", "information disappeared"],
+           "Documents you upload are saved straight away. Details you type on the application steps are kept while "
+           "you're signed in (up to 8 hours), but signing out clears them, so try to finish and submit in one sitting."),
+    Intent("multiple_accounts", ["second account", "another account", "two accounts", "multiple accounts",
+                                 "more than one application", "second application", "another company", "two companies"],
+           "Each account can hold one supplier application. To register a different company, sign up with a "
+           "different email address. Remember that a director, shareholder or owner may only be part of one supplier."),
+    Intent("users_per_company", ["add a user", "another user", "colleague", "share login", "multiple users",
+                                 "staff access", "my staff", "share my account", "colleague have a login",
+                                 "have a login", "own login", "second login"],
+           "Each supplier has one login. Don't share your password; if the person who manages your account changes, "
+           f"contact {CONTACT_DETAILS} to change the login email."),
+    Intent("supplier_id", ["supplier id", "supplier number", "vendor number", "igsp number", "my supplier id",
+                           "reference number"],
+           lambda user: f"Your supplier ID is **{user.supplier_id}**. It's shown on your dashboard and on your "
+                        "registration certificate. Quote it when you contact us."),
+    Intent("after_approval", ["after approval", "what happens next", "next steps", "now what", "i am approved",
+                              "what now", "i was approved", "been approved"],
+           "Once you're approved:\n- Your account is activated and your Certificate of Supplier Registration is ready "
+           "at /certificate\n- List your products and services with prices at /inventory\n- Keep your VAT and "
+           "B-BBEE certificates up to date at /certificates\n- The procurement team contacts you directly when they "
+           "need your goods or services"),
+    Intent("certificate_validity", ["valid for", "certificate valid", "is the certificate valid",
+                                    "how long is the certificate", "12 months", "certificate validity", "renew registration",
+                                    "registration expires", "annual", "every year"],
+           "The Certificate of Supplier Registration is valid for 12 months from approval. For questions about "
+           f"renewing your registration, contact {CONTACT_DETAILS}."),
+    Intent("hide_product", ["hide", "remove product", "delete product", "unlist", "out of stock", "no longer supply",
+                            "stop selling", "remove a product"],
+           "At /inventory you can hide a product from the procurement team (it stays in your inventory), delete it, "
+           "or set its quantity to 0 to show it's out of stock."),
+    Intent("who_sees_products", ["who can see my products", "who sees my products", "public", "visible",
+                                 "customers see", "who sees my prices", "can other suppliers see"],
+           "Only Icebolethu Group's procurement staff can see the products you list. They aren't public, and other "
+           "suppliers can't see them."),
+    Intent("data_safety", ["who can see my documents", "documents safe", "is my information safe", "data safe",
+                           "secure", "confidential", "who sees my documents"],
+           "Your documents are only available to authorised Icebolethu staff; they're never public, and every time "
+           "staff open one it's recorded. Your information is handled under POPIA, as explained in the Portal Terms "
+           "(/terms)."),
+    Intent("vat_prices", ["vat inclusive", "include vat", "including vat", "excl vat", "excluding vat",
+                          "prices include", "currency", "rand"],
+           "Enter prices in South African Rand. Say clearly in the product description whether the price includes VAT."),
+    Intent("units", ["unit", "units", "per day", "per hour", "per kg", "per event", "per litre"],
+           "You can price each product " + ", ".join(PRODUCT_UNITS) + "."),
+    Intent("too_many_attempts", ["too many", "too many attempts", "locked", "locked out", "blocked", "try again later",
+                                 "15 minutes", "wait 15"],
+           "After 10 wrong sign-in attempts, or 5 password reset requests, you need to wait 15 minutes before trying "
+           "again. If you've forgotten your password, use /forgot-password."),
+    Intent("session_expired", ["session expired", "logged out", "kicked out", "keeps logging me out", "timeout",
+                               "timed out"],
+           "You stay signed in for up to 8 hours. If you see “Your session expired”, refresh the page and try again; "
+           "you may need to sign in again."),
+    Intent("reset_email", ["reset email", "reset link", "link expired", "didnt get reset", "reset not working",
+                           "no reset email"],
+           "Password reset links work for one hour. Check your spam folder, and if the link has expired, request a "
+           "new one at /forgot-password."),
+    Intent("device_support", ["on my phone", "use my phone", "my phone", "smartphone", "mobile", "cellphone", "tablet", "browser", "download app", "an app",
+                              "not loading", "page not working", "website not working", "error", "something went wrong"],
+           "The portal works in any up-to-date web browser on a phone, tablet or computer; there's no app to "
+           "install. If a page isn't working, refresh it or try another browser. If it still fails, contact "
+           f"{CONTACT_DETAILS} and say what you were doing."),
+    Intent("withdraw", ["withdraw", "withdraw my application", "cancel my application", "cancel application", "stop my application",
+                        "delete my application", "remove my application"],
+           f"To withdraw or cancel your application, please contact {CONTACT_DETAILS}."),
+    Intent("reapply", ["reapply", "apply again", "second chance", "after declined", "after being declined"],
+           "If your application was declined, you can edit it and resubmit it for review from /apps when your "
+           "circumstances change."),
+    Intent("language", ["isizulu", "zulu", "help in", "in isizulu", "in zulu", "other language", "afrikaans", "language", "xhosa", "sesotho"],
+           f"The portal is in English. If you'd like help in another language, please contact {CONTACT_DETAILS}."),
+    Intent("notifications_read", ["mark as read", "unread", "bell", "notification bell"],
+           "The bell at the top shows new notifications. Open /notifications to read them all."),
+    Intent("dashboard", ["dashboard", "home page", "where do i start", "main page"],
+           "Your dashboard (/dashboard) shows your application status, next steps, certificate alerts and shortcuts "
+           "to everything else."),
+    Intent("provinces", ["provinces", "which areas", "outside kzn", "nationwide", "where must i be based",
+                         "johannesburg", "cape town", "other province"],
+           "Businesses from any of South Africa's 9 provinces can register. Your city and province help the "
+           "procurement team find suppliers close to where they need them."),
+    Intent("category_question", CATEGORY_KEYWORDS, _answer_category_question, with_message=True),
+    Intent("signup", ["sign up", "signup", "create an account", "create account", "register an account",
+                      "open an account", "new account", "how do i register"],
+           "Create your account at /signup with your company name, contact name, phone number, email and a password, "
+           "and accept the Portal Terms. We email you a 6-digit code to confirm your email, then you can start your "
+           "application at /onboarding/profile."),
+    Intent("password_rules", ["password rules", "password requirements", "strong password", "password must",
+                              "password not accepted", "weak password"],
+           "Choose a strong password you don't use anywhere else. If the portal doesn't accept it, the message on the "
+           "page says what's missing."),
+    Intent("wrong_email", ["wrong email", "typo in my email", "mistake in my email", "entered the wrong email",
+                           "change my login email", "change login email"],
+           f"Your login email can't be changed in the portal. Please contact {CONTACT_DETAILS} and we'll help."),
+    Intent("company_name_change", ["change company name", "company name changed", "new company name", "rename company",
+                                   "change trading name", "change registration number"],
+           "While your application can still be edited, change your company details at /apps (choose Edit). After "
+           f"approval, company details are locked: please contact {CONTACT_DETAILS}."),
+    Intent("certificate_dates", ["issue date", "expiry date", "which date", "what date", "dates on the certificate",
+                                 "no expiry date", "date of issue"],
+           "When you upload your SARS VAT certificate and your B-BBEE certificate, letter or affidavit, enter the issue "
+           "date and the expiry date as they appear on the document. If it doesn't show an expiry date, contact "
+           f"{CONTACT_DETAILS} for help."),
+    Intent("bbbee_expired", ["bbbee expired", "bbbee has expired", "new bbbee not ready", "waiting for bbbee",
+                             "waiting for new certificate", "renewal not ready"],
+           "Upload the renewed B-BBEE certificate, accountant's letter or sworn affidavit at /certificates as soon as "
+           "you have it; your account is reactivated automatically. If you're waiting for a new one, contact "
+           f"{CONTACT_DETAILS}."),
+    Intent("id_number_invalid", ["id number invalid", "invalid id", "id not accepted", "id number not accepted",
+                                 "checksum", "13 digits", "id number error", "passport number error", "id number is not accepted",
+                                 "not accepted", "id is wrong", "id number is invalid"],
+           "South African ID numbers must be the 13-digit number exactly as on the ID, starting with the date of birth "
+           "(YYMMDD). For someone who isn't South African, choose their nationality first and enter their passport "
+           "number (6–20 letters or digits)."),
+    Intent("add_directors", ["how many directors", "add a director", "add another director", "more directors",
+                             "remove a director", "remove director", "change directors", "add shareholder"],
+           "On step 1 you can add a row for every director, shareholder and owner, and remove rows you don't need. "
+           "After you've submitted, you can change them by editing your application from /apps while it can still be "
+           f"edited. After approval, contact {CONTACT_DETAILS}."),
+    Intent("view_application", ["view my application", "see my application", "my submitted application",
+                                "where is my application", "open my application", "print my application",
+                                "my applications"], _answer_my_application_page),
+    Intent("multiple_files", ["more than one file", "multiple files", "two files", "several pages", "combine",
+                              "merge pdf", "one pdf", "many pages", "separate files"],
+           "Each document slot takes one PDF. If a document has several pages or files (for example the ID copies of "
+           "all directors), combine them into one PDF before uploading. Use **Other supporting documents** for "
+           "anything extra."),
+    Intent("make_pdf", ["how do i make a pdf", "convert to pdf", "save as pdf", "scan to pdf", "how to scan",
+                        "create a pdf", "turn into pdf", "no scanner"],
+           "To make a PDF: in Word or most apps choose **Save as** or **Print** and pick PDF; on a phone, a scanner "
+           "app (or the scan option in your phone's notes or files app) saves photos of documents as a PDF."),
+    Intent("tax_number", ["tax number", "income tax", "tax reference", "tax pin", "tax clearance", "tax compliance",
+                          "sars pin"],
+           "Enter your company's tax number on step 1. The SARS VAT certificate is the SARS document you upload. For "
+           f"other tax compliance questions, contact {CONTACT_DETAILS}."),
+    Intent("primary_contact", ["primary contact", "contact person be different", "who should be the contact",
+                               "different contact", "someone else as contact",
+                               "contact persons role"],
+           "On step 1, give the person Icebolethu should contact about your business, their role and their contact "
+           "number and email. It can be someone other than the person who signed up."),
+    Intent("conflict_family", ["family member works", "relative works", "work at icebolethu", "employee of icebolethu",
+                               "i work for icebolethu", "know someone at icebolethu", "related to"],
+           "Declare any relationship between your business (or its directors and owners) and Icebolethu Group or its "
+           "staff on the Declaration of Interest form. Declaring it doesn't automatically disqualify you."),
+    Intent("gifts", ["gift", "gifts", "bribe", "kickback", "pay someone", "speed up my application", "fast track"],
+           "Icebolethu Group doesn't accept gifts, payments or favours in exchange for approval or orders, and "
+           "applications can't be fast-tracked. If anyone asks you for this, please report it to "
+           f"{CONTACT_DETAILS}."),
+    Intent("insurance", ["insurance", "public liability", "licence", "license", "permit", "health certificate",
+                         "roadworthy"],
+           "The portal asks for the 7 documents listed on step 3, and you can add any other licences or certificates "
+           "under **Other supporting documents**. For anything specific your category needs, contact "
+           f"{CONTACT_DETAILS}."),
+    Intent("delivery", ["delivery", "deliver", "lead time", "how fast", "turnaround", "collection"],
+           "For each product in your inventory you can set a lead time: how many days you need to supply it. Delivery "
+           "arrangements are agreed with the procurement team when they place an order."),
+    Intent("edit_product", ["edit product", "change price", "change a price", "change the price", "change my price", "update price", "update stock", "change a product",
+                            "edit a product", "update my products"],
+           "Open /inventory and choose **Edit** on the product to change its name, description, price, unit, "
+           "quantity or lead time."),
+    Intent("stock_quantity", ["quantity", "what quantity", "quantity for services", "how many in stock", "services quantity", "not tracked", "unlimited"],
+           "Quantity is optional. Leave it blank for services or anything you don't count (it shows as “not "
+           "tracked”), or enter how many you have; 0 shows as out of stock."),
+    Intent("what_is_bbbee", ["what is bbbee", "what is bee", "bbbee meaning", "broad based"],
+           "B-BBEE (Broad-Based Black Economic Empowerment) is South Africa's framework for measuring a business's "
+           "empowerment status. The portal asks for a valid B-BBEE certificate, an accountant's letter or a sworn affidavit."),
+    Intent("what_is_cipc", ["what is cipc", "cipc meaning"],
+           "CIPC is the Companies and Intellectual Property Commission, where South African companies are registered. "
+           "Your CIPC registration document shows your company's registration details."),
+    Intent("hours", ["hours", "open", "opening hours", "working hours", "weekend", "public holiday", "after hours"],
+           "The portal is available 24/7, so you can apply and update your details any time. For the Call Centre, "
+           "phone 031 208 9102 or email supplier_onboarding@icebolethu.co.za."),
+    Intent("whatsapp", ["whatsapp", "sms", "social media", "facebook", "telephone number", "email address for"],
+           f"You can reach the supplier onboarding team at {CONTACT_DETAILS}."),
+]
+
+ADMIN_INTENTS = [
+    Intent("greeting", ["hi", "hii", "hie", "hai", "hey", "hello", "helo", "hallo", "hola", "yo", "sawubona", "molo", "dumela",
+                        "heita", "howzit", "unjani", "yebo", "hi there", "good day", "good morning", "good afternoon",
+                        "good evening", "morning", "afternoon", "how are you", "how are you doing", "help"],
+           "Hi, I'm Cebelihle, how can I help you?", suggestions=ADMIN_SUGGESTIONS),
+    Intent("thanks", ["thanks", "thank you", "ngiyabonga", "great", "perfect"], "You're welcome!"),
+    Intent("counts", ["how many", "count", "numbers", "waiting", "awaiting review", "pending", "unassigned", "backlog",
+                      "summary", "overview", "statistics", "stats"], _answer_admin_counts, section="applications"),
+    Intent("expiring", ["expiring", "expire", "expired", "expiry", "certificates", "renewal", "renew"],
+           _answer_admin_expiring, section="applications"),
+    Intent("active_suppliers", ["active suppliers", "suppliers active", "how many suppliers", "supplier accounts"],
+           _answer_admin_suppliers, section="suppliers"),
+    Intent("assign", ["assign", "assigned", "take an application", "unassign", "release", "hand over", "reassign"],
+           "Open the application and click **Assign to me**. Only the assigned admin can record a decision. "
+           "To hand it back, use **Unassign**. A Procurement Team Lead or ICT Admin can also assign an application "
+           "to any Procurement Officer from the application page.", section="applications"),
+    Intent("decide", ["approve", "decline", "return", "on file", "decision", "review an application", "reject",
+                      "comment", "comments", "under review"],
+           "On an application assigned to you, use the **Review decision** panel:\n"
+           "- **Approve**: activates the supplier account and issues their registration certificate.\n"
+           "- **Accept & keep on file**: everything is in order but the services aren't needed yet.\n"
+           "- **Mark under review**, **Return to supplier** (needs a comment) or **Decline** (needs a comment).\n"
+           "The supplier is emailed about every change, and it's all recorded in the History.", section="applications"),
+    Intent("director_match", ["director match", "director", "shareholder", "linked to another", "already linked",
+                              "duplicate", "decline only", "greyed out", "can only be declined"],
+           "A **Director match** means a director, shareholder or owner on the application is already on another "
+           "supplier's earlier application. The supplier can still submit, but admins are notified, the application "
+           "is flagged, and it can only be declined (the other buttons are greyed out). The decline comment is "
+           "pre-filled for you. An ICT Admin can delete a wrongly captured director.", section="applications"),
+    Intent("documents", ["document", "documents", "view document", "replace document", "download all", "zip", "pdf"],
+           "On the application page you can open each PDF (every view is logged in the History), replace a document "
+           "on behalf of the supplier, and download all documents as one ZIP with **Download all**.", section="applications"),
+    Intent("history", ["history", "audit trail", "who changed", "log", "changes"],
+           "Every application has a **History** button showing who did what and when, including document views, "
+           "with a CSV export. Sign-ins and ICT actions are in the User audit (ICT Admins only).", section="applications"),
+    Intent("suppliers", ["supplier account", "deactivate", "activate", "suppliers page", "find a supplier", "suppliers"],
+           "Use /admin/suppliers to find suppliers and filter by account and application status. The assigned admin "
+           "can activate or deactivate a supplier's account from the application page; the supplier is notified.",
+           section="suppliers"),
+    Intent("catalogue", ["catalogue", "catalog", "products", "prices", "compare prices", "find a product", "location",
+                         "province", "find", "looking for", "who sells", "who supplies", "where can i get", "cheapest",
+                         *[p.lower() for p in PROVINCES]],
+           "The catalogue (/admin/catalogue) lists products from active approved suppliers. Filter by category, "
+           "supplier and province, compare prices, and contact the supplier directly by phone or email to order.",
+           section="catalogue"),
+    Intent("reports", ["report", "reports", "export", "csv", "date range", "excel"],
+           "Reports (/admin/reports) cover applications, suppliers, inventory and activity. Pick a period or a custom "
+           "date range, and export any report to CSV.", section="reports"),
+    Intent("user_audit", ["user audit", "audit", "sign ins", "failed login", "login history", "who logged in"],
+           "The User audit (/admin/ict/audit) shows everything admins do: sign-ins and failed sign-ins, work on "
+           "applications (assigning, decisions, comments, document views and downloads), exports and ICT actions, "
+           "with IP addresses. Pick an admin to see all their activity, and export it to CSV. Supplier activity "
+           "isn't included.",
+           section="ict"),
+    Intent("email_templates", ["email template", "email templates", "edit email", "change email text", "wording"],
+           "Edit the emails sent to suppliers at /admin/ict/emails. Use only the placeholders listed for each email, "
+           "check the preview, and use **Reset to default text** to undo.", section="ict"),
+    Intent("delete", ["delete application", "delete director", "remove director", "remove application", "delete"],
+           "ICT Admins can delete a director (bin icon in the directors table) or a whole application (the "
+           "**Delete application** card; type the company name to confirm) from the application page. Deleting an "
+           "application removes its documents and history and can't be undone.", section="ict"),
+    Intent("roles", ["roles", "role", "permissions", "access", "what can i do", "team lead", "officer", "manager", "ict"],
+           "Admin roles:\n"
+           "- **Procurement Team Lead**: everything, and assigns applications to officers.\n"
+           "- **Procurement Officer**: applications and suppliers.\n"
+           "- **Procurement Manager**: reports only.\n"
+           "- **ICT Admin**: everything except the dashboard, plus user audit, email templates and deleting records."),
+    Intent("new_admin", ["new admin", "add admin", "create admin", "add a user", "new user", "change role"],
+           "Admin accounts are created by IT with the command `flask --app app create-admin` (with --role super, "
+           "applications, reports or ict). Roles can be changed with `flask --app app set-admin-role`."),
+    Intent("supplier_process", ["how does the supplier apply", "supplier steps", "onboarding", "required documents",
+                                "what documents"],
+           "Suppliers sign up, then apply in 4 steps: company profile (with directors), category, the 7 required PDF "
+           "documents, and review (accepting the Supplier Application Terms). VAT and B-BBEE certificates carry "
+           "expiry dates; reminders go out 30 and 7 days before, and expiry deactivates the account until renewed."),
+    # ---- Frequently asked questions ----
+    Intent("bot_identity", ["who are you", "are you a robot", "are you a bot", "your name", "what is cebelihle", "bot"],
+           "I'm Cebelihle, the portal's built-in assistant. I explain how the admin portal works and can look up "
+           "applications by number, counts and expiring certificates for the sections your role can open."),
+    Intent("what_can_you_do", ["what can you do", "what can you help", "how can you help", "options", "menu"],
+           "Ask me things like:\n- “application 12”\n- “How many applications are waiting?”\n- “Which certificates "
+           "are expiring?”\n- “How do I assign an application?”\n- “What is a director match?”\n- “What can each "
+           "role do?”", suggestions=ADMIN_SUGGESTIONS),
+    Intent("bye", ["bye", "goodbye", "thats all", "no thanks", "cheers"], "Goodbye!"),
+    Intent("admin_password", ["admin password", "forgot my password", "change my password", "reset my password",
+                              "password"],
+           "Admin passwords are reset by IT with `flask --app app create-admin --email <your email>` (it resets the "
+           "password of an existing admin). If your Microsoft account uses the same email, you can also sign in with "
+           "Microsoft."),
+    Intent("microsoft_login", ["microsoft", "sso", "office 365", "single sign on", "outlook login"],
+           "On the admin sign-in page choose **Sign in with Microsoft**. It works when your Microsoft account email "
+           "matches your admin account."),
+    Intent("supplier_password", ["supplier password", "supplier forgot", "supplier cant log in", "supplier locked out",
+                                 "supplier login", "supplier cannot sign in", "supplier code"],
+           "Suppliers reset their own password at /forgot-password; admins can't see or set supplier passwords. Every "
+           "supplier sign-in needs a 6-digit code emailed to them (valid 10 minutes). After 10 wrong attempts they "
+           "must wait 15 minutes."),
+    Intent("supplier_emails", ["supplier didnt get email", "emails not sending", "email not received",
+                               "notification email", "supplier not getting emails", "not getting emails",
+                               "getting emails", "not receiving emails"],
+           "Suppliers are emailed automatically at every status change and also see each update at /notifications in "
+           "the portal. Ask them to check their spam folder; if no emails are going out at all, contact IT."),
+    Intent("reopen_approved", ["change approved", "edit approved application", "reopen", "supplier wants to update",
+                               "unlock", "let supplier edit", "let a supplier edit", "edit an approved", "approved application"],
+           "Approved and on-file applications are locked for suppliers. To let a supplier make changes, the assigned "
+           "admin uses **Return to supplier** with a comment saying what to update; their resubmission comes back as "
+           "pending review.", section="applications"),
+    Intent("reactivate_supplier", ["reactivate", "reactivate supplier", "reactivate a supplier", "supplier inactive", "account deactivated",
+                                   "certificate expired supplier"],
+           "A supplier deactivated because a certificate expired is reactivated automatically when they upload the "
+           "renewed certificate. Otherwise the assigned admin can activate the account from the **Supplier account** "
+           "card on the application page.", section="suppliers"),
+    Intent("registration_cert_admin", ["registration certificate", "supplier certificate", "print certificate",
+                                       "certificate of registration"],
+           "For an approved application, open it and click **Certificate** at the top to view or print the "
+           "Certificate of Supplier Registration (valid 12 months from approval).", section="applications"),
+    Intent("notifications_admin", ["notifications", "bell", "alerts", "who gets notified", "notified"],
+           "The bell at the top opens /admin/notifications. Procurement Team Leads and Procurement Officers are "
+           "notified (and emailed) about new, updated and resubmitted applications, director matches and certificate "
+           "expiries. ICT Admins and Procurement Managers aren't."),
+    Intent("search_filter", ["search", "filter", "find an application", "find application", "look up an application"],
+           "Use the search box and the status and assignment filters on /admin/applications, or just ask me "
+           "“application <number>”.", section="applications"),
+    Intent("expiry_process", ["how does expiry work", "expiry reminders", "automatic deactivation", "expiry check",
+                              "how often", "when are reminders sent"],
+           "The portal checks VAT and B-BBEE certificate dates automatically every few hours. Suppliers are reminded "
+           "30 and 7 days before expiry; on expiry their account is deactivated and admins are notified. Uploading "
+           "the renewed certificate reactivates the account automatically."),
+    Intent("dashboard_admin", ["dashboard", "home", "overview page"],
+           "The dashboard (/admin) gives Procurement Team Leads an overview of applications and suppliers. Other "
+           "roles start on the first page their role can open.", section="dashboard"),
+    Intent("terms_admin", ["terms", "terms accepted", "supplier accept", "terms did", "application terms", "terms version", "terms and conditions"],
+           "Suppliers accept the Portal Terms (/terms) when they sign up and log in, and the Supplier Application "
+           "Terms (/application-terms) before submitting. The application page shows which version they accepted and when."),
+    Intent("director_false_positive", ["wrong director", "director mistake", "false match", "captured wrongly",
+                                       "director entered wrong", "remove the match"],
+           "If a director match is caused by a wrongly captured director, an ICT Admin can delete that director from "
+           "the application page; the flag then clears. Otherwise the application can only be declined."),
+    Intent("place_order", ["place an order", "order", "buy", "purchase", "contact supplier", "contact a supplier"],
+           "Orders aren't placed in the portal. Find the item in /admin/catalogue and contact the supplier directly "
+           "using the phone number or email on the product card.", section="catalogue"),
+    Intent("on_file_admin", ["what is on file", "keep on file", "on file meaning", "accept and keep on file"],
+           "**Accept & keep on file** means the documents and information are in order but the services aren't "
+           "needed yet. The supplier is told we'll contact them when they're needed, and their account stays inactive.",
+           section="applications"),
+    Intent("my_queue", ["my applications", "assigned to me", "my queue", "my work", "what must i do",
+                        "my open applications", "what is on my plate"], _answer_admin_my_queue, section="applications"),
+    Intent("unassigned_list", ["unassigned applications", "list unassigned", "which applications are unassigned",
+                               "who needs to be assigned", "not assigned"], _answer_admin_unassigned, section="applications"),
+    Intent("recent_activity", ["this month", "last 30 days", "recently", "new applications", "how many approved",
+                               "approved this month", "new suppliers", "sign ups"], _answer_admin_recent,
+           section="applications"),
+    Intent("catalogue_count", ["how many products", "products in the catalogue", "catalogue size", "number of products"],
+           _answer_admin_catalogue_count, section="catalogue"),
+    Intent("cant_decide", ["cant approve", "cannot approve", "buttons disabled", "cant decide", "cant change status",
+                           "why cant i", "not allowed", "no decision panel"],
+           "You can only record a decision on an application assigned to you. If it's assigned to you and only "
+           "**Decline** works, the application has a director match. If the page isn't open to you at all, your role "
+           "doesn't include applications.", section="applications"),
+    Intent("save_comments", ["save comments", "comment only", "add a comment", "without changing status", "note"],
+           "Type in **Comments to supplier** and click **Save comments only** to keep the status as it is. The "
+           "supplier is notified of new comments, so only write what they should see.", section="applications"),
+    Intent("documents_status", ["documents status", "documents pending", "documents complete", "document status"],
+           "**Documents** on the decision panel records whether you've checked the documents: Pending or Complete. "
+           "Keeping an application on file marks them Complete automatically.", section="applications"),
+    Intent("status_meanings", ["under review mean", "pending review mean", "what does under review",
+                               "what does pending review", "pending review", "under review", "submitted status", "what does pending mean",
+                               "status meaning", "statuses"],
+           "Statuses:\n- **Pending review**: submitted and waiting for an admin\n- **Under review**: an admin is "
+           "working on it\n- **Returned for update**: sent back to the supplier with comments\n- **Approved**: "
+           "registered supplier, account active\n- **On file**: in order but not needed yet\n- **Declined**: not "
+           "successful; the supplier may edit and resubmit"),
+    Intent("someone_elses", ["assigned to someone else", "someone else has it", "colleague is away", "on leave",
+                             "left the company", "take over"],
+           "Only the assigned admin can unassign themselves. A Procurement Team Lead or ICT Admin can reassign it to "
+           "another officer from the application page, and IT can release it with `flask --app app "
+           "release-application <id>` if the admin has left.", section="applications"),
+    Intent("what_changed", ["what changed", "see changes", "supplier updated", "before and after", "compare changes"],
+           "Open the application's **History**: every supplier edit shows each changed field before and after, and "
+           "you can export it to CSV.", section="applications"),
+    Intent("contact_supplier", ["contact the supplier", "supplier phone", "supplier email", "call the supplier",
+                                "supplier details", "supplier contact"],
+           "The supplier's contact person, phone and email are on the application page under **Contact**, and on each "
+           "product card in the catalogue. Ask me “application <number>” to find the application.", section="applications"),
+    Intent("supplier_id_admin", ["supplier id", "igsp number", "supplier number"],
+           "Each supplier gets an ID like IGSP1234 when they sign up. It's shown on the application page, the "
+           "suppliers list and their registration certificate."),
+    Intent("delete_supplier", ["delete supplier", "delete a supplier", "remove supplier", "remove a supplier", "delete a supplier account", "remove supplier account"],
+           "Supplier logins can't be deleted in the portal. To stop a supplier, deactivate their account; an ICT Admin "
+           "can delete an application if it was captured in error."),
+    Intent("run_expiry_check", ["run expiry check", "run the expiry check", "run expiry", "check now", "check certificates now", "check-certificates", "manual check"],
+           "The certificate check runs automatically every few hours. IT can run it straight away with "
+           "`flask --app app check-certificates`."),
+    Intent("report_types", ["which reports", "types of reports", "inventory report", "activity report",
+                            "suppliers report", "applications report"],
+           "Reports at /admin/reports:\n- **Applications**: submissions and outcomes\n- **Suppliers**: registrations "
+           "and accounts\n- **Inventory**: listed products\n- **Admin activity**: what admins have been doing\nEach can be "
+           "filtered by period or date range and exported to CSV.", section="reports"),
+]
+
+
+def _best_intent(intents, words):
+    best, best_score = None, 0
+    for intent in intents:
+        score = intent.score(words)
+        if score > best_score:
+            best, best_score = intent, score
+    return best
+
+
+def supplier_chat_reply(user, message):
+    intent = _best_intent(SUPPLIER_INTENTS, _chat_words(message))
+    if not intent:
+        return ("Sorry, I didn't quite get that. I can help with your application, documents, certificates, account "
+                f"and inventory. For anything else, contact {CONTACT_DETAILS}.", SUPPLIER_SUGGESTIONS)
+    return intent.reply(user, message), intent.suggestions
+
+
+def admin_chat_reply(admin, message):
+    words = _chat_words(message)
+    number = re.search(r"(?:application|app|#)\s*#?\s*(\d{1,9})\b", words)
+    if number and admin.can("applications"):
+        return admin_application_reply(int(number.group(1))), []
+    intent = _best_intent(ADMIN_INTENTS, words)
+    if not intent:
+        return ("Sorry, I didn't quite get that. Ask me about an application by number, or about assigning, "
+                "decisions, director matches, the catalogue, reports or roles.", ADMIN_SUGGESTIONS)
+    if intent.section and not admin.can(intent.section):
+        return f"Your role ({admin.role_label}) doesn't have access to that part of the portal.", []
+    return intent.reply(admin, message), intent.suggestions
+
+
+def chat_message():
+    data = request.get_json(silent=True) or {}
+    message = data.get("message")
+    if message is None and isinstance(data.get("messages"), list) and data["messages"]:
+        message = (data["messages"][-1] or {}).get("content") if isinstance(data["messages"][-1], dict) else None
+    message = str(message or "").strip()
+    return message if 0 < len(message) <= CHAT_MAX_MESSAGE_CHARS else None
+
+
+def chat_response(reply_fn, who, limiter_key):
+    message = chat_message()
+    if message is None:
+        return jsonify(reply=f"Please type a question of up to {CHAT_MAX_MESSAGE_CHARS} characters.", suggestions=[]), 400
+    if chat_limiter.is_blocked(limiter_key):
+        return jsonify(reply="You've sent a lot of messages. Please wait a few minutes and try again.", suggestions=[]), 429
+    chat_limiter.hit(limiter_key)
+    reply, suggestions = reply_fn(who, message)
+    return jsonify(reply=reply, suggestions=suggestions)
+
+
+@app.route("/chat", methods=["POST"])
+@login_required
+def supplier_chat():
+    user = get_current_user()
+    return chat_response(supplier_chat_reply, user, ("chat-supplier", user.id))
+
+
+@app.route("/admin/chat", methods=["POST"])
+@admin_required
+def admin_chat():
+    admin = get_current_admin()
+    return chat_response(admin_chat_reply, admin, ("chat-admin", admin.id))
+
+
+# ---------------------------------------------------------------------------
 # CLI commands:  flask --app app <command>
 # ---------------------------------------------------------------------------
 
@@ -4094,7 +5446,8 @@ def init_db_command():
 @click.option("--name", prompt=True, default="")
 @click.option("--role", type=click.Choice(list(ADMIN_ROLES)), default=None,
               help="super (Procurement Team Lead): everything; applications (Procurement Officer): applications and suppliers; "
-                   "reports (Procurement Manager): reports only. "
+                   "reports (Procurement Manager): reports only; ict (ICT Admin): everything except the dashboard, "
+                   "plus user audit, email templates and deletions. "
                    "New admins default to super; existing admins keep their role unless this is given.")
 @click.password_option()
 def create_admin_command(email, name, role, password):
@@ -4390,6 +5743,82 @@ def seed_demo_command(count, months, remove, seed):
     click.echo(f"Created {len(created_users)} demo suppliers ({len(approved)} approved, {len(products)} products) "
                f"over the last {months} months.")
     click.echo(f"Demo supplier logins: <company>@{DEMO_EMAIL_DOMAIN} / Password123!   Remove with: flask --app app seed-demo --remove")
+
+
+
+# Dummy user-audit entries use the 198.51.100.0/24 documentation range (RFC 5737), which no real visitor can have,
+# so they can be told apart from real entries and removed again.
+DEMO_AUDIT_IP_PREFIX = "198.51.100."
+
+
+@app.cli.command("seed-audit")
+@click.option("--days", default=60, show_default=True, help="Spread entries over this many days.")
+@click.option("--remove", is_flag=True, help="Delete the dummy entries instead of creating them.")
+@click.option("--seed", default=2026, show_default=True, help="Random seed, for repeatable data.")
+def seed_audit_command(days, remove, seed):
+    """Create (or --remove) dummy user-audit entries (sign-ins, sign-outs, exports, template edits) for the existing admins."""
+    import random
+
+    dummy = AuditLog.query.filter(AuditLog.ip_address.like(f"{DEMO_AUDIT_IP_PREFIX}%"))
+    if remove:
+        count = dummy.delete(synchronize_session=False)
+        DB.session.commit()
+        click.echo(f"Removed {count} dummy audit entries.")
+        return
+    if dummy.first():
+        raise click.ClickException("Dummy audit entries already exist. Run `flask --app app seed-audit --remove` first.")
+    admins = Admin.query.order_by(Admin.id).all()
+    if not admins:
+        raise click.ClickException("Create an admin first: flask --app app create-admin")
+
+    rng = random.Random(seed)
+    ips = {}  # each person mostly signs in from the same address
+
+    def ip_for(key):
+        if key not in ips:
+            ips[key] = f"{DEMO_AUDIT_IP_PREFIX}{rng.randint(2, 254)}"
+        return ips[key] if rng.random() < 0.85 else f"{DEMO_AUDIT_IP_PREFIX}{rng.randint(2, 254)}"
+
+    entries = []
+
+    def add(when, action, actor=None, email="", detail=""):
+        name, key = (actor.name, actor.id) if actor else ("", email)
+        entries.append(AuditLog(created_at=when, actor_type="admin", actor_id=getattr(actor, "id", None),
+                                actor_name=(name or "")[:150], actor_email=(getattr(actor, "email", None) or email)[:120],
+                                action=action, detail=detail[:255], ip_address=ip_for(key)))
+
+    today = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    templates = list(EMAIL_TEMPLATES.values())
+    for day in range(days, -1, -1):
+        date_ = today - timedelta(days=day)
+        workday = date_.weekday() < 5
+        for admin in admins:
+            if rng.random() > (0.7 if workday else 0.08):
+                continue
+            start = date_ + timedelta(hours=rng.randint(7, 9), minutes=rng.randint(0, 59), seconds=rng.randint(0, 59))
+            if rng.random() < 0.07:  # mistyped password first
+                add(start - timedelta(minutes=1), "admin_login_failed", actor=admin, detail="Wrong password")
+            add(start, "admin_login", actor=admin, detail="Microsoft" if rng.random() < 0.35 else "Email and password")
+            if admin.role == "ict" and rng.random() < 0.08:
+                template = rng.choice(templates)
+                add(start + timedelta(minutes=rng.randint(10, 120)), "email_template_updated", actor=admin, detail=template["name"])
+            if admin.can("reports") and rng.random() < 0.1:
+                kind, label = rng.choice(REPORT_KINDS)
+                add(start + timedelta(minutes=rng.randint(15, 240)), "report_exported", actor=admin,
+                    detail=f"{label} report ({rng.choice(['30d', '90d', '12m', 'ytd'])})")
+            if rng.random() < 0.6:
+                add(start + timedelta(hours=rng.randint(3, 9), minutes=rng.randint(0, 59)), "admin_logout", actor=admin)
+        # Someone guessing at an admin address now and then.
+        if rng.random() < 0.12:
+            add(date_ + timedelta(hours=rng.randint(0, 23), minutes=rng.randint(0, 59)), "admin_login_failed",
+                email=rng.choice(["admin@icebolethu.co.za", "it@icebolethu.co.za", "test@icebolethu.co.za"]),
+                detail="No admin account with this email")
+    now = utcnow()
+    entries = [e for e in entries if e.created_at <= now]
+    DB.session.add_all(entries)
+    DB.session.commit()
+    click.echo(f"Created {len(entries)} dummy audit entries for {len(admins)} admins over the last {days} days. "
+               "Remove with: flask --app app seed-audit --remove")
 
 
 init_database()

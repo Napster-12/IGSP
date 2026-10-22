@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from datetime import date, timedelta
 
@@ -1238,3 +1239,271 @@ def test_supplier_account_card_only_after_onboarding(client):
     assert "Supplier account" not in admin.get(f"/admin/applications/{app_id}").data.decode()
     admin.post(f"/admin/applications/{app_id}/update", {"status": "approved", "documents_status": "complete"})
     assert "Supplier account" in admin.get(f"/admin/applications/{app_id}").data.decode()
+
+
+def test_ict_admin_sees_everything_but_the_dashboard(client):
+    client.signup_and_login()
+    app_id = submit_application(client)
+    add_admin(client.app, "ict@icebolethu.co.za", "ICT Admin", "ict")
+    ict, resp = login_as(client.app, "ict@icebolethu.co.za")
+    assert resp.headers["Location"].endswith("/admin/applications")
+
+    page = ict.get("/admin/applications").data.decode()
+    assert "ICT Admin" in page and 'href="/admin/ict/audit"' in page and 'href="/admin/ict/emails"' in page
+    assert 'href="/admin"' not in page
+    assert ict.get("/admin").headers["Location"].endswith("/admin/applications")
+    for url in ["/admin/suppliers", "/admin/catalogue", "/admin/reports", f"/admin/applications/{app_id}",
+                "/admin/ict/audit", "/admin/ict/audit?view=accounts", "/admin/ict/emails", "/admin/ict/emails/application_received"]:
+        assert ict.get(url).status_code == 200, url
+    # Like a Team Lead, ICT can hand applications to officers.
+    officer_id = add_admin(client.app, "officer@icebolethu.co.za", "Officer", "applications")
+    ict.post(f"/admin/applications/{app_id}/assign-to", {"admin_id": officer_id})
+    with client.app.app_context():
+        assert igsp.DB.session.get(igsp.SupplierApplication, app_id).assigned_admin_id == officer_id
+        # ICT isn't part of the review workflow, so it gets no application notifications.
+        ict_id = igsp.find_admin_by_email("ict@icebolethu.co.za").id
+        assert igsp.Notification.query.filter_by(admin_id=ict_id).count() == 0
+
+    # Nobody else can open the ICT pages or use the ICT actions.
+    team_lead = Client(client.app)
+    team_lead.admin_login()
+    for url in ["/admin/ict/audit", "/admin/ict/emails", "/admin/ict/emails/application_received"]:
+        assert team_lead.get(url).status_code == 302, url
+    assert 'href="/admin/ict/audit"' not in team_lead.get("/admin").data.decode()
+    assert "Delete application" not in team_lead.get(f"/admin/applications/{app_id}").data.decode()
+    team_lead.post(f"/admin/ict/applications/{app_id}/delete", {"confirm_name": "Acme Caskets"})
+    with client.app.app_context():
+        assert igsp.DB.session.get(igsp.SupplierApplication, app_id) is not None
+
+
+def test_user_audit_shows_everything_an_admin_did_and_no_suppliers(client):
+    client.signup_and_login()
+    client.get("/logout")
+    client.post("/login", {"email": "supplier@example.com", "password": "wrong", "accept_terms": "1"})
+    client.signup_and_login("second@example.com")
+    app_id = submit_application(client)
+    Client(client.app).post("/admin/login", {"email": "admin@icebolethu.co.za", "password": "wrong"})
+
+    # The Team Lead signs in, works on the application and exports a report.
+    lead = Client(client.app)
+    lead.admin_login()
+    lead.assign(app_id)
+    with client.app.app_context():
+        doc_path = igsp.SupplierDocument.query.filter_by(application_id=app_id).first().file_path
+        lead_id = igsp.find_admin_by_email("admin@icebolethu.co.za").id
+    lead.get(f"/uploads/{doc_path}")
+    lead.post(f"/admin/applications/{app_id}/update", {"status": "under_review", "documents_status": "complete"})
+    lead.get("/admin/reports/export")
+    add_admin(client.app, "ict@icebolethu.co.za", "ICT Admin", "ict")
+    ict, _ = login_as(client.app, "ict@icebolethu.co.za")
+
+    # Supplier activity isn't recorded in the user audit at all.
+    with client.app.app_context():
+        assert igsp.AuditLog.query.filter(igsp.AuditLog.actor_type != "admin").count() == 0
+
+    def rows(page):
+        return re.findall(r'<td class="ad-nowrap">([A-Za-z][^<]+)</td>', page)
+
+    lead_page = ict.get(f"/admin/ict/audit?admin={lead_id}").data.decode()
+    assert rows(lead_page) == ["Report exported", "Status changed", "Document viewed", "Assigned to admin",
+                               "Admin signed in", "Admin sign-in failed"]
+    assert "Acme Caskets" in lead_page and f"#{app_id}" in lead_page and "supplier@example.com" not in lead_page
+    everyone = rows(ict.get("/admin/ict/audit").data.decode())
+    assert everyone[0] == "Admin signed in" and "Report exported" in everyone and not any("Supplier" in r for r in everyone)
+    assert rows(ict.get("/admin/ict/audit?action=document_viewed").data.decode()) == ["Document viewed"]
+
+    csv_body = ict.get(f"/admin/ict/audit/export?admin={lead_id}").data.decode("utf-8-sig")
+    assert "Status changed" in csv_body and f"Acme Caskets (#{app_id})" in csv_body
+    accounts = ict.get("/admin/ict/audit?view=accounts").data.decode()
+    assert f"/admin/ict/audit?admin={lead_id}" in accounts and "All activity" in accounts
+
+
+def test_ict_edits_email_templates(client):
+    add_admin(client.app, "ict@icebolethu.co.za", "ICT Admin", "ict")
+    ict, _ = login_as(client.app, "ict@icebolethu.co.za")
+    url = "/admin/ict/emails/application_received"
+
+    bad = ict.post(url, {"subject": "Hi", "body": "Thanks {contact_person}"})
+    assert bad.status_code == 200 and "{contact_person}" in bad.data.decode()
+    ict.post(url, {"subject": "We got it, {company_name}", "body": "Thanks {company_name}, we will be in touch."})
+    assert "Edited" in ict.get("/admin/ict/emails").data.decode()
+
+    client.signup_and_login()
+    submit_application(client)
+    with client.app.app_context():
+        note = igsp.Notification.query.filter(igsp.Notification.user_id.isnot(None)).one()
+        assert (note.title, note.message) == ("We got it, Acme Caskets", "Thanks Acme Caskets, we will be in touch.")
+        assert igsp.AuditLog.query.filter_by(action="email_template_updated").count() == 1
+
+    ict.post(f"{url}/reset")
+    with client.app.app_context():
+        assert igsp.email_text("application_received", company_name="X")[0] == "Application Received"
+
+
+def test_ict_deletes_directors_and_applications(client):
+    client.signup_and_login()
+    app_id = submit_application(client)
+    add_admin(client.app, "ict@icebolethu.co.za", "ICT Admin", "ict")
+    ict, _ = login_as(client.app, "ict@icebolethu.co.za")
+    with client.app.app_context():
+        director_id = igsp.DB.session.get(igsp.SupplierApplication, app_id).directors[0].id
+        file_paths = [d.file_path for d in igsp.SupplierDocument.query.filter_by(application_id=app_id)]
+
+    ict.post(f"/admin/ict/applications/{app_id}/directors/{director_id}/delete")
+    with client.app.app_context():
+        application = igsp.DB.session.get(igsp.SupplierApplication, app_id)
+        assert application.directors == []
+        assert igsp.ApplicationEvent.query.filter_by(application_id=app_id, action="director_removed").count() == 1
+        assert "8001015009087" in igsp.AuditLog.query.filter_by(action="director_deleted").one().detail
+
+    # The company name must be typed to confirm.
+    ict.post(f"/admin/ict/applications/{app_id}/delete", {"confirm_name": "Wrong name"})
+    with client.app.app_context():
+        assert igsp.DB.session.get(igsp.SupplierApplication, app_id) is not None
+
+    resp = ict.post(f"/admin/ict/applications/{app_id}/delete", {"confirm_name": "acme caskets"})
+    assert resp.headers["Location"].endswith("/admin/applications")
+    with client.app.app_context():
+        assert igsp.DB.session.get(igsp.SupplierApplication, app_id) is None
+        assert igsp.SupplierDocument.query.filter_by(application_id=app_id).count() == 0
+        assert igsp.ApplicationEvent.query.filter_by(application_id=app_id).count() == 0
+        assert "Acme Caskets" in igsp.AuditLog.query.filter_by(action="application_deleted").one().detail
+        for path in file_paths:
+            assert not igsp.absolute_upload_path(path) or not os.path.isfile(igsp.absolute_upload_path(path))
+    # The supplier can still sign in and apply again.
+    assert client.get("/onboarding/profile").status_code == 200
+
+
+
+def ask(client, url, message):
+    resp = client.c.post(url, json={"message": message}, headers={"X-CSRFToken": client.token()})
+    return resp.status_code, (resp.get_json() or {}).get("reply", "")
+
+
+def test_cebelihle_answers_suppliers_from_their_own_records(client):
+    other = Client(client.app)
+    other.signup_and_login("other@example.com")
+    submit_application(other)
+    with client.app.app_context():
+        igsp.SupplierApplication.query.one().company_name = "Bongi Funerals"
+        igsp.DB.session.commit()
+
+    client.signup_and_login()
+    assert "Ask Cebelihle" in client.get("/dashboard").data.decode()
+    status, reply = ask(client, "/chat", "What's my application status?")
+    assert status == 200 and "haven't submitted" in reply and "/onboarding/profile" in reply
+    assert "7 required document" in ask(client, "/chat", "which documents are missing?")[1]
+
+    app_id = submit_application(client)
+    reply = ask(client, "/chat", "what is the status of my application")[1]
+    assert "Acme Caskets" in reply and "Pending Review" in reply and "Bongi" not in reply
+    assert "All 7 required documents are uploaded" in ask(client, "/chat", "any documents missing?")[1]
+    assert "SARS VAT certificate" in ask(client, "/chat", "when does my VAT certificate expire")[1]
+    assert "031 208 9102" in ask(client, "/chat", "I want to change my bank details")[1]
+    assert "031 208 9102" in ask(client, "/chat", "Why was I declined?")[1]
+    assert "can't share information about other suppliers" in ask(client, "/chat", "how many other suppliers are there")[1]
+    assert "PDF" in ask(client, "/chat", "Can I upload a jpg photo?")[1]
+    assert "didn't quite get that" in ask(client, "/chat", "what's the weather in Durban")[1]
+
+    # Returned with comments: the supplier sees the comments and where to fix them.
+    with client.app.app_context():
+        application = igsp.DB.session.get(igsp.SupplierApplication, app_id)
+        application.status, application.review_comments = "returned_for_update", "Upload a newer bank letter."
+        igsp.DB.session.commit()
+    reply = ask(client, "/chat", "any update on my application?")[1]
+    assert "Returned For Update" in reply and "newer bank letter" in reply and f"/applications/{app_id}/edit" in reply
+
+    assert ask(client, "/chat", "x" * 501)[0] == 400
+    assert ask(client, "/admin/chat", "application 1")[0] == 302  # suppliers can't use the admin chat
+
+
+def test_cebelihle_admin_answers_follow_the_role(client):
+    client.signup_and_login()
+    app_id = submit_application(client)
+    add_admin(client.app, "officer@icebolethu.co.za", "Officer", "applications")
+    add_admin(client.app, "manager@icebolethu.co.za", "Manager", "reports")
+    officer, _ = login_as(client.app, "officer@icebolethu.co.za")
+    manager, _ = login_as(client.app, "manager@icebolethu.co.za")
+    assert "Ask Cebelihle" in officer.get("/admin/applications").data.decode()
+
+    reply = ask(officer, "/admin/chat", f"tell me about application {app_id}")[1]
+    assert "Acme Caskets" in reply and "Pending Review" in reply and f"/admin/applications/{app_id}" in reply
+    assert "awaiting review" in ask(officer, "/admin/chat", "How many applications are waiting?")[1]
+    assert "Assign to me" in ask(officer, "/admin/chat", "how do I assign an application")[1]
+    assert "can only be declined" in ask(officer, "/admin/chat", "what is a director match")[1]
+
+    # A Procurement Manager (reports only) gets no application data.
+    assert "doesn't have access" in ask(manager, "/admin/chat", "How many applications are waiting?")[1]
+    assert "Acme" not in ask(manager, "/admin/chat", f"application {app_id}")[1]
+    assert "/admin/reports" in ask(manager, "/admin/chat", "how do I export a report")[1]
+
+
+def test_cebelihle_answers_frequently_asked_questions(client):
+    client.signup_and_login()
+    faqs = {
+        "Is it free to register?": "no fee",
+        "I don't have a B-BBEE certificate": "sworn affidavit",
+        "Can I save and continue later?": "signing out clears them",
+        "Who can see my products?": "Only Icebolethu Group's procurement staff",
+        "What is my supplier ID?": "IGSP",
+        "I want to withdraw my application": "031 208 9102",
+        "Can I choose more than one category?": "one supplier category",
+    }
+    for question, expected in faqs.items():
+        assert expected in ask(client, "/chat", question)[1], question
+
+    add_admin(client.app, "officer@icebolethu.co.za", "Officer", "applications")
+    officer, _ = login_as(client.app, "officer@icebolethu.co.za")
+    assert "/forgot-password" in ask(officer, "/admin/chat", "A supplier forgot their password")[1]
+    assert "Return to supplier" in ask(officer, "/admin/chat", "How do I let a supplier edit an approved application?")[1]
+    assert "doesn't have access" in ask(officer, "/admin/chat", "How do I place an order?")[1]  # no catalogue access
+
+
+def test_cebelihle_greets_back(client):
+    client.signup_and_login()
+    # The chat opens empty: Cebelihle only speaks once the user has written something.
+    assert "Hi, I'm Cebelihle" not in client.get("/dashboard").data.decode()
+    for greeting in ["hi", "Hi!", "hii", "hie", "hello", "helo", "hey", "good day", "sawubona", "howzit", "how are you?"]:
+        status, reply = ask(client, "/chat", greeting)
+        assert status == 200 and reply.startswith("Hi, I'm Cebelihle, how can I help you?"), greeting
+    # A page still running the previous widget sends the whole conversation; the last message is answered.
+    resp = client.c.post("/chat", json={"messages": [{"role": "user", "content": "hi"}]}, headers={"X-CSRFToken": client.token()})
+    assert resp.status_code == 200 and resp.get_json()["reply"].startswith("Hi, I'm Cebelihle")
+    page = client.get("/dashboard").data.decode()
+    assert re.search(r'/static/js/chatbot\.js\?v=\d+', page) and re.search(r'/static/css/icebolethu\.css\?v=\d+', page)
+
+
+def test_cebelihle_more_knowledge(client):
+    client.signup_and_login()
+    reply = ask(client, "/chat", "Do you need caterers?")[1]
+    assert "**Catering**" in reply and "/onboarding/category" in reply
+    assert "**Caskets and Tombstones**" in ask(client, "/chat", "I sell coffins")[1]
+    assert "one PDF" in ask(client, "/chat", "Can I upload multiple files?")[1]
+    assert "Declaration of Interest" in ask(client, "/chat", "My family member works at Icebolethu")[1]
+    assert "13-digit" in ask(client, "/chat", "My ID number is not accepted")[1]
+    app_id = submit_application(client)
+    assert f"/applications/{app_id}" in ask(client, "/chat", "Where can I view my application?")[1]
+
+    add_admin(client.app, "officer@icebolethu.co.za", "Officer", "applications")
+    officer, _ = login_as(client.app, "officer@icebolethu.co.za")
+    assert f"#{app_id}" in ask(officer, "/admin/chat", "List unassigned applications")[1]
+    assert "no open applications assigned to you" in ask(officer, "/admin/chat", "Which applications are assigned to me?")[1]
+    officer.assign(app_id)
+    assert f"Acme Caskets (#{app_id})" in ask(officer, "/admin/chat", "Which applications are assigned to me?")[1]
+    assert "1** applications submitted" in ask(officer, "/admin/chat", "How many were approved this month?")[1]
+
+
+def test_seed_audit_creates_and_removes_dummy_entries(client):
+    client.admin_login()  # one real admin sign-in entry
+    runner = client.app.test_cli_runner()
+    result = runner.invoke(args=["seed-audit", "--days", "10"])
+    assert result.exit_code == 0 and "dummy audit entries" in result.output
+    with client.app.app_context():
+        dummy = igsp.AuditLog.query.filter(igsp.AuditLog.ip_address.like("198.51.100.%"))
+        assert dummy.count() > 0
+        assert {e.actor_email for e in dummy.filter_by(action="admin_login")} <= {"admin@icebolethu.co.za"}
+    assert runner.invoke(args=["seed-audit"]).exit_code != 0  # won't add a second batch
+    assert runner.invoke(args=["seed-audit", "--remove"]).exit_code == 0
+    with client.app.app_context():
+        assert igsp.AuditLog.query.filter(igsp.AuditLog.ip_address.like("198.51.100.%")).count() == 0
+        assert igsp.AuditLog.query.count() == 1  # the real admin sign-in is untouched

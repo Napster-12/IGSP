@@ -11,7 +11,9 @@
 } %}
 {% block content %}
     <p style="margin:0 0 14px; font-size:16px; font-weight:600; color:#1F2430;">Hello {{ recipient_name }},</p>
-    <p style="margin:0 0 18px; color:#1F2430;">{{ message }}</p>
+    {% for paragraph in message.split('\n\n') if paragraph.strip() %}
+    <p style="margin:0 0 18px; color:#1F2430;">{{ paragraph.strip() }}</p>
+    {% endfor %}
 
     {% if application %}
     {% set bg, fg = badge_colours.get(application.status, ('#6E696A', '#ffffff')) %}
