@@ -1,0 +1,31 @@
+{#- Cebelihle chat widget. Include with `chat_url` (the endpoint). The chat opens empty; Cebelihle replies once the user writes. -#}
+<div class="cb" data-chatbot data-chat-url="{{ chat_url }}" data-csrf="{{ csrf_token() }}" data-avatar="{{ static_url('images/cebelihle.jpg') }}">
+    <section class="cb-panel" id="cb-panel" role="dialog" aria-label="Chat with Cebelihle" hidden>
+        <header class="cb-head">
+            <img class="cb-avatar" src="{{ static_url('images/cebelihle.jpg') }}" alt="" width="38" height="38">
+            <div class="cb-title">
+                <strong>Cebelihle</strong>
+                <span>Chatbot assistant</span>
+            </div>
+            <button type="button" class="cb-icon-btn" data-chat-reset title="Start a new chat" aria-label="Start a new chat">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+            </button>
+            <button type="button" class="cb-icon-btn" data-chat-close title="Close" aria-label="Close chat">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </header>
+        <div class="cb-log" data-chat-log aria-live="polite"></div>
+        <form class="cb-form" data-chat-form>
+            <label for="cb-input" class="visually-hidden">Message Cebelihle</label>
+            <textarea id="cb-input" rows="1" maxlength="500" placeholder="Say hi to Cebelihle…" data-chat-input></textarea>
+            <button type="submit" class="cb-send" aria-label="Send">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+        </form>
+    </section>
+    <button type="button" class="cb-launcher" data-chat-open aria-controls="cb-panel" aria-expanded="false">
+        <img class="cb-launcher-avatar" src="{{ static_url('images/cebelihle.jpg') }}" alt="" width="34" height="34">
+        <span>Ask Cebelihle</span>
+    </button>
+</div>
+<script src="{{ static_url('js/chatbot.js') }}"></script>

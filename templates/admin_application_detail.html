@@ -95,7 +95,7 @@
                 {% if application.directors %}
                     <div class="ad-table-wrap">
                         <table class="ad-table ad-table--compact">
-                            <thead><tr><th>Name</th><th>ID / passport</th><th>Role</th><th>Nationality</th><th>Also linked to</th></tr></thead>
+                            <thead><tr><th>Name</th><th>ID / passport</th><th>Role</th><th>Nationality</th><th>Also linked to</th>{% if admin.can('ict') %}<th><span class="visually-hidden">Delete</span></th>{% endif %}</tr></thead>
                             <tbody>
                                 {% for director in application.directors %}
                                     {% set links = director_flags|selectattr(0, 'equalto', director)|list %}
@@ -110,6 +110,15 @@
                                                 <span class="ad-cell-sub">{{ other_director.role }} · {{ status_label(other.status) }}</span>
                                             {% else %}<span class="ad-muted">—</span>{% endfor %}
                                         </td>
+                                        {% if admin.can('ict') %}
+                                            <td>
+                                                <form method="post" action="{{ url_for('admin_delete_director', application_id=application.id, director_id=director.id) }}"
+                                                      onsubmit="return confirm('Delete {{ director.initials_surname|e }} ({{ director.id_number|e }}) from this application? This is recorded in the history and user audit.');">
+                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                    <button type="submit" class="ad-icon-btn" title="Delete director" aria-label="Delete {{ director.initials_surname }}">{{ ad.icon('trash') }}</button>
+                                                </form>
+                                            </td>
+                                        {% endif %}
                                     </tr>
                                 {% endfor %}
                             </tbody>
@@ -303,6 +312,19 @@ Your application cannot be accepted because {{ flagged_names|join(', ') }} {{ 'i
                         <button type="submit" class="ad-btn ad-btn--ghost ad-btn--block">{{ 'Deactivate account' if supplier.active else 'Activate account' }}</button>
                     </form>
                     {% endif %}
+                </section>
+            {% endif %}
+            {% if admin.can('ict') %}
+                <section class="ad-card ad-danger">
+                    <div class="ad-card-head"><h2>Delete application</h2></div>
+                    <p>Permanently deletes this application with its documents, directors and history. The supplier's login stays, so they can apply again. This can't be undone.</p>
+                    <form method="post" action="{{ url_for('admin_delete_application', application_id=application.id) }}" class="ad-form"
+                          onsubmit="return confirm('Permanently delete this application? This cannot be undone.');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <label for="confirm_name">Type <strong>{{ application.company_name }}</strong> to confirm</label>
+                        <input type="text" id="confirm_name" name="confirm_name" autocomplete="off" required>
+                        <button type="submit" class="ad-btn ad-btn--danger ad-btn--block ad-mt">{{ ad.icon('trash') }} Delete application</button>
+                    </form>
                 </section>
             {% endif %}
         </aside>
