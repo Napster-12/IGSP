@@ -9,14 +9,29 @@
     var form = root.querySelector('[data-chat-form]');
     var input = root.querySelector('[data-chat-input]');
     var storeKey = 'cebelihle:' + root.dataset.chatUrl;
-    var history = [];
+    var turns = [];
     var busy = false;
+    var phone = window.matchMedia('(max-width: 600px)');
+    var pushedState = false;  // on phones, opening the chat adds a history entry so Back closes it
+
+    // Phones: keep the full-screen chat inside the visible area, above the on-screen keyboard.
+    function fitToViewport() {
+        var vv = window.visualViewport;
+        if (!phone.matches || panel.hidden || !vv) {
+            root.style.removeProperty('--cb-height');
+            root.style.removeProperty('--cb-top');
+            return;
+        }
+        root.style.setProperty('--cb-height', vv.height + 'px');
+        root.style.setProperty('--cb-top', vv.offsetTop + 'px');
+        log.scrollTop = log.scrollHeight;
+    }
 
     function load() {
-        try { history = JSON.parse(sessionStorage.getItem(storeKey) || '[]') || []; } catch (e) { history = []; }
+        try { turns = JSON.parse(sessionStorage.getItem(storeKey) || '[]') || []; } catch (e) { turns = []; }
     }
     function save() {
-        try { sessionStorage.setItem(storeKey, JSON.stringify(history.slice(-30))); } catch (e) { /* storage unavailable */ }
+        try { sessionStorage.setItem(storeKey, JSON.stringify(turns.slice(-30))); } catch (e) { /* storage unavailable */ }
     }
 
     // Escape everything, then allow **bold**, "- " bullets, line breaks and links to portal paths.
@@ -80,22 +95,34 @@
 
     function render() {
         log.innerHTML = '';
-        history.forEach(function (turn) { addMessage(turn.role, turn.content); });
+        turns.forEach(function (turn) { addMessage(turn.role, turn.content); });
     }
 
-    function setOpen(open) {
+    function setOpen(open, fromHistory) {
         panel.hidden = !open;
         launcher.setAttribute('aria-expanded', open ? 'true' : 'false');
         root.classList.toggle('is-open', open);
-        try { sessionStorage.setItem(storeKey + ':open', open ? '1' : ''); } catch (e) { /* ignore */ }
-        if (open) { input.focus(); log.scrollTop = log.scrollHeight; }
+        document.documentElement.classList.toggle('cb-lock', open && phone.matches);
+        try { sessionStorage.setItem(storeKey + ':open', open && !phone.matches ? '1' : ''); } catch (e) { /* ignore */ }
+        if (open && phone.matches && !pushedState) {
+            window.history.pushState({ cebelihle: true }, '');
+            pushedState = true;
+        } else if (!open && pushedState && !fromHistory) {
+            pushedState = false;
+            window.history.back();
+        }
+        fitToViewport();
+        if (open) {
+            log.scrollTop = log.scrollHeight;
+            if (!phone.matches) { input.focus(); }  // on phones, let them read first instead of popping up the keyboard
+        }
     }
 
     function send(text) {
         if (busy) { return; }
         busy = true;
         log.querySelectorAll('.cb-chips').forEach(function (el) { el.remove(); });
-        history.push({ role: 'user', content: text });
+        turns.push({ role: 'user', content: text });
         addMessage('user', text);
         fetch(root.dataset.chatUrl, {
             method: 'POST',
@@ -106,24 +133,24 @@
             return resp.json().catch(function () { return {}; });
         }).then(function (data) {
             var reply = data.reply || 'Sorry, something went wrong. Please try again.';
-            history.push({ role: 'assistant', content: reply });
+            turns.push({ role: 'assistant', content: reply });
             save();
             addMessage('assistant', reply);
             addChips(data.suggestions);
         }).catch(function () {
-            history.pop();
+            turns.pop();
             save();
             addMessage('assistant', 'I couldn\'t reach the server. Check your connection and try again.', 'cb-msg--error');
         }).finally(function () {
             busy = false;
-            input.focus();
+            if (!phone.matches || document.activeElement === input) { input.focus(); }
         });
     }
 
     launcher.addEventListener('click', function () { setOpen(panel.hidden); });
     root.querySelector('[data-chat-close]').addEventListener('click', function () { setOpen(false); });
     root.querySelector('[data-chat-reset]').addEventListener('click', function () {
-        history = [];
+        turns = [];
         save();
         render();
         input.focus();
@@ -132,6 +159,17 @@
         var chip = e.target.closest('.cb-chip');
         if (chip) { send(chip.textContent); }
     });
+    window.addEventListener('popstate', function () {
+        if (pushedState) {
+            pushedState = false;
+            if (!panel.hidden) { setOpen(false, true); }
+        }
+    });
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', fitToViewport);
+        window.visualViewport.addEventListener('scroll', fitToViewport);
+    }
+    phone.addEventListener('change', function () { setOpen(!panel.hidden, true); });
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && !panel.hidden) { setOpen(false); launcher.focus(); }
     });
@@ -155,5 +193,5 @@
     render();
     var wasOpen = false;
     try { wasOpen = !!sessionStorage.getItem(storeKey + ':open'); } catch (e) { /* ignore */ }
-    if (wasOpen) { setOpen(true); }
+    if (wasOpen && !phone.matches) { setOpen(true); }
 })();
