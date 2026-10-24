@@ -5959,3 +5959,34 @@ html.cb-lock, html.cb-lock body{ overflow:hidden; overscroll-behavior:none; }
 .cb-chip{ padding:6px 11px; border:1px solid #F5C8A8; border-radius:999px; background:var(--white); color:var(--primary-text); font:inherit; font-size:12.5px; font-weight:600; cursor:pointer; text-align:left; }
 .cb-chip:hover{ background:var(--primary-light); }
 .cb-row + .cb-chips{ margin-left:36px; }
+
+/* ---- Laptop widths (including Windows display scaling and browser zoom) ---- */
+/* Leave room under each page's last content so Cebelihle's button never covers it. */
+.ad-main{ padding-bottom:104px; }
+/* Smaller laptops: Cebelihle's button is just her photo, so it covers less. */
+@media (max-width: 1280px){
+    .cb-launcher{ width:56px; height:56px; padding:0; justify-content:center; }
+    .cb-launcher span{ display:none; }
+    .cb-launcher-avatar{ width:48px; height:48px; margin:0; }
+    .cb.is-open .cb-launcher{ padding:0; }
+}
+/* Tables with many columns (inventory) don't fit beside the sidebar on laptops, so their rows become cards,
+   two per row, like on phones. Cell labels come from static/js/shell.js. */
+@media (min-width: 641px) and (max-width: 1180px){
+    .ad-table-wrap--cards-md{ margin:0; padding:0; overflow:visible; }
+    .ad-table--cards-md thead{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+    .ad-table--cards-md, .ad-table--cards-md tr, .ad-table--cards-md td{ display:block; width:100%; }
+    .ad-table--cards-md tbody{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+    .ad-table--cards-md tbody tr{ padding:6px 16px 14px; border:1px solid var(--border); border-radius:12px; background:var(--white); }
+    .ad-table--cards-md td{ position:relative; padding:6px 0 6px 96px; border-bottom:none; text-align:left; white-space:normal; overflow-wrap:anywhere; }
+    .ad-table--cards-md td::before{ content:attr(data-label); position:absolute; left:0; top:8px; width:88px; font-size:12px; font-weight:600; line-height:1.3; color:var(--text-light); }
+    .ad-table--cards-md td:first-child, .ad-table--cards-md td.ad-cell-action{ padding-left:0; }
+    .ad-table--cards-md td:first-child::before, .ad-table--cards-md td.ad-cell-action::before{ content:none; }
+    .ad-table--cards-md td:first-child{ padding-top:12px; font-size:15px; font-weight:600; }
+    .ad-table--cards-md td:first-child .ad-cell-sub{ font-weight:400; }
+    .ad-table--cards-md td.ad-num{ text-align:left; }
+    .ad-table--cards-md td.ad-cell-action{ display:flex; gap:8px; padding-top:12px; }
+    .ad-table--cards-md td.ad-cell-action > *{ flex:1; }
+    .ad-table--cards-md td.ad-cell-action .ad-btn{ width:100%; justify-content:center; }
+    .ad-table--cards-md tbody tr:hover td{ background:none; }
+}
