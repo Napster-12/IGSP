@@ -502,8 +502,7 @@ def test_director_id_and_nationality_validation(client):
     resp = client.post("/onboarding/profile", {**PROFILE, "website": "https://acme.co.za",
                                               "director_nationality_0": "Zimbabwe", "director_id_0": "fn 123456"})
     assert resp.headers["Location"].endswith("/onboarding/category")
-    with client.c.session_transaction() as sess:
-        assert sess["supplier_onboarding"]["directors"][0]["id_number"] == "FN123456"
+    assert saved_draft(client)["directors"][0]["id_number"] == "FN123456"
 
 
 def test_nationality_dropdown_lists_south_africa_first(client):
@@ -922,11 +921,23 @@ def test_admin_login_error_shows_sign_in_options(client):
     assert "Invalid email or password." in page and 'name="password"' in page
 
 
-def test_admin_logout_returns_to_admin_login(client):
+def test_logout_shows_secure_signed_out_page(client):
     client.admin_login()
     resp = client.get("/admin/logout")
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("/admin/login")
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/signed-out?who=admin")
+    page = client.get(resp.headers["Location"])
+    assert page.headers["Cache-Control"] == "no-store" and "Clear-Site-Data" not in page.headers  # slow in browsers
+    body = page.data.decode()
+    assert "You have been signed out" in body and 'href="/admin/login"' in body and "no activity" not in body
     assert client.get("/admin").status_code == 302  # signed out
+    with client.c.session_transaction() as sess:
+        assert "admin_id" not in sess and "_csrf_token" not in sess  # the whole session was cleared
+
+    client.signup_and_login()
+    resp = client.get("/logout")
+    assert resp.headers["Location"].endswith("/signed-out?who=supplier")
+    assert 'href="/login"' in client.get(resp.headers["Location"]).data.decode()
+    assert client.get("/dashboard").headers["Location"].startswith("/login")
 
 
 def test_caskets_and_tombstones_are_one_category(client):
@@ -937,8 +948,7 @@ def test_caskets_and_tombstones_are_one_category(client):
     assert 'value="Caskets"' not in page and 'value="Tombstones"' not in page
     # An old category name still posted by a stale form is mapped onto the merged category.
     client.post("/onboarding/category", {"categories": "Tombstones"})
-    with client.c.session_transaction() as sess:
-        assert sess["supplier_onboarding"]["supplier_category"] == "Caskets and Tombstones"
+    assert saved_draft(client)["supplier_category"] == "Caskets and Tombstones"
 
 
 def test_application_slicer_cards_count_and_filter(client):
@@ -994,6 +1004,13 @@ def test_supplier_slicer_cards_count_and_filter(client):
 
     page = client.get("/admin/suppliers?account=inactive&application=none").data.decode()
     assert "Charlie" in page and "Bravo" not in page and "Delta" not in page
+
+
+def saved_draft(client, email="supplier@example.com"):
+    """The application in progress saved for a supplier (None if there isn't one)."""
+    with client.app.app_context():
+        row = igsp.DB.session.get(igsp.ApplicationDraft, igsp.find_user_by_email(email).id)
+        return json.loads(row.data_json) if row else None
 
 
 def add_admin(app, email, name, role):
@@ -1443,7 +1460,7 @@ def test_cebelihle_answers_frequently_asked_questions(client):
     faqs = {
         "Is it free to register?": "no fee",
         "I don't have a B-BBEE certificate": "sworn affidavit",
-        "Can I save and continue later?": "signing out clears them",
+        "Can I save and continue later?": "Save & continue later",
         "Who can see my products?": "Only Icebolethu Group's procurement staff",
         "What is my supplier ID?": "IGSP",
         "I want to withdraw my application": "031 208 9102",
@@ -1507,3 +1524,123 @@ def test_seed_audit_creates_and_removes_dummy_entries(client):
     with client.app.app_context():
         assert igsp.AuditLog.query.filter(igsp.AuditLog.ip_address.like("198.51.100.%")).count() == 0
         assert igsp.AuditLog.query.count() == 1  # the real admin sign-in is untouched
+
+
+def test_application_can_be_saved_and_continued_later(client):
+    client.signup_and_login()
+    assert "Start your application" in client.get("/dashboard").data.decode()
+
+    # Step 1 half done: no tax number yet and a director row still being typed. Saving for later keeps all of it.
+    partial = {k: v for k, v in PROFILE.items() if not k.startswith("director_") and k != "tax_number"}
+    resp = client.post("/onboarding/profile", {**partial, "director_initials_0": "J. Dube", "director_role_0": "Director",
+                                               "save_later": "1"}, content_type="multipart/form-data")
+    assert resp.headers["Location"].endswith("/dashboard")
+    draft = saved_draft(client)
+    assert draft["registered_vendor_name"] == PROFILE["registered_vendor_name"] and draft["tax_number"] == ""
+    assert draft["directors"] == [{"initials_surname": "J. Dube", "id_number": "", "role": "Director", "nationality": ""}]
+
+    # Signing out and back in (any device) brings it all back.
+    client.get("/logout")
+    again = Client(client.app)
+    again.post("/login", {"email": "supplier@example.com", "password": PASSWORD, "accept_terms": "1"})
+    again.post("/verify-email", {"code": client.app.sent_codes[-1][1]})
+    dashboard = again.get("/dashboard").data.decode()
+    assert "Continue your application" in dashboard and "step 1 of 4" in dashboard
+    assert again.get("/onboarding").headers["Location"].endswith("/onboarding/profile")
+    page = again.get("/onboarding/profile").data.decode()
+    assert PROFILE["registered_vendor_name"] in page and 'value="J. Dube"' in page
+
+    # Finish step 1, save at step 2, and "Continue" goes straight to step 2 next time.
+    again.post("/onboarding/profile", {**PROFILE, "document_file_company_profile": pdf("profile.pdf")},
+               content_type="multipart/form-data")
+    resp = again.post("/onboarding/category", {"categories": "Caskets and Tombstones", "save_later": "1"})
+    assert resp.headers["Location"].endswith("/dashboard")
+    assert "step 3 of 4" in again.get("/dashboard").data.decode()
+    assert again.get("/onboarding").headers["Location"].endswith("/onboarding/documents")
+
+    # Submitting the application removes the saved draft.
+    submit_application(again)
+    assert saved_draft(client) is None
+    assert "Continue your application" not in again.get("/dashboard").data.decode()
+
+
+def test_cebelihle_knows_who_is_asking(client):
+    client.signup_and_login()
+    reply = ask(client, "/chat", "What's the name of my company?")[1]
+    assert "**Acme Caskets**" in reply and "IGSP" in reply
+    reply = ask(client, "/chat", "What are my details?")[1]
+    assert "Jane Dube" in reply and "0820000000" in reply and "supplier@example.com" in reply
+    assert "/settings" in ask(client, "/chat", "How do I change my phone number?")[1]
+    submit_application(client)
+    assert "Registration number: 2020/123456/07" in ask(client, "/chat", "what is my registration number")[1]
+
+    add_admin(client.app, "officer@icebolethu.co.za", "Thandi Officer", "applications")
+    officer, _ = login_as(client.app, "officer@icebolethu.co.za")
+    reply = ask(officer, "/admin/chat", "Who am I?")[1]
+    assert "Thandi Officer" in reply and "Procurement Officer" in reply and "Applications" in reply
+
+
+def idle_for(client, minutes):
+    import time
+    with client.c.session_transaction() as sess:
+        sess["last_seen"] = time.time() - minutes * 60
+
+
+def test_signed_out_after_five_minutes_without_activity(client):
+    client.signup_and_login()
+    page = client.get("/dashboard").data.decode()
+    assert 'data-idle-timeout="300"' in page and "/logout?idle=1" in page
+
+    # Active within the limit: still signed in, and a keep-alive from the browser resets the clock.
+    idle_for(client, 4)
+    assert client.get("/dashboard").status_code == 200
+    token = client.token()
+    idle_for(client, 4)
+    assert client.c.post("/session/keepalive", headers={"X-CSRFToken": token}).get_json()["ok"] is True
+    with client.c.session_transaction() as sess:
+        import time
+        assert time.time() - sess["last_seen"] < 5
+
+    # Nothing for longer than the limit (plus the server's one-minute grace): signed out with a message.
+    idle_for(client, 7)
+    resp = client.get("/dashboard")
+    assert resp.headers["Location"].endswith("/signed-out?who=supplier&reason=idle")
+    page = client.get(resp.headers["Location"]).data.decode()
+    assert "You have been signed out" in page and "no activity for 5 minutes" in page
+    assert client.get("/dashboard").headers["Location"].startswith("/login")
+    assert client.c.post("/session/keepalive", headers={"X-CSRFToken": client.token()}).status_code == 401
+
+    # The browser's own sign-out shows the same message.
+    client.signup_and_login("second@example.com")
+    resp = client.get("/logout?idle=1")
+    assert "no activity for 5 minutes" in client.get(resp.headers["Location"]).data.decode()
+
+
+def test_admin_idle_sign_out_is_recorded(client):
+    admin = Client(client.app)
+    admin.admin_login()
+    assert "/admin/logout?idle=1" in admin.get("/admin").data.decode()
+    idle_for(admin, 7)
+    assert admin.get("/admin/applications").headers["Location"].endswith("/signed-out?who=admin&reason=idle")
+    # Chat requests get a JSON answer the widget can show, not a redirect.
+    admin.admin_login()
+    token = admin.token()
+    idle_for(admin, 7)
+    resp = admin.c.post("/admin/chat", json={"message": "hi"}, headers={"X-CSRFToken": token})
+    assert resp.status_code == 401 and resp.get_json()["redirect"].endswith("/signed-out?who=admin&reason=idle")
+    with client.app.app_context():
+        entries = igsp.AuditLog.query.filter_by(action="admin_logout").all()
+        assert len(entries) == 2 and all("without activity" in e.detail for e in entries)
+
+
+def test_idle_sign_out_on_an_application_step_saves_it_first(client):
+    client.signup_and_login()
+    assert "data-idle-save" in client.get("/onboarding/profile").data.decode()
+    # idle.js submits the step with these two fields when time runs out.
+    partial = {k: v for k, v in PROFILE.items() if not k.startswith("director_")}
+    resp = client.post("/onboarding/profile", {**partial, "save_later": "1", "idle_sign_out": "1"},
+                       content_type="multipart/form-data")
+    assert resp.headers["Location"].endswith("/signed-out?who=supplier&reason=idle&saved=1")
+    assert "Your application was saved" in client.get(resp.headers["Location"]).data.decode()
+    assert client.get("/dashboard").headers["Location"].startswith("/login")  # signed out
+    assert saved_draft(client)["registered_vendor_name"] == PROFILE["registered_vendor_name"]

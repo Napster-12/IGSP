@@ -8,7 +8,7 @@
 {% block content %}
     {{ f.steps(1) }}
 
-    <form class="ad-form ad-stack" method="post" enctype="multipart/form-data">
+    <form class="ad-form ad-stack" method="post" enctype="multipart/form-data" data-idle-save>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {% set values = draft %}
         {% set directors = draft.directors %}
@@ -25,6 +25,7 @@
 
         <div class="ad-form-actions ad-form-actions--sticky">
             <a href="{{ url_for('dashboard') }}" class="ad-btn ad-btn--ghost">Cancel</a>
+            <button type="submit" name="save_later" value="1" formnovalidate class="ad-btn ad-btn--ghost ob-save-later">Save &amp; continue later</button>
             <button type="submit" class="ad-btn ad-btn--primary">Continue to category →</button>
         </div>
     </form>

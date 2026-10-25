@@ -20,7 +20,7 @@
     ] %}
     {% set uploaded_count = required_docs|select('in', by_type)|list|length %}
 
-    <form class="ad-form ad-stack" method="post" action="{{ url_for('onboarding_documents') }}" enctype="multipart/form-data">
+    <form class="ad-form ad-stack" method="post" action="{{ url_for('onboarding_documents') }}" enctype="multipart/form-data" data-idle-save>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <section class="ad-card">
             <div class="ad-card-head">
@@ -48,6 +48,7 @@
 
         <div class="ad-form-actions ad-form-actions--sticky">
             <a href="{{ url_for('onboarding_category') }}" class="ad-btn ad-btn--ghost">← Back</a>
+            <button type="submit" name="save_later" value="1" formnovalidate class="ad-btn ad-btn--ghost ob-save-later">Save &amp; continue later</button>
             <button type="submit" class="ad-btn ad-btn--primary">Upload &amp; continue to review →</button>
         </div>
     </form>

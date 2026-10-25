@@ -80,5 +80,6 @@
     {% block scripts %}{% endblock %}
     <script src="{{ url_for('static', filename='js/pdf-viewer.js') }}"></script>
     {% with chat_url=url_for('admin_chat') %}{% include "_chatbot.html" %}{% endwith %}
+    {% with logout_url=url_for('admin_logout', idle=1) %}{% include "_idle.html" %}{% endwith %}
 </body>
 </html>

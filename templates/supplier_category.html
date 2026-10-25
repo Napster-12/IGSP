@@ -8,7 +8,7 @@
 {% block content %}
     {{ f.steps(2) }}
 
-    <form class="ad-form ad-stack" method="post">
+    <form class="ad-form ad-stack" method="post" data-idle-save>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <section class="ad-card">
             <div class="ad-card-head">
@@ -20,6 +20,7 @@
         <div class="ad-form-actions ad-form-actions--sticky cat-actions">
             <p class="cat-summary" data-category-summary aria-live="polite">No category selected</p>
             <a href="{{ url_for('onboarding_profile') }}" class="ad-btn ad-btn--ghost">← Back</a>
+            <button type="submit" name="save_later" value="1" formnovalidate class="ad-btn ad-btn--ghost ob-save-later">Save &amp; continue later</button>
             <button type="submit" class="ad-btn ad-btn--primary">Continue to documents →</button>
         </div>
     </form>

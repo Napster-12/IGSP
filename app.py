@@ -31,6 +31,7 @@ from flask import (
     flash,
     g,
     jsonify,
+    make_response,
     redirect,
     render_template,
     request,
@@ -568,6 +569,16 @@ class AuditLog(DB.Model):
     ip_address = DB.Column(DB.String(64), nullable=False, default="")
 
 
+class ApplicationDraft(DB.Model):
+    """An application a supplier has started but not submitted, kept so they can finish it later on any device.
+    Uploaded documents are stored separately (SupplierDocument rows without an application)."""
+    __tablename__ = "application_drafts"
+
+    user_id = DB.Column(DB.Integer, DB.ForeignKey("users.id"), primary_key=True)
+    data_json = DB.Column(DB.Text, nullable=False, default="{}")
+    updated_at = DB.Column(DB.DateTime, default=utcnow, onupdate=utcnow)
+
+
 class EmailTemplate(DB.Model):
     """An ICT admin's edited version of one of the EMAIL_TEMPLATES; without a row the default text is used."""
     __tablename__ = "email_templates"
@@ -1084,6 +1095,65 @@ def protect_requests():
             return redirect(url_for("home"))
 
 
+# Signed-in suppliers and admins are signed out after this long without activity. The browser (static/js/idle.js)
+# reports typing and clicking through /session/keepalive, so filling in a long form doesn't count as idle.
+IDLE_TIMEOUT_SECONDS = int(float(os.getenv("IDLE_TIMEOUT_MINUTES", "5")) * 60)
+# The browser reports activity at most once a minute, so the server allows one extra minute before it steps in.
+IDLE_SERVER_GRACE_SECONDS = 60
+IDLE_SIGNED_OUT_MESSAGE = "You have been signed out."
+
+
+def mark_active():
+    session["last_seen"] = time.time()
+
+
+def end_session():
+    """Sign out completely: clear the whole session (a new CSRF token is issued next time) and the request cache."""
+    session.clear()
+    g.pop("user", None)
+    g.pop("admin", None)
+
+
+def signed_out_url(who, idle=False, saved=False):
+    args = {"who": who}
+    if idle:
+        args["reason"] = "idle"
+    if saved:
+        args["saved"] = 1
+    return url_for("signed_out", **args)
+
+
+@app.before_request
+def sign_out_idle_sessions():
+    if request.path.startswith("/static/") or request.endpoint == "health":
+        return None
+    signed_in_admin_id, signed_in_user_id = session.get("admin_id"), session.get("user_id")
+    if not signed_in_admin_id and not signed_in_user_id:
+        return None
+    last_seen = session.get("last_seen")
+    if last_seen is not None and time.time() - last_seen > IDLE_TIMEOUT_SECONDS + IDLE_SERVER_GRACE_SECONDS:
+        admin = DB.session.get(Admin, signed_in_admin_id) if signed_in_admin_id else None
+        if admin:
+            audit("admin_logout", f"Signed out after {IDLE_TIMEOUT_SECONDS // 60} minutes without activity", actor=admin)
+            DB.session.commit()
+        end_session()
+        destination = signed_out_url("admin" if request.path.startswith("/admin") or not signed_in_user_id else "supplier",
+                                     idle=True)
+        if request.path in ("/session/keepalive", "/chat", "/admin/chat") or request.is_json:
+            return jsonify(signed_out=True, reply=IDLE_SIGNED_OUT_MESSAGE, redirect=destination), 401
+        return redirect(destination)
+    mark_active()
+    return None
+
+
+@app.route("/session/keepalive", methods=["POST"])
+def session_keepalive():
+    """The browser calls this while someone is typing or clicking, so they aren't signed out mid-form."""
+    if not session.get("admin_id") and not session.get("user_id"):
+        return jsonify(signed_out=True), 401
+    return jsonify(ok=True, timeout=IDLE_TIMEOUT_SECONDS)
+
+
 @app.after_request
 def add_security_headers(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -1304,6 +1374,7 @@ def inject_globals():
         "SUPPLIER_CATEGORIES": cats,
         "CATEGORY_SECTIONS": get_category_sections(),
         "PROVINCES": PROVINCES,
+        "idle_timeout_seconds": IDLE_TIMEOUT_SECONDS,
         "static_url": static_url,
         "COUNTRIES": COUNTRIES,
         "normalize_nationality": normalize_nationality,
@@ -1815,9 +1886,23 @@ def application_terms():
 
 @app.route("/logout")
 def logout():
-    for key in ("user_id", "supplier_onboarding", "pending_user_id", "verify_attempts", "code_sent_at", "login_next"):
-        session.pop(key, None)
-    return redirect(url_for("home"))
+    end_session()
+    return redirect(signed_out_url("supplier", idle=bool(request.args.get("idle"))))
+
+
+@app.route("/signed-out")
+def signed_out():
+    """Shown after every sign-out. Tells the browser to forget cached pages and stored data for the portal."""
+    who = "admin" if request.args.get("who") == "admin" else "supplier"
+    response = make_response(render_template(
+        "signed_out.html", who=who, idle=request.args.get("reason") == "idle", saved=bool(request.args.get("saved")),
+        idle_minutes=IDLE_TIMEOUT_SECONDS // 60,
+    ))
+    # Signed-in pages are already sent with "no-store", so Back can't show them; the page itself clears what the
+    # portal stored in the browser (e.g. Cebelihle's conversation). No Clear-Site-Data header: browsers can take
+    # several seconds to process it, which made this page slow.
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def get_pending_user():
@@ -1842,6 +1927,7 @@ def verify_email():
             for key in ("pending_user_id", "verify_attempts", "code_sent_at"):
                 session.pop(key, None)
             session["user_id"] = user.id
+            mark_active()
             session.permanent = True
             user.email_verified = True
             user.clear_verification_code()
@@ -1967,22 +2053,96 @@ def registration_details(user):
     }
 
 
+def saved_draft(user):
+    return DB.session.get(ApplicationDraft, user.id)
+
+
 def get_onboarding_draft():
+    """The supplier's application in progress: saved in the database so they can leave and come back later."""
     user = get_current_user()
-    draft = session.get("supplier_onboarding")
-    if not draft or normalize_email(draft.get("email")) != normalize_email(user.email):
+    row = saved_draft(user)
+    try:
+        draft = {**empty_draft(user), **json.loads(row.data_json)} if row else empty_draft(user)
+    except ValueError:
         draft = empty_draft(user)
     # Pre-fill from the registration; anything the supplier already typed wins.
     for field, value in registration_details(user).items():
         if not draft.get(field):
             draft[field] = value
-    save_draft(draft)
     return draft
 
 
 def save_draft(draft):
-    session["supplier_onboarding"] = draft
-    session.modified = True
+    """Save the application in progress for the signed-in supplier (commits)."""
+    user = get_current_user()
+    row = saved_draft(user)
+    if not row:
+        row = ApplicationDraft(user_id=user.id)
+        DB.session.add(row)
+    row.data_json = json.dumps(draft)
+    row.updated_at = utcnow()
+    DB.session.commit()
+
+
+def discard_draft(user):
+    row = saved_draft(user)
+    if row:
+        DB.session.delete(row)
+
+
+def draft_next_step(draft, user):
+    """The first step that still needs work: where "Continue your application" takes the supplier."""
+    if profile_step_error(draft, user):
+        return 1, "onboarding_profile"
+    if not draft.get("supplier_category"):
+        return 2, "onboarding_category"
+    if missing_required_documents(pending_documents(user)):
+        return 3, "onboarding_documents"
+    return 4, "onboarding_review"
+
+
+def raw_directors(form):
+    """Director rows exactly as typed (no checks), so half-finished rows aren't lost when saving for later."""
+    rows = defaultdict(dict)
+    for key, value in form.items():
+        match = DIRECTOR_FIELD_RE.match(key)
+        if match:
+            rows[int(match.group(2))][match.group(1)] = value.strip()
+    return [{"initials_surname": row.get("initials", "")[:120], "id_number": row.get("id", "")[:50],
+             "role": row.get("role", "")[:120], "nationality": row.get("nationality", "")[:80]}
+            for _, row in sorted(rows.items()) if any(row.values())]
+
+
+def draft_progress(user):
+    """For the dashboard: (step to continue at 1-4, last saved) when the supplier has started an application."""
+    row = saved_draft(user)
+    if not row and not pending_documents(user):
+        return None
+    draft = get_onboarding_draft()
+    step, _ = draft_next_step(draft, user)
+    return {"step": step, "saved_at": row.updated_at if row else None}
+
+
+def saved_for_later_response():
+    """After "Save & continue later". When the page saved itself because the supplier was idle, sign them out."""
+    if request.form.get("idle_sign_out"):
+        end_session()
+        return redirect(signed_out_url("supplier", idle=True, saved=True))
+    flash(SAVED_FOR_LATER_MESSAGE, "success")
+    return redirect(url_for("dashboard"))
+
+
+SAVED_FOR_LATER_MESSAGE = "Your application is saved. You can come back and continue it any time from your dashboard."
+
+
+@app.route("/onboarding")
+@login_required
+def onboarding_resume():
+    user = get_current_user()
+    blocked = redirect_if_already_applied(user)
+    if blocked:
+        return blocked
+    return redirect(url_for(draft_next_step(get_onboarding_draft(), user)[1]))
 
 
 def redirect_if_already_applied(user):
@@ -2026,13 +2186,14 @@ def onboarding_profile():
     draft = get_onboarding_draft()
 
     if request.method == "POST":
+        save_later = bool(request.form.get("save_later"))
         draft.update(read_fields(request.form, PROFILE_FIELDS))
         directors, director_error = parse_directors(request.form)
-        if directors:
-            draft["directors"] = directors
+        # Keep what was typed even when a row isn't valid yet, so nothing is lost.
+        draft["directors"] = directors or raw_directors(request.form)
         save_draft(draft)
 
-        if director_error:
+        if director_error and not save_later:
             flash(director_error, "error")
             return redirect(url_for("onboarding_profile"))
 
@@ -2044,6 +2205,8 @@ def onboarding_profile():
         for doc_type, file_storage in uploads:
             store_document(user.id, None, doc_type, file_storage)
         DB.session.commit()
+        if save_later:
+            return saved_for_later_response()
 
         error = profile_step_error(draft, user)
         if error:
@@ -2076,6 +2239,12 @@ def onboarding_category():
 
     if request.method == "POST":
         categories, details, error = parse_categories(request.form)
+        if request.form.get("save_later"):
+            if not error:
+                draft.update(supplier_categories=categories, supplier_category=categories[0],
+                             supplier_category_details=details, supplier_category_detail=details.get(categories[0], ""))
+                save_draft(draft)
+            return saved_for_later_response()
         if error:
             flash(error, "error")
             return redirect(url_for("onboarding_category"))
@@ -2122,6 +2291,10 @@ def onboarding_documents():
         DB.session.commit()
 
         missing = missing_required_documents(pending_documents(user))
+        if request.form.get("save_later"):
+            draft["documents_status"] = "pending" if missing else "complete"
+            save_draft(draft)
+            return saved_for_later_response()
         if missing:
             draft["documents_status"] = "pending"
             save_draft(draft)
@@ -2191,6 +2364,7 @@ def onboarding_review():
         )
         notify_supplier(user, *email_text("application_received", company_name=application.company_name), application)
         flag_director_matches(application)
+        discard_draft(user)
         DB.session.commit()
 
         session.pop("supplier_onboarding", None)
@@ -2247,6 +2421,7 @@ def dashboard():
         documents=SupplierDocument.query.filter_by(user_id=user.id).all(),
         contact_phone=(latest.phone if latest and latest.phone else user.phone),
         certificate_alerts=certificate_alerts(latest),
+        draft_progress=draft_progress(user) if not latest else None,
     )
 
 
@@ -2288,7 +2463,6 @@ def update_contact_details():
     user.phone = values["phone"][:50]
     user.address = values["address"][:255]
     DB.session.commit()
-    session.pop("supplier_onboarding", None)
     flash("Your account details have been updated.", "success")
     return redirect(url_for("supplier_settings"))
 
@@ -2560,6 +2734,7 @@ def admin_login():
         audit("admin_login", "Email and password", actor=admin)
         DB.session.commit()
         session["admin_id"] = admin.id
+        mark_active()
         session.permanent = True
         return redirect(url_for(admin.home_endpoint))
 
@@ -2608,6 +2783,7 @@ def admin_login_microsoft_callback():
     audit("admin_login", "Microsoft", actor=admin)
     DB.session.commit()
     session["admin_id"] = admin.id
+    mark_active()
     session.permanent = True
     flash(f"Welcome, {admin.name or admin.email}", "success")
     return redirect(url_for(admin.home_endpoint))
@@ -2616,11 +2792,13 @@ def admin_login_microsoft_callback():
 @app.route("/admin/logout")
 def admin_logout():
     admin = get_current_admin()
+    idle = bool(request.args.get("idle"))
     if admin:
-        audit("admin_logout", actor=admin)
+        audit("admin_logout", f"Signed out after {IDLE_TIMEOUT_SECONDS // 60} minutes without activity" if idle else "",
+              actor=admin)
         DB.session.commit()
-    session.pop("admin_id", None)
-    return redirect(url_for("admin_login"))
+    end_session()
+    return redirect(signed_out_url("admin", idle=idle))
 
 
 AWAITING_REVIEW_STATUSES = ["submitted", "pending_review", "under_review"]
@@ -4767,6 +4945,37 @@ def _answer_my_application_page(user):
             "All your applications are listed at /apps.")
 
 
+def _answer_my_company(user):
+    application = _supplier_application(user)
+    lines = [f"Your company is **{user.company_name}** (supplier ID {user.supplier_id})."]
+    if application:
+        if application.registered_vendor_name and application.registered_vendor_name != user.company_name:
+            lines.append(f"Registered name: {application.registered_vendor_name}")
+        if application.trading_name and application.trading_name not in (user.company_name, application.registered_vendor_name):
+            lines.append(f"Trading name: {application.trading_name}")
+        if application.business_registration_number:
+            lines.append(f"Registration number: {application.business_registration_number}")
+    return "\n".join(lines) + "\nTo see all your details, ask “what are my details?”."
+
+
+def _answer_my_details(user):
+    rows = [f"Company: {user.company_name}", f"Supplier ID: {user.supplier_id}",
+            f"Contact person: {user.contact_name or '—'}", f"Phone: {user.phone or '—'}", f"Login email: {user.email}"]
+    if user.address:
+        rows.append(f"Address: {user.address}")
+    return ("Your account details:\n" + _bullets(rows)
+            + "\nUpdate your phone, contact person and address at /settings. To change your login email, "
+            + REFER[0].lower() + REFER[1:])
+
+
+def _answer_admin_whoami(admin):
+    sections = sorted(ROLE_SECTIONS.get(admin.role, set()))
+    names = {"dashboard": "Dashboard", "applications": "Applications", "suppliers": "Suppliers", "catalogue": "Catalogue",
+             "reports": "Reports", "ict": "User audit and email templates"}
+    return (f"You're signed in as **{admin.name or admin.email}** ({admin.email}), a **{admin.role_label}**. "
+            f"Your role can open: {', '.join(names.get(s, s) for s in sections) or 'nothing yet'}.")
+
+
 def _answer_admin_my_queue(admin):
     rows = (SupplierApplication.query.filter(SupplierApplication.assigned_admin_id == admin.id,
                                              SupplierApplication.status.in_(AWAITING_REVIEW_STATUSES + ["returned_for_update"]))
@@ -4870,7 +5079,8 @@ SUPPLIER_INTENTS = [
            "Every time you sign in, we email you a 6-digit code that's valid for 10 minutes. If it hasn't arrived, "
            "check your spam folder and use **Resend code** (you can resend after 30 seconds). After 5 wrong codes "
            "you'll need to log in again."),
-    Intent("contact_details", ["contact details", "update my details", "change phone", "change email", "phone number",
+    Intent("contact_details", ["contact details", "update my details", "change my details", "change my phone number",
+                               "change my phone", "update my phone number", "change my address", "change phone", "change email", "phone number",
                                "contact person", "settings"],
            "Update your phone number and contact details at /settings. To change your login email, " + REFER[0].lower()
            + REFER[1:]),
@@ -4923,6 +5133,12 @@ SUPPLIER_INTENTS = [
            f"and contact {CONTACT_DETAILS}. Icebolethu staff will never ask for your password or verification code."),
     Intent("other_suppliers", ["other suppliers", "competitor", "who else", "other companies", "how many suppliers"],
            "I can only help with your own account, so I can't share information about other suppliers."),
+    Intent("my_company", ["name of my company", "my company name", "my company", "what is my company",
+                          "company am i", "my business name", "my business", "registered name", "my trading name",
+                          "my registration number", "which company"], _answer_my_company),
+    Intent("my_details", ["my details", "my account details", "who am i", "my information on file", "my email",
+                          "my login email", "my phone number", "my contact details", "my address", "my contact person",
+                          "what do you have on me", "my profile"], _answer_my_details),
     # ---- Frequently asked questions ----
     Intent("bot_identity", ["who are you", "are you a robot", "are you human", "are you a bot", "your name",
                             "what is cebelihle", "who is cebelihle", "bot"],
@@ -4987,8 +5203,9 @@ SUPPLIER_INTENTS = [
            "change the category, edit your application from /apps while it can still be edited."),
     Intent("save_progress", ["save", "continue later", "save my progress", "come back later", "lost my information",
                              "lost my details", "draft", "start over", "information disappeared"],
-           "Documents you upload are saved straight away. Details you type on the application steps are kept while "
-           "you're signed in (up to 8 hours), but signing out clears them, so try to finish and submit in one sitting."),
+           "Yes. On any step, click **Save & continue later** and everything you've entered is saved, even if it's "
+           "not finished. Uploaded documents are saved straight away. Next time you sign in, click **Continue "
+           "application** on your dashboard (/dashboard) to carry on where you left off."),
     Intent("multiple_accounts", ["second account", "another account", "two accounts", "multiple accounts",
                                  "more than one application", "second application", "another company", "two companies"],
            "Each account can hold one supplier application. To register a different company, sign up with a "
@@ -5305,6 +5522,8 @@ ADMIN_INTENTS = [
            "**Accept & keep on file** means the documents and information are in order but the services aren't "
            "needed yet. The supplier is told we'll contact them when they're needed, and their account stays inactive.",
            section="applications"),
+    Intent("whoami", ["who am i", "my name", "what is my name", "my role", "what is my role", "my account",
+                      "my access", "what can i open", "my permissions", "signed in as", "logged in as"], _answer_admin_whoami),
     Intent("my_queue", ["my applications", "assigned to me", "my queue", "my work", "what must i do",
                         "my open applications", "what is on my plate"], _answer_admin_my_queue, section="applications"),
     Intent("unassigned_list", ["unassigned applications", "list unassigned", "which applications are unassigned",

@@ -80,7 +80,7 @@
 
             {% block content %}{% endblock %}
 
-            <p class="ad-disclaimer">NB: Icebolethu Group reserves the right to reject any incomplete application or an application that contains incorrect information.</p>
+            <p class="ad-disclaimer">NB: Approved suppliers may remain on our database without being used until a suitable need arises. Being approved does not mean orders will start immediately.</p>
         </main>
     </div>
     <script src="{{ url_for('static', filename='js/shell.js') }}"></script>
@@ -88,5 +88,6 @@
     <script src="{{ url_for('static', filename='js/pdf-viewer.js') }}"></script>
     {% block scripts %}{% endblock %}
     {% with chat_url=url_for('supplier_chat') %}{% include "_chatbot.html" %}{% endwith %}
+    {% with logout_url=url_for('logout', idle=1) %}{% include "_idle.html" %}{% endwith %}
 </body>
 </html>

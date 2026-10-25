@@ -151,6 +151,7 @@
         }).then(function (resp) {
             return resp.json().catch(function () { return {}; });
         }).then(function (data) {
+            if (data.signed_out) { window.location.href = data.redirect || window.location.href; return; }
             var reply = data.reply || 'Sorry, something went wrong. Please try again.';
             turns.push({ role: 'assistant', content: reply });
             save();

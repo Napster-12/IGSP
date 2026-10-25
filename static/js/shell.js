@@ -1,5 +1,28 @@
 // Shared behaviour for the signed-in layouts (supplier_base.html and admin_base.html).
 (function () {
+    // Older Safari (before 15.4) has no CSS :has(), so the states the styles need are set as classes here.
+    if (document.querySelector('.ad-form-actions--sticky')) { document.body.classList.add('has-sticky-actions'); }
+    document.querySelectorAll('.ad-slot').forEach(function (slot) {
+        if (slot.querySelector('.ad-slot-dates')) { slot.classList.add('has-dates'); }
+    });
+    function syncChecked() {
+        document.querySelectorAll('.cat-tile, .ad-choice').forEach(function (tile) {
+            tile.classList.toggle('is-checked', !!tile.querySelector('input:checked'));
+        });
+    }
+    syncChecked();
+    document.addEventListener('change', syncChecked);
+    document.addEventListener('focusin', function (e) {
+        var tile = e.target.closest && e.target.closest('.cat-tile');
+        var keyboard = true;
+        try { keyboard = e.target.matches(':focus-visible'); } catch (err) { /* older browsers: assume keyboard */ }
+        if (tile && keyboard) { tile.classList.add('has-focus'); }
+    });
+    document.addEventListener('focusout', function (e) {
+        var tile = e.target.closest && e.target.closest('.cat-tile');
+        if (tile) { tile.classList.remove('has-focus'); }
+    });
+
     // Phone / tablet menu: the sidebar collapses into a top bar with a Menu button.
     var toggle = document.querySelector('[data-menu-toggle]');
     var menu = toggle && document.getElementById(toggle.getAttribute('aria-controls'));

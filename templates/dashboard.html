@@ -11,6 +11,8 @@
             <a href="{{ url_for('edit_application', application_id=supplier_application.id) }}" class="ad-btn ad-btn--primary">{{ ad.icon('edit') }}
                 {{ 'Update & resubmit' if supplier_application.status in ['returned_for_update', 'declined'] else 'Edit application' }}</a>
         {% endif %}
+    {% elif draft_progress %}
+        <a href="{{ url_for('onboarding_resume') }}" class="ad-btn ad-btn--primary">{{ ad.icon('edit') }} Continue application</a>
     {% else %}
         <a href="{{ url_for('onboarding_profile') }}" class="ad-btn ad-btn--primary">{{ ad.icon('plus') }} Start application</a>
     {% endif %}
@@ -21,8 +23,8 @@
     <section class="ad-stats" aria-label="Your account">
         <div class="ad-stat">
             <span class="ad-stat-label">Application</span>
-            <span class="ad-stat-value ad-stat-value--sm">{% if application %}{{ ad.status_badge(application.status) }}{% else %}<span class="ad-muted">Not started</span>{% endif %}</span>
-            <span class="ad-stat-sub">{% if application and application.created_at %}Submitted {{ application.created_at.strftime('%d %b %Y') }}{% else %}Apply to become a supplier{% endif %}</span>
+            <span class="ad-stat-value ad-stat-value--sm">{% if application %}{{ ad.status_badge(application.status) }}{% elif draft_progress %}<span class="ad-badge ad-badge--draft">In progress</span>{% else %}<span class="ad-muted">Not started</span>{% endif %}</span>
+            <span class="ad-stat-sub">{% if application and application.created_at %}Submitted {{ application.created_at.strftime('%d %b %Y') }}{% elif draft_progress %}Saved, not submitted yet{% else %}Apply to become a supplier{% endif %}</span>
         </div>
         <div class="ad-stat">
             <span class="ad-stat-label">Documents uploaded</span>
@@ -44,9 +46,15 @@
     {% if not application %}
         <section class="ad-card ad-hero">
             <div>
-                <h2>Become an Icebolethu Group supplier</h2>
-                <p>Complete your application in four short steps. You can save your progress between steps, and we'll email you as soon as it's been reviewed.</p>
-                <a href="{{ url_for('onboarding_profile') }}" class="ad-btn ad-btn--primary ad-btn--lg ad-mt">Start your application</a>
+                {% if draft_progress %}
+                    <h2>Continue your application</h2>
+                    <p>Your application is saved{% if draft_progress.saved_at %} (last saved {{ draft_progress.saved_at.strftime('%d %b %Y, %H:%M') }}){% endif %} but not submitted yet. Pick up where you left off: <strong>step {{ draft_progress.step }} of 4</strong>.</p>
+                    <a href="{{ url_for('onboarding_resume') }}" class="ad-btn ad-btn--primary ad-btn--lg ad-mt">Continue application</a>
+                {% else %}
+                    <h2>Become an Icebolethu Group supplier</h2>
+                    <p>Complete your application in four short steps. If you can't finish in one go, use <strong>Save &amp; continue later</strong> and come back any time.</p>
+                    <a href="{{ url_for('onboarding_profile') }}" class="ad-btn ad-btn--primary ad-btn--lg ad-mt">Start your application</a>
+                {% endif %}
             </div>
             <ol class="ad-howto">
                 <li><strong>Company profile</strong><span>Registration, tax, address, contact and directors</span></li>

@@ -1,0 +1,11 @@
+{#- Automatic sign-out after inactivity. Include with `logout_url` on signed-in pages. -#}
+<div data-idle-timeout="{{ idle_timeout_seconds }}" data-keepalive-url="{{ url_for('session_keepalive') }}"
+     data-logout-url="{{ logout_url }}" data-csrf="{{ csrf_token() }}" hidden></div>
+<div class="idle-warning" id="idle-warning" role="alertdialog" aria-labelledby="idle-title" aria-describedby="idle-text" hidden>
+    <div class="idle-card">
+        <strong id="idle-title">Are you still there?</strong>
+        <p id="idle-text">For your security, you'll be signed out in <span data-idle-countdown>60</span> seconds.</p>
+        <button type="button" class="ad-btn ad-btn--primary" data-idle-stay>Stay signed in</button>
+    </div>
+</div>
+<script src="{{ static_url('js/idle.js') }}"></script>

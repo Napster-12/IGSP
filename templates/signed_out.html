@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex">
+    <title>Signed out | IGSP</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap">
+    <link rel="stylesheet" href="{{ static_url('css/icebolethu.css') }}">
+</head>
+<body class="adm-login">
+    <div class="adm-login-photo" aria-hidden="true">
+        <img src="{{ url_for('static', filename='images/background.jpg') }}" alt="" decoding="async">
+    </div>
+
+    <div class="adm-login-side">
+        <main class="adm-login-main">
+            <img class="adm-login-logo" src="{{ url_for('static', filename='images/logo.png') }}" alt="Icebolethu Group" width="150" height="58">
+            <h1>You have been signed out</h1>
+            {% if idle %}
+                <p class="adm-login-lead">There was no activity for {{ idle_minutes }} minutes, so we signed you out to keep your account safe.</p>
+            {% endif %}
+
+            <div class="adm-login-panel">
+                {% if saved %}
+                    <div class="flash-message flash-success adm-login-flash">Your application was saved. Sign in to continue where you left off.</div>
+                {% endif %}
+                <a class="adm-login-btn signed-out-btn" href="{{ url_for('admin_login' if who == 'admin' else 'login') }}">Sign in again</a>
+                <ul class="signed-out-tips">
+                    <li>Your session has ended on this browser.</li>
+                    <li>On a shared computer, close the browser window too.</li>
+                    <li>We will never ask for your password or code.</li>
+                </ul>
+            </div>
+        </main>
+    </div>
+
+    <footer class="adm-login-foot">
+        <p><strong>Call Centre:</strong> 031 208 9102</p>
+        <p><strong>Email:</strong> supplier_onboarding@icebolethu.co.za</p>
+    </footer>
+
+    <script>
+        // Forget anything the portal stored in this browser (e.g. Cebelihle's conversation).
+        try { sessionStorage.clear(); } catch (e) { /* storage unavailable */ }
+        try {
+            Object.keys(localStorage).forEach(function (key) {
+                if (key.indexOf('igsp:') === 0 || key.indexOf('cebelihle') === 0) { localStorage.removeItem(key); }
+            });
+        } catch (e) { /* storage unavailable */ }
+        // A page restored by the Back button is re-checked by the server, which sends it here or to sign-in.
+        window.addEventListener('pageshow', function (event) { if (event.persisted) { window.location.reload(); } });
+    </script>
+</body>
+</html>
