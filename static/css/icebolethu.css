@@ -5213,7 +5213,7 @@ a.ig-stat:hover{
 /* ---- Inventory, catalogue & product requests ---- */
 .ig-num{ text-align:right; font-variant-numeric:tabular-nums; }
 .ig-table th.ig-num{ text-align:right; }
-.ig-clamp{ display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; max-width:360px; }
+.ig-clamp{ display:-webkit-box; -webkit-line-clamp:1; line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; max-width:360px; }
 .ig-select{
     height:40px;
     padding:0 12px;
@@ -5247,7 +5247,7 @@ a.ig-stat:hover{
 .ig-product h3{ font-size:16px; line-height:1.3; }
 .ig-product-supplier{ font-size:13px; color:var(--text-light); text-decoration:none; }
 .ig-product-supplier:hover{ color:var(--primary-text); text-decoration:underline; }
-.ig-product-desc{ font-size:13px; color:var(--text-light); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.ig-product-desc{ font-size:13px; color:var(--text-light); display:-webkit-box; -webkit-line-clamp:3; line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .ig-product-meta{ display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; margin-top:auto; padding-top:10px; border-top:1px solid var(--border); }
 .ig-product-meta dt{ font-size:11px; color:var(--text-light); }
 .ig-product-meta dd{ font-size:13px; }
