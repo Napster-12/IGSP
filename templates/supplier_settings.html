@@ -5,73 +5,73 @@
 {% block page_subtitle %}Manage your account details and password{% endblock %}
 
 {% block content %}
-    <div class="ad-grid ad-grid--2">
-        <section class="ad-card">
-            <div class="ad-card-head">
+    <div class="ig-grid ig-grid--2">
+        <section class="ig-card">
+            <div class="ig-card-head">
                 <div><h2>Account details</h2><p>Used to pre-fill your application</p></div>
             </div>
-            <form class="ad-form" method="post" action="{{ url_for('update_contact_details') }}">
+            <form class="ig-form" method="post" action="{{ url_for('update_contact_details') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="ad-form-grid ad-form-grid--2">
-                    <div class="ad-field-row">
+                <div class="ig-form-grid ig-form-grid--2">
+                    <div class="ig-field-row">
                         <label>Supplier ID</label>
                         <input type="text" value="{{ user.supplier_id or '—' }}" readonly>
                     </div>
-                    <div class="ad-field-row">
+                    <div class="ig-field-row">
                         <label>Login email</label>
                         <input type="email" value="{{ user.email }}" readonly>
                     </div>
-                    <div class="ad-field-row ad-field-row--wide">
+                    <div class="ig-field-row ig-field-row--wide">
                         <label for="company_name">Company name <span class="req">*</span></label>
                         <input id="company_name" name="company_name" type="text" value="{{ user.company_name }}" required>
                     </div>
-                    <div class="ad-field-row">
+                    <div class="ig-field-row">
                         <label for="contact_name">Contact person <span class="req">*</span></label>
                         <input id="contact_name" name="contact_name" type="text" value="{{ user.contact_name }}" required>
                     </div>
-                    <div class="ad-field-row">
+                    <div class="ig-field-row">
                         <label for="phone">Phone number <span class="req">*</span></label>
                         <input id="phone" name="phone" type="tel" value="{{ user.phone }}" required>
                     </div>
-                    <div class="ad-field-row ad-field-row--wide">
+                    <div class="ig-field-row ig-field-row--wide">
                         <label for="address">Address</label>
                         <input id="address" name="address" type="text" value="{{ user.address }}">
                     </div>
                 </div>
-                <div class="ad-form-actions"><button type="submit" class="ad-btn ad-btn--primary">Save details</button></div>
+                <div class="ig-form-actions"><button type="submit" class="ig-btn ig-btn--primary">Save details</button></div>
             </form>
         </section>
 
-        <div class="ad-stack">
-            <section class="ad-card">
-                <div class="ad-card-head">
+        <div class="ig-stack">
+            <section class="ig-card">
+                <div class="ig-card-head">
                     <div><h2>Change password</h2><p>At least 8 characters, including a number and a special character</p></div>
                 </div>
-                <form class="ad-form" method="post" action="{{ url_for('change_password') }}">
+                <form class="ig-form" method="post" action="{{ url_for('change_password') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="ad-field-row">
+                    <div class="ig-field-row">
                         <label for="current_password">Current password</label>
                         <input id="current_password" name="current_password" type="password" autocomplete="current-password" required>
                     </div>
-                    <div class="ad-form-grid ad-form-grid--2">
-                        <div class="ad-field-row">
+                    <div class="ig-form-grid ig-form-grid--2">
+                        <div class="ig-field-row">
                             <label for="new_password">New password</label>
                             <input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="8" required>
                         </div>
-                        <div class="ad-field-row">
+                        <div class="ig-field-row">
                             <label for="confirm_password">Confirm new password</label>
                             <input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="8" required>
                         </div>
                     </div>
-                    <div class="ad-form-actions"><button type="submit" class="ad-btn ad-btn--primary">Update password</button></div>
+                    <div class="ig-form-actions"><button type="submit" class="ig-btn ig-btn--primary">Update password</button></div>
                 </form>
             </section>
 
-            <section class="ad-card">
-                <div class="ad-card-head"><h2>Account status</h2></div>
-                <dl class="ad-fields ad-fields--1">
-                    <div class="ad-field"><dt>Email</dt><dd>{% if user.email_verified %}<span class="ad-badge ad-badge--active">Verified</span>{% else %}<span class="ad-badge ad-badge--inactive">Not verified</span>{% endif %}</dd></div>
-                    <div class="ad-field"><dt>Supplier account</dt><dd>{% if user.active %}<span class="ad-badge ad-badge--active">Active</span>{% else %}<span class="ad-badge ad-badge--inactive">Inactive</span> <span class="ad-muted">· activated when your application is approved</span>{% endif %}</dd></div>
+            <section class="ig-card">
+                <div class="ig-card-head"><h2>Account status</h2></div>
+                <dl class="ig-fields ig-fields--1">
+                    <div class="ig-field"><dt>Email</dt><dd>{% if user.email_verified %}<span class="ig-badge ig-badge--active">Verified</span>{% else %}<span class="ig-badge ig-badge--inactive">Not verified</span>{% endif %}</dd></div>
+                    <div class="ig-field"><dt>Supplier account</dt><dd>{% if user.active %}<span class="ig-badge ig-badge--active">Active</span>{% else %}<span class="ig-badge ig-badge--inactive">Inactive</span> <span class="ig-muted">· activated when your application is approved</span>{% endif %}</dd></div>
                 </dl>
             </section>
         </div>

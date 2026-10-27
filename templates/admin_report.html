@@ -5,7 +5,7 @@
 {% block page_title %}Reports{% endblock %}
 {% block page_subtitle %}{{ description }}{% endblock %}
 {% block page_actions %}
-    <a href="{{ url_for('admin_report_export', kind=kind, **range_args) }}" class="ad-btn ad-btn--primary">{{ ad.icon('download') }} Export CSV</a>
+    <a href="{{ url_for('admin_report_export', kind=kind, **range_args) }}" class="ig-btn ig-btn--primary">{{ ad.icon('download') }} Export CSV</a>
 {% endblock %}
 {% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>{% endblock %}
 
@@ -13,62 +13,62 @@
     {% include "_report_tabs.html" %}
 
     {% if report.snapshot %}
-        <p class="ad-snapshot">{{ ad.icon('clock') }} Live snapshot of the current inventory — period filters don't apply.</p>
+        <p class="ig-snapshot">{{ ad.icon('clock') }} Live snapshot of the current inventory — period filters don't apply.</p>
     {% else %}
-        <div class="ad-period">
-            <nav class="ad-tabs" aria-label="Period">
+        <div class="ig-period">
+            <nav class="ig-tabs" aria-label="Period">
                 {% for key, label in periods %}
-                    <a href="{{ url_for('admin_report', kind=kind, period=key) }}" class="ad-tab{% if key == period %} is-active{% endif %}">{{ label }}</a>
+                    <a href="{{ url_for('admin_report', kind=kind, period=key) }}" class="ig-tab{% if key == period %} is-active{% endif %}">{{ label }}</a>
                 {% endfor %}
             </nav>
-            <form method="get" class="ad-period-range{% if period == 'custom' %} is-active{% endif %}" aria-label="Custom date range">
+            <form method="get" class="ig-period-range{% if period == 'custom' %} is-active{% endif %}" aria-label="Custom date range">
                 <label><span>From</span><input type="date" name="date_from" value="{{ date_from }}" max="{{ date_to or '' }}"></label>
                 <label><span>To</span><input type="date" name="date_to" value="{{ date_to }}" min="{{ date_from or '' }}"></label>
-                <button type="submit" class="ad-btn ad-btn--primary ad-btn--sm">Apply</button>
-                {% if period == 'custom' %}<a href="{{ url_for('admin_report', kind=kind) }}" class="ad-btn ad-btn--ghost ad-btn--sm">Clear</a>{% endif %}
+                <button type="submit" class="ig-btn ig-btn--primary ig-btn--sm">Apply</button>
+                {% if period == 'custom' %}<a href="{{ url_for('admin_report', kind=kind) }}" class="ig-btn ig-btn--ghost ig-btn--sm">Clear</a>{% endif %}
             </form>
         </div>
     {% endif %}
 
-    <section class="ad-stats ad-stats--5" aria-label="Key figures">
+    <section class="ig-stats ig-stats--5" aria-label="Key figures">
         {% for label, value, sub in report.kpis %}
-            <div class="ad-stat">
-                <span class="ad-stat-label">{{ label }}</span>
-                <span class="ad-stat-value{% if value is string and value|length > 9 %} ad-stat-value--md{% endif %}">{{ value }}</span>
-                <span class="ad-stat-sub">{{ sub }}</span>
+            <div class="ig-stat">
+                <span class="ig-stat-label">{{ label }}</span>
+                <span class="ig-stat-value{% if value is string and value|length > 9 %} ig-stat-value--md{% endif %}">{{ value }}</span>
+                <span class="ig-stat-sub">{{ sub }}</span>
             </div>
         {% endfor %}
     </section>
 
-    <div class="ad-grid ad-grid--2">
+    <div class="ig-grid ig-grid--2">
         {% for chart in report.charts %}
-            <section class="ad-card{% if loop.last and loop.length is odd %} ad-span-2{% endif %}">
-                <div class="ad-card-head"><div><h2>{{ chart.title }}</h2><p>{{ chart.subtitle }}</p></div></div>
+            <section class="ig-card{% if loop.last and loop.length is odd %} ig-span-2{% endif %}">
+                <div class="ig-card-head"><div><h2>{{ chart.title }}</h2><p>{{ chart.subtitle }}</p></div></div>
                 {% if chart.labels %}
                     {% set h = [140, 40 * chart.labels|length + 50]|max if chart.horizontal else 260 %}
-                    <div class="ad-chart" style="height: {{ h }}px"><canvas id="{{ chart.id }}" role="img" aria-label="{{ chart.title }}"></canvas></div>
+                    <div class="ig-chart" style="height: {{ h }}px"><canvas id="{{ chart.id }}" role="img" aria-label="{{ chart.title }}"></canvas></div>
                 {% else %}
-                    <p class="ad-muted ad-chart-fallback">No data for this period.</p>
+                    <p class="ig-muted ig-chart-fallback">No data for this period.</p>
                 {% endif %}
             </section>
         {% endfor %}
     </div>
 
-    <section class="ad-card">
-        <div class="ad-card-head">
+    <section class="ig-card">
+        <div class="ig-card-head">
             <div><h2>Details</h2><p>{{ report.rows|length }} row{{ '' if report.rows|length == 1 else 's' }}{% if report.rows|length >= 500 %} (most recent 500){% endif %}</p></div>
         </div>
         {% if report.rows %}
-            <div class="ad-table-wrap ad-table-wrap--scroll">
-                <table class="ad-table">
+            <div class="ig-table-wrap ig-table-wrap--scroll">
+                <table class="ig-table">
                     <thead><tr>{% for column in report.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead>
                     <tbody>
                         {% for row in report.rows %}
                             <tr>
                                 {% for c in row %}
-                                    <td class="{% if c.num %}ad-num ad-nowrap{% endif %}{% if c.mono %} ad-mono{% endif %}">
-                                        {%- if c.badge -%}<span class="ad-badge ad-badge--{{ c.badge }}">{{ c.text }}</span>
-                                        {%- elif c.href -%}<a class="ad-row-link" href="{{ c.href }}">{{ c.text }}</a>
+                                    <td class="{% if c.num %}ig-num ig-nowrap{% endif %}{% if c.mono %} ig-mono{% endif %}">
+                                        {%- if c.badge -%}<span class="ig-badge ig-badge--{{ c.badge }}">{{ c.text }}</span>
+                                        {%- elif c.href -%}<a class="ig-row-link" href="{{ c.href }}">{{ c.text }}</a>
                                         {%- else -%}{{ c.text }}{%- endif -%}
                                     </td>
                                 {% endfor %}
@@ -78,7 +78,7 @@
                 </table>
             </div>
         {% else %}
-            <div class="ad-empty"><strong>Nothing to show</strong><span>Try a longer period or a wider date range.</span></div>
+            <div class="ig-empty"><strong>Nothing to show</strong><span>Try a longer period or a wider date range.</span></div>
         {% endif %}
     </section>
 
@@ -90,8 +90,8 @@
 document.addEventListener('DOMContentLoaded', function () {
     var charts = JSON.parse(document.getElementById('report-charts').textContent);
     if (!window.Chart) {
-        document.querySelectorAll('.ad-chart').forEach(function (el) {
-            el.innerHTML = '<p class="ad-muted ad-chart-fallback">Charts could not load (no internet connection?). The table below is unaffected.</p>';
+        document.querySelectorAll('.ig-chart').forEach(function (el) {
+            el.innerHTML = '<p class="ig-muted ig-chart-fallback">Charts could not load (no internet connection?). The table below is unaffected.</p>';
         });
         return;
     }

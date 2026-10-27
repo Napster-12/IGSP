@@ -3,15 +3,15 @@
 {% import "admin_macros.html" as ad with context %}
 
 {% macro input(name, label, value='', required=false, type='text', wide=false, hint='', attrs='') -%}
-    <div class="ad-field-row{% if wide %} ad-field-row--wide{% endif %}">
+    <div class="ig-field-row{% if wide %} ig-field-row--wide{% endif %}">
         <label for="{{ name }}">{{ label }}{% if required %} <span class="req">*</span>{% endif %}</label>
         <input id="{{ name }}" name="{{ name }}" type="{{ type }}" value="{{ value or '' }}" {% if required %}required{% endif %} {{ attrs|safe }}>
-        {% if hint %}<small class="ad-hint">{{ hint }}</small>{% endif %}
+        {% if hint %}<small class="ig-hint">{{ hint }}</small>{% endif %}
     </div>
 {%- endmacro %}
 
 {% macro province_select(value='') -%}
-    <div class="ad-field-row">
+    <div class="ig-field-row">
         <label for="province">Province <span class="req">*</span></label>
         <select id="province" name="province" required>
             <option value="">Select province</option>
@@ -25,12 +25,12 @@
 {# Wizard progress for the 4 onboarding steps. #}
 {% macro steps(current) -%}
     {% set labels = ['Company profile', 'Category', 'Documents', 'Review & submit'] %}
-    <ol class="ad-steps" aria-label="Application progress">
+    <ol class="ig-steps" aria-label="Application progress">
         {% for label in labels %}
             {% set n = loop.index %}
-            <li class="ad-step{% if n < current %} is-done{% elif n == current %} is-current{% endif %}" {% if n == current %}aria-current="step"{% endif %}>
-                <span class="ad-step-dot">{% if n < current %}{{ ad.icon('check') }}{% else %}{{ n }}{% endif %}</span>
-                <span class="ad-step-label">{{ label }}</span>
+            <li class="ig-step{% if n < current %} is-done{% elif n == current %} is-current{% endif %}" {% if n == current %}aria-current="step"{% endif %}>
+                <span class="ig-step-dot">{% if n < current %}{{ ad.icon('check') }}{% else %}{{ n }}{% endif %}</span>
+                <span class="ig-step-label">{{ label }}</span>
             </li>
         {% endfor %}
     </ol>
@@ -39,14 +39,14 @@
 {# Issue and expiry date fields for a dated certificate (VAT, B-BBEE). Named after the upload field. #}
 {% macro document_dates(field, doc=none, required=false, prefill=true) -%}
     {% set doc = doc if prefill else none %}
-    <div class="ad-slot-dates" data-document-dates>
+    <div class="ig-slot-dates" data-document-dates>
         <label>
-            <span>Issue date <span class="ad-required">*</span></span>
+            <span>Issue date <span class="ig-required">*</span></span>
             <input type="date" name="{{ field }}_issue_date" value="{{ doc.issue_date.isoformat() if doc and doc.issue_date else '' }}"
                    min="{{ EARLIEST_ISSUE_DATE.isoformat() }}" max="{{ TODAY.isoformat() }}"{% if required %} required{% endif %}>
         </label>
         <label>
-            <span>Expiry date <span class="ad-required">*</span></span>
+            <span>Expiry date <span class="ig-required">*</span></span>
             <input type="date" name="{{ field }}_expiry_date" value="{{ doc.expiry_date.isoformat() if doc and doc.expiry_date else '' }}"
                    min="{{ TODAY.isoformat() }}" max="{{ LATEST_EXPIRY_DATE.isoformat() }}"{% if required %} required{% endif %}>
         </label>
@@ -56,22 +56,22 @@
 {# One document upload slot: shows what's uploaded and lets the supplier pick a (replacement) PDF.
    Dated certificates (VAT, B-BBEE) also get mandatory issue and expiry dates. #}
 {% macro document_slot(field, title, doc=none, number='', required=true, help='', renewal=false) -%}
-    <div class="ad-slot{% if doc %} is-uploaded{% elif required %} is-missing{% endif %}">
-        <span class="ad-slot-num">{% if doc %}{{ ad.icon('check') }}{% else %}{{ number }}{% endif %}</span>
-        <div class="ad-slot-body">
-            <strong>{{ title }}{% if not required %} <span class="ad-muted">(optional)</span>{% endif %}</strong>
-            {% if help %}<span class="ad-slot-help">{{ help }}</span>{% endif %}
-            <span class="ad-slot-file" data-file-name>
+    <div class="ig-slot{% if doc %} is-uploaded{% elif required %} is-missing{% endif %}">
+        <span class="ig-slot-num">{% if doc %}{{ ad.icon('check') }}{% else %}{{ number }}{% endif %}</span>
+        <div class="ig-slot-body">
+            <strong>{{ title }}{% if not required %} <span class="ig-muted">(optional)</span>{% endif %}</strong>
+            {% if help %}<span class="ig-slot-help">{{ help }}</span>{% endif %}
+            <span class="ig-slot-file" data-file-name>
                 {% if doc %}
                     Uploaded: {{ doc.original_filename }} ·
-                    <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" target="_blank" rel="noopener" class="ad-link">View</a>
+                    <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" target="_blank" rel="noopener" class="ig-link">View</a>
                 {% else %}
                     {{ 'Not uploaded yet' }}
                 {% endif %}
             </span>
         </div>
-        <label class="ad-btn ad-btn--ghost ad-btn--sm ad-slot-btn" for="{{ field }}">{{ ad.icon('upload') }} {{ 'Replace' if doc else 'Choose PDF' }}</label>
-        <input type="file" id="{{ field }}" name="{{ field }}" accept="application/pdf,.pdf" class="ad-sr" data-file-input>
+        <label class="ig-btn ig-btn--ghost ig-btn--sm ig-slot-btn" for="{{ field }}">{{ ad.icon('upload') }} {{ 'Replace' if doc else 'Choose PDF' }}</label>
+        <input type="file" id="{{ field }}" name="{{ field }}" accept="application/pdf,.pdf" class="ig-sr" data-file-input>
         {#- On the renewal page the dates start empty and become required once a file is chosen. -#}
         {% if title in DATED_DOCUMENTS %}{{ document_dates(field, doc, required=doc is not none and not renewal, prefill=not renewal) }}{% endif %}
     </div>
@@ -139,15 +139,15 @@
 {# Directors / shareholders table; rows added with the "Add" button (static/js/portal.js). #}
 {% macro directors_table(directors=[]) -%}
     {% import '_macros.html' as ui with context %}
-    <div class="ad-table-wrap">
-        <table class="ad-table directors-table" id="directors-table">
+    <div class="ig-table-wrap">
+        <table class="ig-table directors-table" id="directors-table">
             <thead>
                 <tr>
                     <th>Initials &amp; surname <span class="req">*</span></th>
                     <th>Nationality <span class="req">*</span></th>
                     <th>ID / passport number <span class="req">*</span></th>
                     <th>Role <span class="req">*</span></th>
-                    <th><span class="ad-sr">Remove</span></th>
+                    <th><span class="ig-sr">Remove</span></th>
                 </tr>
             </thead>
             <tbody>
@@ -158,7 +158,7 @@
                         <td data-label="Nationality">{{ ui.nationality_select('director_nationality_' ~ i, director.nationality or '') }}</td>
                         <td data-label="ID / passport number">{{ ui.director_id_input('director_id_' ~ i, director.id_number or '') }}</td>
                         <td data-label="Role">{{ role_select('director_role_' ~ i, director.role or '') }}</td>
-                        <td class="ad-cell-action"><button type="button" class="ad-btn ad-btn--ghost ad-btn--sm" data-remove-row>Remove</button></td>
+                        <td class="ig-cell-action"><button type="button" class="ig-btn ig-btn--ghost ig-btn--sm" data-remove-row>Remove</button></td>
                     </tr>
                 {% endfor %}
             </tbody>
@@ -170,10 +170,10 @@
             <td data-label="Nationality">{{ ui.nationality_select('director_nationality_{INDEX}') }}</td>
             <td data-label="ID / passport number">{{ ui.director_id_input('director_id_{INDEX}') }}</td>
             <td data-label="Role">{{ role_select('director_role_{INDEX}') }}</td>
-            <td class="ad-cell-action"><button type="button" class="ad-btn ad-btn--ghost ad-btn--sm" data-remove-row>Remove</button></td>
+            <td class="ig-cell-action"><button type="button" class="ig-btn ig-btn--ghost ig-btn--sm" data-remove-row>Remove</button></td>
         </tr>
     </template>
-    <button type="button" class="ad-btn ad-btn--ghost ad-mt" data-add-director>{{ ad.icon('plus') }} Add director / shareholder</button>
+    <button type="button" class="ig-btn ig-btn--ghost ig-mt" data-add-director>{{ ad.icon('plus') }} Add director / shareholder</button>
 {%- endmacro %}
 
 {% macro role_select(name, value='') -%}

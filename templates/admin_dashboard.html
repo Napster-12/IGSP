@@ -5,85 +5,85 @@
 {% block page_title %}Welcome back{% if admin.name %}, {{ admin.name.split()[0] }}{% endif %}{% endblock %}
 {% block page_subtitle %}Here's what needs your attention across the supplier portal.{% endblock %}
 {% block page_actions %}
-    <a href="{{ url_for('admin_reports') }}" class="ad-btn ad-btn--ghost">{{ ad.icon('reports') }} Reports</a>
-    <a href="{{ url_for('admin_applications', assigned='unassigned') }}" class="ad-btn ad-btn--ghost">Unassigned</a>
-    <a href="{{ url_for('admin_applications', assigned='me') }}" class="ad-btn ad-btn--primary">My assigned applications</a>
+    <a href="{{ url_for('admin_reports') }}" class="ig-btn ig-btn--ghost">{{ ad.icon('reports') }} Reports</a>
+    <a href="{{ url_for('admin_applications', assigned='unassigned') }}" class="ig-btn ig-btn--ghost">Unassigned</a>
+    <a href="{{ url_for('admin_applications', assigned='me') }}" class="ig-btn ig-btn--primary">My assigned applications</a>
 {% endblock %}
 
 {% block content %}
-    <section class="ad-stats" aria-label="Key figures">
-        <a class="ad-stat ad-stat--accent" href="{{ url_for('admin_applications', status='pending_review') }}">
-            <span class="ad-stat-label">Awaiting review</span>
-            <span class="ad-stat-value">{{ awaiting_count }}</span>
-            <span class="ad-stat-sub">{{ assigned_to_me_count }} assigned to you · {{ unassigned_count }} unassigned</span>
+    <section class="ig-stats" aria-label="Key figures">
+        <a class="ig-stat ig-stat--accent" href="{{ url_for('admin_applications', status='pending_review') }}">
+            <span class="ig-stat-label">Awaiting review</span>
+            <span class="ig-stat-value">{{ awaiting_count }}</span>
+            <span class="ig-stat-sub">{{ assigned_to_me_count }} assigned to you · {{ unassigned_count }} unassigned</span>
         </a>
-        <a class="ad-stat" href="{{ url_for('admin_applications') }}">
-            <span class="ad-stat-label">Total applications</span>
-            <span class="ad-stat-value">{{ total_applications }}</span>
-            <span class="ad-stat-sub">{{ status_counts.returned_for_update }} returned to suppliers</span>
+        <a class="ig-stat" href="{{ url_for('admin_applications') }}">
+            <span class="ig-stat-label">Total applications</span>
+            <span class="ig-stat-value">{{ total_applications }}</span>
+            <span class="ig-stat-sub">{{ status_counts.returned_for_update }} returned to suppliers</span>
         </a>
-        <a class="ad-stat" href="{{ url_for('admin_applications', status='approved') }}">
-            <span class="ad-stat-label">Approved</span>
-            <span class="ad-stat-value">{{ approved_count }}</span>
-            <span class="ad-stat-sub">{{ rejected_count }} declined</span>
+        <a class="ig-stat" href="{{ url_for('admin_applications', status='approved') }}">
+            <span class="ig-stat-label">Approved</span>
+            <span class="ig-stat-value">{{ approved_count }}</span>
+            <span class="ig-stat-sub">{{ rejected_count }} declined</span>
         </a>
-        <a class="ad-stat" href="{{ url_for('admin_suppliers') }}">
-            <span class="ad-stat-label">Suppliers</span>
-            <span class="ad-stat-value">{{ total_suppliers }}</span>
-            <span class="ad-stat-sub">{{ active_suppliers }} active</span>
+        <a class="ig-stat" href="{{ url_for('admin_suppliers') }}">
+            <span class="ig-stat-label">Suppliers</span>
+            <span class="ig-stat-value">{{ total_suppliers }}</span>
+            <span class="ig-stat-sub">{{ active_suppliers }} active</span>
         </a>
     </section>
 
-    <div class="ad-grid ad-grid--2-1">
-        <section class="ad-card">
-            <div class="ad-card-head">
+    <div class="ig-grid ig-grid--2-1">
+        <section class="ig-card">
+            <div class="ig-card-head">
                 <div>
                     <h2>Awaiting review</h2>
                     <p>Oldest first</p>
                 </div>
-                <a href="{{ url_for('admin_applications', status='pending_review') }}" class="ad-link">View all</a>
+                <a href="{{ url_for('admin_applications', status='pending_review') }}" class="ig-link">View all</a>
             </div>
             {% if awaiting_review %}
-                <ul class="ad-queue">
+                <ul class="ig-queue">
                     {% for application in awaiting_review %}
                         <li>
-                            <a href="{{ url_for('admin_application_detail', application_id=application.id) }}" class="ad-queue-item">
-                                <div class="ad-queue-main">
+                            <a href="{{ url_for('admin_application_detail', application_id=application.id) }}" class="ig-queue-item">
+                                <div class="ig-queue-main">
                                     <strong>{{ application.company_name }}</strong>
                                     <span>{{ application.category_names|join(', ') or '—' }}</span>
                                 </div>
-                                <div class="ad-queue-meta">
+                                <div class="ig-queue-meta">
                                     {{ ad.status_badge(application.status) }}
                                     {{ ad.assignee(application, admin) }}
-                                    <span class="ad-muted">{{ application.created_at.strftime('%d %b %Y') if application.created_at else '' }}</span>
+                                    <span class="ig-muted">{{ application.created_at.strftime('%d %b %Y') if application.created_at else '' }}</span>
                                 </div>
                             </a>
                         </li>
                     {% endfor %}
                 </ul>
             {% else %}
-                <div class="ad-empty">
+                <div class="ig-empty">
                     <strong>All caught up</strong>
                     <span>No applications are waiting for review.</span>
                 </div>
             {% endif %}
         </section>
 
-        <section class="ad-card">
-            <div class="ad-card-head">
+        <section class="ig-card">
+            <div class="ig-card-head">
                 <div>
                     <h2>Applications by status</h2>
                     <p>{{ total_applications }} total</p>
                 </div>
             </div>
             {% set max_count = (status_counts.values()|max) or 1 %}
-            <ul class="ad-bars">
+            <ul class="ig-bars">
                 {% for status, count in status_counts.items() %}
                     <li>
-                        <a href="{{ url_for('admin_applications', status=status) }}" class="ad-bar-row">
-                            <span class="ad-bar-label">{{ status_label(status) }}</span>
-                            <span class="ad-bar-track"><span class="ad-bar-fill" style="width: {{ (count / max_count * 100)|round(1) }}%"></span></span>
-                            <span class="ad-bar-value">{{ count }}</span>
+                        <a href="{{ url_for('admin_applications', status=status) }}" class="ig-bar-row">
+                            <span class="ig-bar-label">{{ status_label(status) }}</span>
+                            <span class="ig-bar-track"><span class="ig-bar-fill" style="width: {{ (count / max_count * 100)|round(1) }}%"></span></span>
+                            <span class="ig-bar-value">{{ count }}</span>
                         </a>
                     </li>
                 {% endfor %}
@@ -91,36 +91,36 @@
         </section>
     </div>
 
-    <section class="ad-card">
-        <div class="ad-card-head">
+    <section class="ig-card">
+        <div class="ig-card-head">
             <div>
                 <h2>Recent applications</h2>
                 <p>Latest submissions</p>
             </div>
-            <a href="{{ url_for('admin_applications') }}" class="ad-link">View all applications</a>
+            <a href="{{ url_for('admin_applications') }}" class="ig-link">View all applications</a>
         </div>
         {% if recent_applications %}
-            <div class="ad-table-wrap">
-                <table class="ad-table">
+            <div class="ig-table-wrap">
+                <table class="ig-table">
                     <thead>
-                        <tr><th>Company</th><th>Contact</th><th>Category</th><th>Status</th><th>Submitted</th><th><span class="ad-sr">Open</span></th></tr>
+                        <tr><th>Company</th><th>Contact</th><th>Category</th><th>Status</th><th>Submitted</th><th><span class="ig-sr">Open</span></th></tr>
                     </thead>
                     <tbody>
                         {% for application in recent_applications %}
                             <tr>
-                                <td><a class="ad-row-link" href="{{ url_for('admin_application_detail', application_id=application.id) }}">{{ application.company_name }}</a></td>
+                                <td><a class="ig-row-link" href="{{ url_for('admin_application_detail', application_id=application.id) }}">{{ application.company_name }}</a></td>
                                 <td>{{ application.contact_name }}</td>
                                 <td>{{ application.category_names|join(', ') or '—' }}</td>
                                 <td>{{ ad.status_badge(application.status) }}</td>
-                                <td class="ad-nowrap">{{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}</td>
-                                <td class="ad-cell-action"><a href="{{ url_for('admin_application_detail', application_id=application.id) }}" class="ad-link">Open</a></td>
+                                <td class="ig-nowrap">{{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}</td>
+                                <td class="ig-cell-action"><a href="{{ url_for('admin_application_detail', application_id=application.id) }}" class="ig-link">Open</a></td>
                             </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
         {% else %}
-            <div class="ad-empty"><strong>No applications yet</strong><span>Submitted applications will appear here.</span></div>
+            <div class="ig-empty"><strong>No applications yet</strong><span>Submitted applications will appear here.</span></div>
         {% endif %}
     </section>
 {% endblock %}

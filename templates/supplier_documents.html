@@ -20,17 +20,17 @@
     ] %}
     {% set uploaded_count = required_docs|select('in', by_type)|list|length %}
 
-    <form class="ad-form ad-stack" method="post" action="{{ url_for('onboarding_documents') }}" enctype="multipart/form-data" data-idle-save>
+    <form class="ig-form ig-stack" method="post" action="{{ url_for('onboarding_documents') }}" enctype="multipart/form-data" data-idle-save>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <section class="ad-card">
-            <div class="ad-card-head">
+        <section class="ig-card">
+            <div class="ig-card-head">
                 <div><h2>Required documents</h2><p>{{ uploaded_count }} of {{ required_docs|length }} uploaded</p></div>
             </div>
-            <div class="ad-meter ad-meter--sm" aria-hidden="true"><span style="width: {{ (uploaded_count / required_docs|length * 100)|round }}%"></span></div>
-            <div class="ad-slots ad-mt">
+            <div class="ig-meter ig-meter--sm" aria-hidden="true"><span style="width: {{ (uploaded_count / required_docs|length * 100)|round }}%"></span></div>
+            <div class="ig-slots ig-mt">
                 {% for doc_type in required_docs %}
                     {% if doc_type == 'Declaration Form' %}
-                        {% set help %}Download the <a href="{{ url_for('static', filename='Declaration.pdf') }}" target="_blank" rel="noopener" class="ad-link">declaration form</a>, print, sign and upload it.{% endset %}
+                        {% set help %}Download the <a href="{{ url_for('static', filename='Declaration.pdf') }}" target="_blank" rel="noopener" class="ig-link">declaration form</a>, print, sign and upload it.{% endset %}
                     {% else %}
                         {% set help = '' %}
                     {% endif %}
@@ -39,17 +39,17 @@
             </div>
         </section>
 
-        <section class="ad-card">
-            <div class="ad-card-head">
+        <section class="ig-card">
+            <div class="ig-card-head">
                 <div><h2>Other supporting documents</h2><p>Optional — e.g. public liability insurance, industry licence or accreditation, COIDA letter of good standing</p></div>
             </div>
             {{ f.document_slot('document_file_other', 'Other supporting documents', by_type.get('Other Supporting Documents'), number='+', required=false) }}
         </section>
 
-        <div class="ad-form-actions ad-form-actions--sticky">
-            <a href="{{ url_for('onboarding_category') }}" class="ad-btn ad-btn--ghost">← Back</a>
-            <button type="submit" name="save_later" value="1" formnovalidate class="ad-btn ad-btn--ghost ob-save-later">Save &amp; continue later</button>
-            <button type="submit" class="ad-btn ad-btn--primary">Upload &amp; continue to review →</button>
+        <div class="ig-form-actions ig-form-actions--sticky">
+            <a href="{{ url_for('onboarding_category') }}" class="ig-btn ig-btn--ghost">← Back</a>
+            <button type="submit" name="save_later" value="1" formnovalidate class="ig-btn ig-btn--ghost ob-save-later">Save &amp; continue later</button>
+            <button type="submit" class="ig-btn ig-btn--primary">Upload &amp; continue to review →</button>
         </div>
     </form>
 {% endblock %}

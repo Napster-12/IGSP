@@ -263,7 +263,7 @@ def test_admin_sees_dates_and_must_give_them_when_replacing(client):
     admin.admin_login()
     admin.assign(app_id)
     page = admin.get(f"/admin/applications/{app_id}").data.decode()
-    assert page.count('<span class="ad-doc-dates">Issued ') == 2 and "Upload replacement" in page
+    assert page.count('<span class="ig-doc-dates">Issued ') == 2 and "Upload replacement" in page
     with client.app.app_context():
         vat_id = igsp.SupplierDocument.query.filter_by(document_type="SARS VAT Certificate").one().id
     admin.post(f"/admin/applications/{app_id}/documents/{vat_id}/replace", {"document_file": pdf("vat2.pdf")},
@@ -582,18 +582,18 @@ def test_admin_pages_share_layout_and_decline_needs_comment(client):
              "/admin/suppliers": "Suppliers", "/admin/reports": "Reports"}
     for url, active in pages.items():
         page = admin.get(url).data.decode()
-        assert 'class="ad-shell"' in page, url
+        assert 'class="ig-shell"' in page, url
         assert re.search(r'is-active"\s+aria-current="page">.*?<span>' + active + '</span>', page, re.S), url
-        assert 'class="ad-bell has-unread"' in page and "<span>Notifications</span>" not in page, url
-    assert 'ad-bell has-unread is-active' in admin.get("/admin/notifications").data.decode()
+        assert 'class="ig-bell has-unread"' in page and "<span>Notifications</span>" not in page, url
+    assert 'ig-bell has-unread is-active' in admin.get("/admin/notifications").data.decode()
 
     # First visit shows the new notification as New; afterwards it's read.
     with client.app.app_context():
         admin_id = igsp.find_admin_by_email("admin@icebolethu.co.za").id
         igsp.DB.session.add(igsp.Notification(admin_id=admin_id, title="Fresh", message="hello"))
         igsp.DB.session.commit()
-    assert 'class="ad-new">New<' in admin.get("/admin/notifications").data.decode()
-    assert 'class="ad-new">New<' not in admin.get("/admin/notifications").data.decode()
+    assert 'class="ig-new">New<' in admin.get("/admin/notifications").data.decode()
+    assert 'class="ig-new">New<' not in admin.get("/admin/notifications").data.decode()
 
     resp = admin.post(f"/admin/applications/{app_id}/update",
                       {"status": "declined", "documents_status": "complete", "review_comments": ""}, follow_redirects=True)
@@ -781,14 +781,14 @@ PRODUCT = {"name": "Pine casket", "category": "Caskets and Tombstones", "descrip
 def test_notification_bell_on_every_supplier_page(client):
     client.signup_and_login()
     page = client.get("/dashboard").data.decode()
-    assert 'class="ad-bell"' in page and '<span class="ad-bell-count is-zero" aria-hidden="true">0</span>' in page
+    assert 'class="ig-bell"' in page and '<span class="ig-bell-count is-zero" aria-hidden="true">0</span>' in page
     submit_application(client)
     for url in ("/dashboard", "/settings", "/apps"):
         page = client.get(url).data.decode()
-        assert 'class="ad-bell has-unread"' in page and '<span class="ad-bell-count" aria-hidden="true">1</span>' in page, url
+        assert 'class="ig-bell has-unread"' in page and '<span class="ig-bell-count" aria-hidden="true">1</span>' in page, url
         assert "<span>Notifications</span>" not in page, url  # replaced the sidebar item
     client.get("/notifications")  # opening the list marks them read
-    assert 'ad-bell-count is-zero" aria-hidden="true">0<' in client.get("/dashboard").data.decode()
+    assert 'ig-bell-count is-zero" aria-hidden="true">0<' in client.get("/dashboard").data.decode()
 
 
 def test_on_file_decision(client):
@@ -811,7 +811,7 @@ def test_on_file_decision(client):
         assert igsp.ApplicationEvent.query.filter_by(application_id=app_id, to_status="on_file").count() == 1
 
     page = client.get("/dashboard").data.decode()
-    assert "ad-badge--on_file" in page and "We will keep your details on file" in page
+    assert "ig-badge--on_file" in page and "We will keep your details on file" in page
     assert client.get("/inventory").headers["Location"].endswith("/dashboard")  # no account, so no inventory
     assert client.get(f"/applications/{app_id}/edit").status_code == 302  # no longer editable
 
@@ -887,7 +887,7 @@ def test_additional_reports(client):
 
     # The applications report shows the report buttons too.
     page = admin.get("/admin/reports").data.decode()
-    assert 'class="ad-report-tabs"' in page and "/admin/reports/suppliers" in page
+    assert 'class="ig-report-tabs"' in page and "/admin/reports/suppliers" in page
     assert "/admin/reports/requests" not in page
 
     page = admin.get("/admin/reports/suppliers?period=all").data.decode()
@@ -1319,7 +1319,7 @@ def test_user_audit_shows_everything_an_admin_did_and_no_suppliers(client):
         assert igsp.AuditLog.query.filter(igsp.AuditLog.actor_type != "admin").count() == 0
 
     def rows(page):
-        return re.findall(r'<td class="ad-nowrap">([A-Za-z][^<]+)</td>', page)
+        return re.findall(r'<td class="ig-nowrap">([A-Za-z][^<]+)</td>', page)
 
     lead_page = ict.get(f"/admin/ict/audit?admin={lead_id}").data.decode()
     assert rows(lead_page) == ["Report exported", "Status changed", "Document viewed", "Assigned to admin",

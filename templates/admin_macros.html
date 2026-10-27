@@ -1,6 +1,6 @@
 {#- Icons and badges shared by the admin pages: {% import "admin_macros.html" as ad with context %} -#}
 {% macro icon(name) -%}
-    <svg class="ad-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg class="ig-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     {%- if name == 'dashboard' -%}<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>
     {%- elif name == 'applications' -%}<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
     {%- elif name == 'suppliers' -%}<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
@@ -28,35 +28,35 @@
 {%- endmacro %}
 {#- Top-right bell on every signed-in page; it flashes while there are unread notifications. -#}
 {% macro notification_bell(url, count, active=False) -%}
-    <a href="{{ url }}" class="ad-bell{% if count > 0 %} has-unread{% endif %}{% if active %} is-active{% endif %}"
+    <a href="{{ url }}" class="ig-bell{% if count > 0 %} has-unread{% endif %}{% if active %} is-active{% endif %}"
        title="Notifications" aria-label="Notifications{% if count > 0 %}, {{ count }} unread{% endif %}"{% if active %} aria-current="page"{% endif %}>
-        <span class="ad-bell-icon">{{ icon('bell') }}</span>
-        <span class="ad-bell-count{% if count == 0 %} is-zero{% endif %}" aria-hidden="true">{{ count if count < 100 else '99+' }}</span>
+        <span class="ig-bell-icon">{{ icon('bell') }}</span>
+        <span class="ig-bell-count{% if count == 0 %} is-zero{% endif %}" aria-hidden="true">{{ count if count < 100 else '99+' }}</span>
     </a>
 {%- endmacro %}
 
 {#- Own line under a dated certificate (VAT, B-BBEE): issue and expiry, flagged when expired or expiring soon. -#}
 {% macro document_dates(doc) -%}
     {%- if doc.issue_date and doc.expiry_date -%}
-        <span class="ad-doc-dates">Issued {{ doc.issue_date.strftime('%d %b %Y') }} · Expires {{ doc.expiry_date.strftime('%d %b %Y') }}
-            {%- if doc.expiry_state == 'expired' %} <span class="ad-expiry ad-expiry--expired">Expired</span>
-            {%- elif doc.expiry_state == 'expiring' %} <span class="ad-expiry ad-expiry--expiring">Expires soon</span>{% endif %}</span>
+        <span class="ig-doc-dates">Issued {{ doc.issue_date.strftime('%d %b %Y') }} · Expires {{ doc.expiry_date.strftime('%d %b %Y') }}
+            {%- if doc.expiry_state == 'expired' %} <span class="ig-expiry ig-expiry--expired">Expired</span>
+            {%- elif doc.expiry_state == 'expiring' %} <span class="ig-expiry ig-expiry--expiring">Expires soon</span>{% endif %}</span>
     {%- elif doc.document_type in DATED_DOCUMENTS -%}
-        <span class="ad-doc-dates"><span class="ad-expiry ad-expiry--expiring">Issue and expiry dates not captured</span></span>
+        <span class="ig-doc-dates"><span class="ig-expiry ig-expiry--expiring">Issue and expiry dates not captured</span></span>
     {%- endif -%}
 {%- endmacro %}
 
 {% macro status_badge(status) -%}
-    <span class="ad-badge ad-badge--{{ status }}">{{ status_label(status) }}</span>
+    <span class="ig-badge ig-badge--{{ status }}">{{ status_label(status) }}</span>
 {%- endmacro %}
 
 {% macro assignee(application, me) -%}
     {% if not application.assigned_admin_id %}
-        <span class="ad-assignee ad-assignee--none">Unassigned</span>
+        <span class="ig-assignee ig-assignee--none">Unassigned</span>
     {% elif application.assigned_admin_id == me.id %}
-        <span class="ad-assignee ad-assignee--me">You</span>
+        <span class="ig-assignee ig-assignee--me">You</span>
     {% else %}
-        <span class="ad-assignee">{{ application.assigned_admin.name or application.assigned_admin.email }}</span>
+        <span class="ig-assignee">{{ application.assigned_admin.name or application.assigned_admin.email }}</span>
     {% endif %}
 {%- endmacro %}
 

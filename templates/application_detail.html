@@ -2,9 +2,9 @@
 {% import "admin_macros.html" as ad with context %}
 
 {% macro field(label, value, wide=false, mono=false) -%}
-    <div class="ad-field{% if wide %} ad-field--wide{% endif %}">
+    <div class="ig-field{% if wide %} ig-field--wide{% endif %}">
         <dt>{{ label }}</dt>
-        <dd{% if mono %} class="ad-mono"{% endif %}>{% if value %}{{ value }}{% else %}<span class="ad-muted">—</span>{% endif %}</dd>
+        <dd{% if mono %} class="ig-mono"{% endif %}>{% if value %}{{ value }}{% else %}<span class="ig-muted">—</span>{% endif %}</dd>
     </div>
 {%- endmacro %}
 
@@ -13,22 +13,22 @@
 {% block page_subtitle %}Submitted {{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}{% if application.updated_at and application.created_at and application.updated_at > application.created_at %} · Last updated {{ application.updated_at.strftime('%d %b %Y') }}{% endif %}{% endblock %}
 {% block page_actions %}
     {% if can_edit %}
-        <a href="{{ url_for('edit_application', application_id=application.id) }}" class="ad-btn ad-btn--primary">{{ ad.icon('edit') }}
+        <a href="{{ url_for('edit_application', application_id=application.id) }}" class="ig-btn ig-btn--primary">{{ ad.icon('edit') }}
             {{ 'Update & resubmit' if application.status in ['returned_for_update', 'declined'] else 'Edit application' }}</a>
     {% endif %}
 {% endblock %}
 
 {% block content %}
     {% if application.review_comments %}
-        <div class="ad-comment ad-comment--card">
-            <span class="ad-comment-label">Comments from Icebolethu Group</span>
+        <div class="ig-comment ig-comment--card">
+            <span class="ig-comment-label">Comments from Icebolethu Group</span>
             <p>{{ application.review_comments }}</p>
         </div>
     {% endif %}
 
-    <section class="ad-card">
-        <div class="ad-card-head"><h2>Company</h2></div>
-        <dl class="ad-fields">
+    <section class="ig-card">
+        <div class="ig-card-head"><h2>Company</h2></div>
+        <dl class="ig-fields">
             {{ field('Registered vendor name', application.registered_vendor_name, wide=true) }}
             {{ field('Trading name', application.trading_name) }}
             {{ field('Registration number', application.business_registration_number, mono=true) }}
@@ -38,18 +38,18 @@
         </dl>
     </section>
 
-    <div class="ad-grid ad-grid--2">
-        <section class="ad-card">
-            <div class="ad-card-head"><h2>Address</h2></div>
-            <dl class="ad-fields ad-fields--1">
+    <div class="ig-grid ig-grid--2">
+        <section class="ig-card">
+            <div class="ig-card-head"><h2>Address</h2></div>
+            <dl class="ig-fields ig-fields--1">
                 {{ field('Physical address', application.physical_address) }}
                 {{ field('City / Province', [application.city, application.province]|select|join(', ')) }}
                 {{ field('Postal code', application.postal_code) }}
             </dl>
         </section>
-        <section class="ad-card">
-            <div class="ad-card-head"><h2>Contact</h2></div>
-            <dl class="ad-fields ad-fields--1">
+        <section class="ig-card">
+            <div class="ig-card-head"><h2>Contact</h2></div>
+            <dl class="ig-fields ig-fields--1">
                 {{ field('Primary contact', [application.primary_contact_person, application.contact_person_role]|select|join(' · ')) }}
                 {{ field('Phone', application.contact_number) }}
                 {{ field('E-mail', application.email_address) }}
@@ -57,48 +57,48 @@
         </section>
     </div>
 
-    <section class="ad-card">
-        <div class="ad-card-head"><h2>Supplier category</h2></div>
-        <div class="ad-chips">
+    <section class="ig-card">
+        <div class="ig-card-head"><h2>Supplier category</h2></div>
+        <div class="ig-chips">
             {% for app_cat in application.application_categories %}
-                <div class="ad-chip"><strong>{{ app_cat.category }}</strong>{% if app_cat.category_detail %}<span>{{ app_cat.category_detail }}</span>{% endif %}</div>
+                <div class="ig-chip"><strong>{{ app_cat.category }}</strong>{% if app_cat.category_detail %}<span>{{ app_cat.category_detail }}</span>{% endif %}</div>
             {% else %}
-                <div class="ad-chip"><strong>{{ application.supplier_category or '—' }}</strong></div>
+                <div class="ig-chip"><strong>{{ application.supplier_category or '—' }}</strong></div>
             {% endfor %}
         </div>
     </section>
 
-    <section class="ad-card">
-        <div class="ad-card-head"><h2>Directors &amp; shareholders</h2><span class="ad-muted">{{ application.directors|length }}</span></div>
-        <div class="ad-table-wrap">
-            <table class="ad-table ad-table--compact">
+    <section class="ig-card">
+        <div class="ig-card-head"><h2>Directors &amp; shareholders</h2><span class="ig-muted">{{ application.directors|length }}</span></div>
+        <div class="ig-table-wrap">
+            <table class="ig-table ig-table--compact">
                 <thead><tr><th>Name</th><th>ID / passport</th><th>Role</th><th>Nationality</th></tr></thead>
                 <tbody>
                     {% for director in application.directors %}
-                        <tr><td>{{ director.initials_surname }}</td><td class="ad-mono">{{ director.id_number }}</td><td>{{ director.role }}</td><td>{{ director.nationality }}</td></tr>
+                        <tr><td>{{ director.initials_surname }}</td><td class="ig-mono">{{ director.id_number }}</td><td>{{ director.role }}</td><td>{{ director.nationality }}</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
     </section>
 
-    <section class="ad-card">
-        <div class="ad-card-head"><h2>Documents</h2><span class="ad-muted">{{ documents|length }} uploaded</span></div>
-        <ul class="ad-docs">
+    <section class="ig-card">
+        <div class="ig-card-head"><h2>Documents</h2><span class="ig-muted">{{ documents|length }} uploaded</span></div>
+        <ul class="ig-docs">
             {% for doc in documents %}
-                <li class="ad-doc">
-                    <span class="ad-doc-icon" aria-hidden="true">{{ ad.icon('file') }}</span>
-                    <div class="ad-doc-text">
+                <li class="ig-doc">
+                    <span class="ig-doc-icon" aria-hidden="true">{{ ad.icon('file') }}</span>
+                    <div class="ig-doc-text">
                         <strong>{{ doc.document_type }}</strong>
                         <span>{{ doc.original_filename }}{% if doc.uploaded_at %} · {{ doc.uploaded_at.strftime('%d %b %Y') }}{% endif %}</span>
                                     {{ ad.document_dates(doc) }}
                     </div>
-                    <div class="ad-doc-actions">
-                        <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" target="_blank" rel="noopener" class="ad-btn ad-btn--ghost ad-btn--sm">View</a>
+                    <div class="ig-doc-actions">
+                        <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" target="_blank" rel="noopener" class="ig-btn ig-btn--ghost ig-btn--sm">View</a>
                     </div>
                 </li>
             {% else %}
-                <li class="ad-empty ad-empty--sm"><span>No documents uploaded.</span></li>
+                <li class="ig-empty ig-empty--sm"><span>No documents uploaded.</span></li>
             {% endfor %}
         </ul>
     </section>
