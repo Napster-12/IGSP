@@ -1355,6 +1355,19 @@ def test_ict_edits_email_templates(client):
     ict.post(f"{url}/reset")
     with client.app.app_context():
         assert igsp.email_text("application_received", company_name="X")[0] == "Application received"
+    assert "/static/images/logo.png" in ict.get(url).data.decode()
+
+
+def test_email_carries_its_own_logo(client):
+    with client.app.test_request_context():
+        html = igsp.render_email("Certificate expired", "Your certificate expired.", "Jane")
+    assert 'src="cid:logo"' in html
+    msg = igsp.build_email_message("jane@acme.co.za", "Certificate expired", html, "html")
+    html_part, logo = msg.get_payload()
+    assert msg.get_content_type() == "multipart/related" and msg["To"] == "jane@acme.co.za"
+    assert html_part.get_content_type() == "text/html"
+    assert logo["Content-ID"] == "<logo>" and logo.get_payload(decode=True).startswith(b"\x89PNG")
+    assert igsp.build_email_message("jane@acme.co.za", "Plain", "hello", "plain").get_content_type() == "text/plain"
 
 
 def test_ict_deletes_directors_and_applications(client):
