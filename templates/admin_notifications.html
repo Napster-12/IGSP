@@ -7,21 +7,21 @@
 {% block page_subtitle %}{% if unread_notifications %}{{ unread_notifications }} new since your last visit{% else %}You're all caught up{% endif %}{% endblock %}
 
 {% block content %}
-    <section class="ad-card">
+    <section class="ig-card">
         {% if notifications %}
-            <ul class="ad-feed">
+            <ul class="ig-feed">
                 {% for notification in notifications %}
-                    <li class="ad-feed-item{% if notification.id in new_ids %} is-unread{% endif %}">
-                        <span class="ad-feed-icon" aria-hidden="true">{{ ad.icon('file' if notification.related_application_id else 'bell') }}</span>
-                        <div class="ad-feed-body">
-                            <div class="ad-feed-top">
+                    <li class="ig-feed-item{% if notification.id in new_ids %} is-unread{% endif %}">
+                        <span class="ig-feed-icon" aria-hidden="true">{{ ad.icon('file' if notification.related_application_id else 'bell') }}</span>
+                        <div class="ig-feed-body">
+                            <div class="ig-feed-top">
                                 <strong>{{ notification.title }}</strong>
-                                {% if notification.id in new_ids %}<span class="ad-new">New</span>{% endif %}
-                                <time class="ad-muted">{{ notification.created_at.strftime('%d %b %Y, %H:%M') if notification.created_at else '' }}</time>
+                                {% if notification.id in new_ids %}<span class="ig-new">New</span>{% endif %}
+                                <time class="ig-muted">{{ notification.created_at.strftime('%d %b %Y, %H:%M') if notification.created_at else '' }}</time>
                             </div>
                             <p>{{ notification.message }}</p>
                             {% if notification.related_application_id %}
-                                <a href="{{ url_for('admin_application_detail', application_id=notification.related_application_id) }}" class="ad-link">Open application →</a>
+                                <a href="{{ url_for('admin_application_detail', application_id=notification.related_application_id) }}" class="ig-link">Open application →</a>
                             {% endif %}
                         </div>
                     </li>
@@ -29,7 +29,7 @@
             </ul>
             {{ ui.render_pagination(pagination, 'admin_notifications') }}
         {% else %}
-            <div class="ad-empty">
+            <div class="ig-empty">
                 <strong>No notifications</strong>
                 <span>You'll be notified here when suppliers submit or update applications.</span>
             </div>

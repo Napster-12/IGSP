@@ -8,25 +8,25 @@
 {% block content %}
     {{ f.steps(1) }}
 
-    <form class="ad-form ad-stack" method="post" enctype="multipart/form-data" data-idle-save>
+    <form class="ig-form ig-stack" method="post" enctype="multipart/form-data" data-idle-save>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {% set values = draft %}
         {% set directors = draft.directors %}
         <div class="ob-layout">
         {% include "_profile_sections.html" %}
 
-        <section class="ad-card ob-card ob-card--profile">
-            <div class="ad-card-head">
+        <section class="ig-card ob-card ob-card--profile">
+            <div class="ig-card-head">
                 <div><h2>Company profile</h2><p>Upload your company profile (PDF), or provide a website above</p></div>
             </div>
             {{ f.document_slot('document_file_company_profile', 'Company profile', company_profile_doc, number='1', required=false) }}
         </section>
         </div>
 
-        <div class="ad-form-actions ad-form-actions--sticky">
-            <a href="{{ url_for('dashboard') }}" class="ad-btn ad-btn--ghost">Cancel</a>
-            <button type="submit" name="save_later" value="1" formnovalidate class="ad-btn ad-btn--ghost ob-save-later">Save &amp; continue later</button>
-            <button type="submit" class="ad-btn ad-btn--primary">Continue to category →</button>
+        <div class="ig-form-actions ig-form-actions--sticky">
+            <a href="{{ url_for('dashboard') }}" class="ig-btn ig-btn--ghost">Cancel</a>
+            <button type="submit" name="save_later" value="1" formnovalidate class="ig-btn ig-btn--ghost ob-save-later">Save &amp; continue later</button>
+            <button type="submit" class="ig-btn ig-btn--primary">Continue to category →</button>
         </div>
     </form>
 {% endblock %}

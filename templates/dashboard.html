@@ -3,60 +3,60 @@
 
 {% block title %}Dashboard{% endblock %}
 {% block page_title %}Welcome, {{ (user.contact_name or user.company_name).split()[0] }}{% endblock %}
-{% block page_subtitle %}{{ user.company_name }} · Supplier ID <span class="ad-mono">{{ user.supplier_id or '—' }}</span>{% endblock %}
+{% block page_subtitle %}{{ user.company_name }} · Supplier ID <span class="ig-mono">{{ user.supplier_id or '—' }}</span>{% endblock %}
 {% block page_actions %}
     {% if supplier_application %}
-        <a href="{{ url_for('application_detail', application_id=supplier_application.id) }}" class="ad-btn ad-btn--ghost">View application</a>
+        <a href="{{ url_for('application_detail', application_id=supplier_application.id) }}" class="ig-btn ig-btn--ghost">View application</a>
         {% if supplier_application.status in EDITABLE_STATUSES %}
-            <a href="{{ url_for('edit_application', application_id=supplier_application.id) }}" class="ad-btn ad-btn--primary">{{ ad.icon('edit') }}
+            <a href="{{ url_for('edit_application', application_id=supplier_application.id) }}" class="ig-btn ig-btn--primary">{{ ad.icon('edit') }}
                 {{ 'Update & resubmit' if supplier_application.status in ['returned_for_update', 'declined'] else 'Edit application' }}</a>
         {% endif %}
     {% elif draft_progress %}
-        <a href="{{ url_for('onboarding_resume') }}" class="ad-btn ad-btn--primary">{{ ad.icon('edit') }} Continue application</a>
+        <a href="{{ url_for('onboarding_resume') }}" class="ig-btn ig-btn--primary">{{ ad.icon('edit') }} Continue application</a>
     {% else %}
-        <a href="{{ url_for('onboarding_profile') }}" class="ad-btn ad-btn--primary">{{ ad.icon('plus') }} Start application</a>
+        <a href="{{ url_for('onboarding_profile') }}" class="ig-btn ig-btn--primary">{{ ad.icon('plus') }} Start application</a>
     {% endif %}
 {% endblock %}
 
 {% block content %}
     {% set application = supplier_application %}
-    <section class="ad-stats" aria-label="Your account">
-        <div class="ad-stat">
-            <span class="ad-stat-label">Application</span>
-            <span class="ad-stat-value ad-stat-value--sm">{% if application %}{{ ad.status_badge(application.status) }}{% elif draft_progress %}<span class="ad-badge ad-badge--draft">In progress</span>{% else %}<span class="ad-muted">Not started</span>{% endif %}</span>
-            <span class="ad-stat-sub">{% if application and application.created_at %}Submitted {{ application.created_at.strftime('%d %b %Y') }}{% elif draft_progress %}Saved, not submitted yet{% else %}Apply to become a supplier{% endif %}</span>
+    <section class="ig-stats" aria-label="Your account">
+        <div class="ig-stat">
+            <span class="ig-stat-label">Application</span>
+            <span class="ig-stat-value ig-stat-value--sm">{% if application %}{{ ad.status_badge(application.status) }}{% elif draft_progress %}<span class="ig-badge ig-badge--draft">In progress</span>{% else %}<span class="ig-muted">Not started</span>{% endif %}</span>
+            <span class="ig-stat-sub">{% if application and application.created_at %}Submitted {{ application.created_at.strftime('%d %b %Y') }}{% elif draft_progress %}Saved, not submitted yet{% else %}Apply to become a supplier{% endif %}</span>
         </div>
-        <div class="ad-stat">
-            <span class="ad-stat-label">Documents uploaded</span>
-            <span class="ad-stat-value">{{ documents|length }}</span>
-            <span class="ad-stat-sub">7 required + company profile</span>
+        <div class="ig-stat">
+            <span class="ig-stat-label">Documents uploaded</span>
+            <span class="ig-stat-value">{{ documents|length }}</span>
+            <span class="ig-stat-sub">7 required + company profile</span>
         </div>
-        <div class="ad-stat">
-            <span class="ad-stat-label">Account</span>
-            <span class="ad-stat-value ad-stat-value--sm">{% if user.active %}<span class="ad-badge ad-badge--active">Active</span>{% else %}<span class="ad-badge ad-badge--inactive">Inactive</span>{% endif %}</span>
-            <span class="ad-stat-sub">{{ 'You can trade with Icebolethu Group' if user.active else ('Your details are on file; we will contact you' if supplier_application and supplier_application.status == 'on_file' else 'Activated once your application is approved') }}</span>
+        <div class="ig-stat">
+            <span class="ig-stat-label">Account</span>
+            <span class="ig-stat-value ig-stat-value--sm">{% if user.active %}<span class="ig-badge ig-badge--active">Active</span>{% else %}<span class="ig-badge ig-badge--inactive">Inactive</span>{% endif %}</span>
+            <span class="ig-stat-sub">{{ 'You can trade with Icebolethu Group' if user.active else ('Your details are on file; we will contact you' if supplier_application and supplier_application.status == 'on_file' else 'Activated once your application is approved') }}</span>
         </div>
-        <a class="ad-stat" href="{{ url_for('notifications') }}">
-            <span class="ad-stat-label">Notifications</span>
-            <span class="ad-stat-value">{{ unread_notifications }}</span>
-            <span class="ad-stat-sub">unread</span>
+        <a class="ig-stat" href="{{ url_for('notifications') }}">
+            <span class="ig-stat-label">Notifications</span>
+            <span class="ig-stat-value">{{ unread_notifications }}</span>
+            <span class="ig-stat-sub">unread</span>
         </a>
     </section>
 
     {% if not application %}
-        <section class="ad-card ad-hero">
+        <section class="ig-card ig-hero">
             <div>
                 {% if draft_progress %}
                     <h2>Continue your application</h2>
                     <p>Your application is saved{% if draft_progress.saved_at %} (last saved {{ draft_progress.saved_at.strftime('%d %b %Y, %H:%M') }}){% endif %} but not submitted yet. Pick up where you left off: <strong>step {{ draft_progress.step }} of 4</strong>.</p>
-                    <a href="{{ url_for('onboarding_resume') }}" class="ad-btn ad-btn--primary ad-btn--lg ad-mt">Continue application</a>
+                    <a href="{{ url_for('onboarding_resume') }}" class="ig-btn ig-btn--primary ig-btn--lg ig-mt">Continue application</a>
                 {% else %}
                     <h2>Become an Icebolethu Group supplier</h2>
                     <p>Complete your application in four short steps. If you can't finish in one go, use <strong>Save &amp; continue later</strong> and come back any time.</p>
-                    <a href="{{ url_for('onboarding_profile') }}" class="ad-btn ad-btn--primary ad-btn--lg ad-mt">Start your application</a>
+                    <a href="{{ url_for('onboarding_profile') }}" class="ig-btn ig-btn--primary ig-btn--lg ig-mt">Start your application</a>
                 {% endif %}
             </div>
-            <ol class="ad-howto">
+            <ol class="ig-howto">
                 <li><strong>Company profile</strong><span>Registration, tax, address, contact and directors</span></li>
                 <li><strong>Category</strong><span>The goods or services you supply</span></li>
                 <li><strong>Documents</strong><span>CIPC, IDs, SARS, bank letter, B-BBEE, proof of address, declaration (PDF)</span></li>
@@ -66,9 +66,9 @@
     {% else %}
         {% set flow = ['submitted', 'under_review', 'decision'] %}
         {% set stage = 2 if application.status in ['approved', 'on_file', 'declined'] else (1 if application.status in ['under_review', 'returned_for_update'] else 0) %}
-        <div class="ad-grid ad-grid--2-1">
-            <section class="ad-card">
-                <div class="ad-card-head">
+        <div class="ig-grid ig-grid--2-1">
+            <section class="ig-card">
+                <div class="ig-card-head">
                     <div>
                         <h2>Your application</h2>
                         <p>{{ application.company_name }} · {{ application.category_names|join(', ') }}</p>
@@ -76,56 +76,56 @@
                     {{ ad.status_badge(application.status) }}
                 </div>
 
-                <ol class="ad-track">
+                <ol class="ig-track">
                     <li class="{{ 'is-done' if stage > 0 else 'is-current' }}"><strong>Submitted</strong><span>{{ application.created_at.strftime('%d %b %Y') if application.created_at else '' }}</span></li>
                     <li class="{{ 'is-done' if stage > 1 else ('is-current' if stage == 1 else '') }}"><strong>In review</strong><span>Our procurement team checks your details and documents</span></li>
                     <li class="{{ 'is-current is-' ~ application.status if stage == 2 else '' }}"><strong>Decision</strong><span>{% if application.status == 'approved' %}Approved{% elif application.status == 'on_file' %}On file{% elif application.status == 'declined' %}Declined{% else %}Approved, on file or declined{% endif %}</span></li>
                 </ol>
 
                 {% for doc in certificate_alerts %}
-                    <div class="ad-callout {{ 'ad-callout--danger' if doc.expiry_state == 'expired' else 'ad-callout--attention' }}">
+                    <div class="ig-callout {{ 'ig-callout--danger' if doc.expiry_state == 'expired' else 'ig-callout--attention' }}">
                         {% if doc.expiry_state == 'expired' %}
                             <strong>Certificate expired:</strong> your {{ DATED_DOCUMENTS[doc.document_type] }} expired on {{ doc.expiry_date.strftime('%d %b %Y') }}.{% if application.expiry_suspended %} Your supplier account is deactivated until you upload the renewed certificate.{% endif %}
                         {% else %}
                             <strong>Certificate expiring soon:</strong> your {{ DATED_DOCUMENTS[doc.document_type] }} expires on {{ doc.expiry_date.strftime('%d %b %Y') }}.{% if user.active %} Upload the renewed one before then to keep your account active.{% endif %}
                         {% endif %}
-                        <a href="{{ url_for('supplier_certificates') }}" class="ad-link">Upload renewed certificate →</a>
+                        <a href="{{ url_for('supplier_certificates') }}" class="ig-link">Upload renewed certificate →</a>
                     </div>
                 {% endfor %}
                 {% if application.status == 'returned_for_update' %}
-                    <div class="ad-callout ad-callout--attention">
+                    <div class="ig-callout ig-callout--attention">
                         <strong>Action needed:</strong> we've returned your application for changes. Please update it and resubmit.
                     </div>
                 {% elif application.status == 'on_file' %}
-                    <div class="ad-callout ad-callout--onfile"><strong>Thank you!</strong> Your application has been received and all your documents and information are in order. We will keep your details on file and contact you when we need your services.</div>
+                    <div class="ig-callout ig-callout--onfile"><strong>Thank you!</strong> Your application has been received and all your documents and information are in order. We will keep your details on file and contact you when we need your services.</div>
                 {% elif application.status == 'approved' %}
-                    <div class="ad-callout ad-callout--success"><strong>Congratulations!</strong> Your application has been approved and your supplier account is active.
-                        <a href="{{ url_for('supplier_certificates') }}" class="ad-link">View your supplier certificate →</a></div>
+                    <div class="ig-callout ig-callout--success"><strong>Congratulations!</strong> Your application has been approved and your supplier account is active.
+                        <a href="{{ url_for('supplier_certificates') }}" class="ig-link">View your supplier certificate →</a></div>
                     {% if user.active %}
-                        <div class="ad-callout ad-callout--attention">
+                        <div class="ig-callout ig-callout--attention">
                             <strong>Next step:</strong> add the products and services you supply so Icebolethu Group can see your prices and availability.
-                            <a href="{{ url_for('inventory') }}" class="ad-link">Go to inventory →</a>
+                            <a href="{{ url_for('inventory') }}" class="ig-link">Go to inventory →</a>
                         </div>
                     {% endif %}
                 {% endif %}
 
                 {% if application.review_comments %}
-                    <div class="ad-comment">
-                        <span class="ad-comment-label">Comments from Icebolethu Group</span>
+                    <div class="ig-comment">
+                        <span class="ig-comment-label">Comments from Icebolethu Group</span>
                         <p>{{ application.review_comments }}</p>
                     </div>
                 {% endif %}
             </section>
 
-            <section class="ad-card">
-                <div class="ad-card-head"><h2>Your details</h2></div>
-                <dl class="ad-fields ad-fields--1">
-                    <div class="ad-field"><dt>Supplier ID</dt><dd class="ad-mono">{{ user.supplier_id or '—' }}</dd></div>
-                    <div class="ad-field"><dt>Contact person</dt><dd>{{ user.contact_name }}</dd></div>
-                    <div class="ad-field"><dt>Phone</dt><dd>{{ contact_phone or user.phone }}</dd></div>
-                    <div class="ad-field"><dt>Login email</dt><dd>{{ user.email }}</dd></div>
+            <section class="ig-card">
+                <div class="ig-card-head"><h2>Your details</h2></div>
+                <dl class="ig-fields ig-fields--1">
+                    <div class="ig-field"><dt>Supplier ID</dt><dd class="ig-mono">{{ user.supplier_id or '—' }}</dd></div>
+                    <div class="ig-field"><dt>Contact person</dt><dd>{{ user.contact_name }}</dd></div>
+                    <div class="ig-field"><dt>Phone</dt><dd>{{ contact_phone or user.phone }}</dd></div>
+                    <div class="ig-field"><dt>Login email</dt><dd>{{ user.email }}</dd></div>
                 </dl>
-                <a href="{{ url_for('supplier_settings') }}" class="ad-link ad-mt" style="display:inline-block;">Update your details</a>
+                <a href="{{ url_for('supplier_settings') }}" class="ig-link ig-mt" style="display:inline-block;">Update your details</a>
             </section>
         </div>
     {% endif %}

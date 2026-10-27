@@ -39,40 +39,40 @@
                   url_for('admin_applications', search=search or None, status=status_filter or None) if assigned_filter else none,
                   variant='compact') }}
 
-    <section class="ad-card">
-        <form method="get" class="ad-toolbar">
+    <section class="ig-card">
+        <form method="get" class="ig-toolbar">
             {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
             {% if assigned_filter %}<input type="hidden" name="assigned" value="{{ assigned_filter }}">{% endif %}
-            <label class="ad-search">
+            <label class="ig-search">
                 {{ ad.icon('search') }}
-                <span class="ad-sr">Search</span>
+                <span class="ig-sr">Search</span>
                 <input type="search" name="search" value="{{ search }}" placeholder="Search company, contact or email">
             </label>
-            <button type="submit" class="ad-btn ad-btn--primary">Search</button>
-            {% if search %}<a href="{{ url_for('admin_applications', status=status_filter or None, assigned=assigned_filter or None) }}" class="ad-btn ad-btn--ghost">Clear</a>{% endif %}
+            <button type="submit" class="ig-btn ig-btn--primary">Search</button>
+            {% if search %}<a href="{{ url_for('admin_applications', status=status_filter or None, assigned=assigned_filter or None) }}" class="ig-btn ig-btn--ghost">Clear</a>{% endif %}
         </form>
 
         {% if applications %}
-            <div class="ad-table-wrap ad-table-wrap--cards-md">
-                <table class="ad-table ad-table--cards-md">
+            <div class="ig-table-wrap ig-table-wrap--cards-md">
+                <table class="ig-table ig-table--cards-md">
                     <thead>
-                        <tr><th>Company</th><th>Contact</th><th>Category</th><th>Documents</th><th>Status</th><th>Assigned to</th><th>Submitted</th><th><span class="ad-sr">Open</span></th></tr>
+                        <tr><th>Company</th><th>Contact</th><th>Category</th><th>Documents</th><th>Status</th><th>Assigned to</th><th>Submitted</th><th><span class="ig-sr">Open</span></th></tr>
                     </thead>
                     <tbody>
                         {% for application in applications %}
                             <tr>
                                 <td>
-                                    <a class="ad-row-link" href="{{ url_for('admin_application_detail', application_id=application.id) }}">{{ application.company_name }}</a>
-                                    {% if application.id in flagged_ids %}<span class="ad-flag" title="A director, shareholder or owner is already linked to another supplier">{{ ad.icon('alert') }} Director match</span>{% endif %}
-                                    <span class="ad-cell-sub">{{ application.email }}</span>
+                                    <a class="ig-row-link" href="{{ url_for('admin_application_detail', application_id=application.id) }}">{{ application.company_name }}</a>
+                                    {% if application.id in flagged_ids %}<span class="ig-flag" title="A director, shareholder or owner is already linked to another supplier">{{ ad.icon('alert') }} Director match</span>{% endif %}
+                                    <span class="ig-cell-sub">{{ application.email }}</span>
                                 </td>
                                 <td>{{ application.contact_name }}</td>
                                 <td>{{ application.category_names|join(', ') or '—' }}</td>
-                                <td><span class="ad-doc-status ad-doc-status--{{ application.documents_status }}">{{ (application.documents_status or 'pending')|title }}</span></td>
+                                <td><span class="ig-doc-status ig-doc-status--{{ application.documents_status }}">{{ (application.documents_status or 'pending')|title }}</span></td>
                                 <td>{{ ad.status_badge(application.status) }}</td>
                                 <td>{{ ad.assignee(application, admin) }}</td>
-                                <td class="ad-nowrap">{{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}</td>
-                                <td class="ad-cell-action"><a href="{{ url_for('admin_application_detail', application_id=application.id) }}" class="ad-btn ad-btn--ghost ad-btn--sm">{{ 'Open' if application.assigned_admin_id == admin.id else ('Assign' if not application.assigned_admin_id else 'View') }}</a></td>
+                                <td class="ig-nowrap">{{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}</td>
+                                <td class="ig-cell-action"><a href="{{ url_for('admin_application_detail', application_id=application.id) }}" class="ig-btn ig-btn--ghost ig-btn--sm">{{ 'Open' if application.assigned_admin_id == admin.id else ('Assign' if not application.assigned_admin_id else 'View') }}</a></td>
                             </tr>
                         {% endfor %}
                     </tbody>
@@ -84,7 +84,7 @@
             {% if assigned_filter %}{% set _ = page_args.update({'assigned': assigned_filter}) %}{% endif %}
             {{ ui.render_pagination(pagination, 'admin_applications', page_args) }}
         {% else %}
-            <div class="ad-empty">
+            <div class="ig-empty">
                 <strong>No applications found</strong>
                 <span>No applications match the selected cards{% if search %} and search{% endif %}. Pick another card or clear a filter.</span>
             </div>

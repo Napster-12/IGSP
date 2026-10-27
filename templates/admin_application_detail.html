@@ -3,36 +3,36 @@
 {% import "form_macros.html" as f with context %}
 
 {% macro field(label, value, wide=false, mono=false) -%}
-    <div class="ad-field{% if wide %} ad-field--wide{% endif %}">
+    <div class="ig-field{% if wide %} ig-field--wide{% endif %}">
         <dt>{{ label }}</dt>
-        <dd{% if mono %} class="ad-mono"{% endif %}>{% if value %}{{ value }}{% else %}<span class="ad-muted">—</span>{% endif %}</dd>
+        <dd{% if mono %} class="ig-mono"{% endif %}>{% if value %}{{ value }}{% else %}<span class="ig-muted">—</span>{% endif %}</dd>
     </div>
 {%- endmacro %}
 
 {% block title %}{{ application.company_name }}{% endblock %}
-{% block breadcrumb %}<a href="{{ url_for('admin_applications') }}" class="ad-crumb">{{ ad.icon('back') }} Applications</a>{% endblock %}
+{% block breadcrumb %}<a href="{{ url_for('admin_applications') }}" class="ig-crumb">{{ ad.icon('back') }} Applications</a>{% endblock %}
 {% block page_title %}{{ application.company_name }} {{ ad.status_badge(application.status) }}{% endblock %}
 {% block page_subtitle %}
-    {% if supplier and supplier.supplier_id %}<span class="ad-mono">{{ supplier.supplier_id }}</span> · {% endif %}
+    {% if supplier and supplier.supplier_id %}<span class="ig-mono">{{ supplier.supplier_id }}</span> · {% endif %}
     Submitted {{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}
     {% if application.updated_at and application.created_at and application.updated_at > application.created_at %} · Updated {{ application.updated_at.strftime('%d %b %Y') }}{% endif %}
     {% if application.terms_accepted_at %} · Application Terms {{ application.terms_version }} accepted {{ application.terms_accepted_at.strftime('%d %b %Y') }}{% endif %}
 {% endblock %}
 {% block page_actions %}
-    <a href="{{ url_for('admin_application_history', application_id=application.id) }}" class="ad-btn ad-btn--ghost">{{ ad.icon('clock') }} History <span class="ad-count">{{ history_count }}</span></a>
-    <a href="{{ url_for('download_all_documents', application_id=application.id) }}" class="ad-btn ad-btn--ghost">{{ ad.icon('download') }} Download all</a>
+    <a href="{{ url_for('admin_application_history', application_id=application.id) }}" class="ig-btn ig-btn--ghost">{{ ad.icon('clock') }} History <span class="ig-count">{{ history_count }}</span></a>
+    <a href="{{ url_for('download_all_documents', application_id=application.id) }}" class="ig-btn ig-btn--ghost">{{ ad.icon('download') }} Download all</a>
     {% if application.status == 'approved' %}
-        <a href="{{ url_for('admin_registration_certificate', application_id=application.id) }}" class="ad-btn ad-btn--ghost">{{ ad.icon('download') }} Certificate</a>
+        <a href="{{ url_for('admin_registration_certificate', application_id=application.id) }}" class="ig-btn ig-btn--ghost">{{ ad.icon('download') }} Certificate</a>
     {% endif %}
 {% endblock %}
 
 {% block content %}
-    <div class="ad-detail">
-        <div class="ad-detail-main">
+    <div class="ig-detail">
+        <div class="ig-detail-main">
 
-            <section class="ad-card">
-                <div class="ad-card-head"><h2>Company</h2></div>
-                <dl class="ad-fields">
+            <section class="ig-card">
+                <div class="ig-card-head"><h2>Company</h2></div>
+                <dl class="ig-fields">
                     {{ field('Registered vendor name', application.registered_vendor_name, wide=true) }}
                     {{ field('Trading name', application.trading_name) }}
                     {{ field('Registration number', application.business_registration_number, mono=true) }}
@@ -42,18 +42,18 @@
                 </dl>
             </section>
 
-            <div class="ad-grid ad-grid--2">
-                <section class="ad-card">
-                    <div class="ad-card-head"><h2>Address</h2></div>
-                    <dl class="ad-fields ad-fields--1">
+            <div class="ig-grid ig-grid--2">
+                <section class="ig-card">
+                    <div class="ig-card-head"><h2>Address</h2></div>
+                    <dl class="ig-fields ig-fields--1">
                         {{ field('Physical address', application.physical_address) }}
                         {{ field('City / Province', [application.city, application.province]|select|join(', ')) }}
                         {{ field('Postal code', application.postal_code) }}
                     </dl>
                 </section>
-                <section class="ad-card">
-                    <div class="ad-card-head"><h2>Contact</h2></div>
-                    <dl class="ad-fields ad-fields--1">
+                <section class="ig-card">
+                    <div class="ig-card-head"><h2>Contact</h2></div>
+                    <dl class="ig-fields ig-fields--1">
                         {{ field('Primary contact', [application.primary_contact_person, application.contact_person_role]|select|join(' · ')) }}
                         {{ field('Phone', application.contact_number or application.phone) }}
                         {{ field('E-mail', application.email_address) }}
@@ -62,28 +62,28 @@
                 </section>
             </div>
 
-            <section class="ad-card">
-                <div class="ad-card-head"><h2>Supplier category</h2></div>
-                <div class="ad-chips">
+            <section class="ig-card">
+                <div class="ig-card-head"><h2>Supplier category</h2></div>
+                <div class="ig-chips">
                     {% for app_cat in application.application_categories %}
-                        <div class="ad-chip">
+                        <div class="ig-chip">
                             <strong>{{ app_cat.category }}</strong>
                             {% if app_cat.category_detail %}<span>{{ app_cat.category_detail }}</span>{% endif %}
                         </div>
                     {% else %}
-                        <div class="ad-chip"><strong>{{ application.supplier_category or '—' }}</strong></div>
+                        <div class="ig-chip"><strong>{{ application.supplier_category or '—' }}</strong></div>
                     {% endfor %}
                 </div>
             </section>
 
-            <section class="ad-card">
-                <div class="ad-card-head">
+            <section class="ig-card">
+                <div class="ig-card-head">
                     <h2>Directors &amp; shareholders</h2>
-                    <span class="ad-muted">{{ application.directors|length }}</span>
+                    <span class="ig-muted">{{ application.directors|length }}</span>
                 </div>
                 {% if director_flags %}
-                    <div class="ad-director-alert" role="alert">
-                        <span class="ad-assign-icon" aria-hidden="true">{{ ad.icon('alert') }}</span>
+                    <div class="ig-director-alert" role="alert">
+                        <span class="ig-assign-icon" aria-hidden="true">{{ ad.icon('alert') }}</span>
                         <div>
                             <strong>Already linked to another supplier</strong>
                             {% set n = director_flags|map(attribute=0)|unique|list|length %}
@@ -93,29 +93,29 @@
                     </div>
                 {% endif %}
                 {% if application.directors %}
-                    <div class="ad-table-wrap">
-                        <table class="ad-table ad-table--compact">
+                    <div class="ig-table-wrap">
+                        <table class="ig-table ig-table--compact">
                             <thead><tr><th>Name</th><th>ID / passport</th><th>Role</th><th>Nationality</th><th>Also linked to</th>{% if admin.can('ict') %}<th><span class="visually-hidden">Delete</span></th>{% endif %}</tr></thead>
                             <tbody>
                                 {% for director in application.directors %}
                                     {% set links = director_flags|selectattr(0, 'equalto', director)|list %}
                                     <tr{% if links %} class="is-flagged"{% endif %}>
                                         <td>{{ director.initials_surname }}</td>
-                                        <td class="ad-mono">{{ director.id_number }}</td>
+                                        <td class="ig-mono">{{ director.id_number }}</td>
                                         <td>{{ director.role }}</td>
                                         <td>{{ director.nationality }}</td>
                                         <td>
                                             {% for _, other, other_director in links %}
-                                                <a class="ad-row-link" href="{{ url_for('admin_application_detail', application_id=other.id) }}">{{ other.company_name }}</a>
-                                                <span class="ad-cell-sub">{{ other_director.role }} · {{ status_label(other.status) }}</span>
-                                            {% else %}<span class="ad-muted">—</span>{% endfor %}
+                                                <a class="ig-row-link" href="{{ url_for('admin_application_detail', application_id=other.id) }}">{{ other.company_name }}</a>
+                                                <span class="ig-cell-sub">{{ other_director.role }} · {{ status_label(other.status) }}</span>
+                                            {% else %}<span class="ig-muted">—</span>{% endfor %}
                                         </td>
                                         {% if admin.can('ict') %}
                                             <td>
                                                 <form method="post" action="{{ url_for('admin_delete_director', application_id=application.id, director_id=director.id) }}"
                                                       onsubmit="return confirm('Delete {{ director.initials_surname|e }} ({{ director.id_number|e }}) from this application? This is recorded in the history and user audit.');">
                                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                                    <button type="submit" class="ad-icon-btn" title="Delete director" aria-label="Delete {{ director.initials_surname }}">{{ ad.icon('trash') }}</button>
+                                                    <button type="submit" class="ig-icon-btn" title="Delete director" aria-label="Delete {{ director.initials_surname }}">{{ ad.icon('trash') }}</button>
                                                 </form>
                                             </td>
                                         {% endif %}
@@ -125,47 +125,47 @@
                         </table>
                     </div>
                 {% else %}
-                    <div class="ad-empty ad-empty--sm"><span>No directors recorded.</span></div>
+                    <div class="ig-empty ig-empty--sm"><span>No directors recorded.</span></div>
                 {% endif %}
             </section>
 
-            <section class="ad-card">
-                <div class="ad-card-head">
+            <section class="ig-card">
+                <div class="ig-card-head">
                     <h2>Documents</h2>
-                    <span class="ad-muted">{{ documents|length }} uploaded</span>
+                    <span class="ig-muted">{{ documents|length }} uploaded</span>
                 </div>
                 {% if missing_documents %}
-                    <div class="ad-flash ad-flash--error ad-flash--inline">
+                    <div class="ig-flash ig-flash--error ig-flash--inline">
                         <strong>Missing required documents:</strong> {{ missing_documents|join(', ') }}
                     </div>
                 {% endif %}
                 {% if documents %}
-                    <ul class="ad-docs">
+                    <ul class="ig-docs">
                         {% for doc in documents %}
-                            <li class="ad-doc">
-                                <span class="ad-doc-icon" aria-hidden="true">{{ ad.icon('file') }}</span>
-                                <div class="ad-doc-text">
+                            <li class="ig-doc">
+                                <span class="ig-doc-icon" aria-hidden="true">{{ ad.icon('file') }}</span>
+                                <div class="ig-doc-text">
                                     <strong>{{ doc.document_type }}</strong>
                                     <span>{{ doc.original_filename }}{% if doc.uploaded_at %} · {{ doc.uploaded_at.strftime('%d %b %Y') }}{% endif %}</span>
                                     {{ ad.document_dates(doc) }}
                                 </div>
-                                <div class="ad-doc-actions">
-                                    <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" data-pdf-view data-pdf-title="{{ doc.document_type }}" class="ad-btn ad-btn--ghost ad-btn--sm">View</a>
+                                <div class="ig-doc-actions">
+                                    <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" data-pdf-view data-pdf-title="{{ doc.document_type }}" class="ig-btn ig-btn--ghost ig-btn--sm">View</a>
                                     {% if is_mine and doc.document_type in DATED_DOCUMENTS %}
-                                    <details class="ad-doc-replace">
-                                        <summary class="ad-btn ad-btn--ghost ad-btn--sm">Replace</summary>
-                                        <form method="post" action="{{ url_for('replace_admin_document', application_id=application.id, document_id=doc.id) }}" enctype="multipart/form-data" class="ad-doc-replace-panel">
+                                    <details class="ig-doc-replace">
+                                        <summary class="ig-btn ig-btn--ghost ig-btn--sm">Replace</summary>
+                                        <form method="post" action="{{ url_for('replace_admin_document', application_id=application.id, document_id=doc.id) }}" enctype="multipart/form-data" class="ig-doc-replace-panel">
                                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                             <input type="file" name="document_file" accept="application/pdf,.pdf" required aria-label="New PDF">
                                             {{ f.document_dates('document_file', doc, required=true) }}
-                                            <button type="submit" class="ad-btn ad-btn--primary ad-btn--sm">Upload replacement</button>
+                                            <button type="submit" class="ig-btn ig-btn--primary ig-btn--sm">Upload replacement</button>
                                         </form>
                                     </details>
                                     {% elif is_mine %}
                                     <form method="post" action="{{ url_for('replace_admin_document', application_id=application.id, document_id=doc.id) }}" enctype="multipart/form-data">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                        <label class="ad-btn ad-btn--ghost ad-btn--sm" for="replace_doc_{{ doc.id }}">Replace</label>
-                                        <input type="file" id="replace_doc_{{ doc.id }}" name="document_file" accept="application/pdf,.pdf" class="ad-sr" onchange="this.form.submit()">
+                                        <label class="ig-btn ig-btn--ghost ig-btn--sm" for="replace_doc_{{ doc.id }}">Replace</label>
+                                        <input type="file" id="replace_doc_{{ doc.id }}" name="document_file" accept="application/pdf,.pdf" class="ig-sr" onchange="this.form.submit()">
                                     </form>
                                     {% endif %}
                                 </div>
@@ -173,27 +173,27 @@
                         {% endfor %}
                     </ul>
                 {% else %}
-                    <div class="ad-empty ad-empty--sm"><span>No documents uploaded.</span></div>
+                    <div class="ig-empty ig-empty--sm"><span>No documents uploaded.</span></div>
                 {% endif %}
             </section>
 
         </div>
 
-        <aside class="ad-detail-side">
+        <aside class="ig-detail-side">
             {% set owner = application.assigned_admin %}
-            <section class="ad-card ad-assigned{% if not owner %} ad-assigned--none{% endif %}">
-                <div class="ad-assigned-row">
+            <section class="ig-card ig-assigned{% if not owner %} ig-assigned--none{% endif %}">
+                <div class="ig-assigned-row">
                     {% if owner %}
-                        <div class="ad-avatar" aria-hidden="true">{{ ((owner.name or owner.email)[:1])|upper }}</div>
+                        <div class="ig-avatar" aria-hidden="true">{{ ((owner.name or owner.email)[:1])|upper }}</div>
                         <div>
                             <strong>{{ 'Assigned to you' if is_mine else 'Assigned to ' ~ (owner.name or owner.email) }}</strong>
-                            <span class="ad-muted">since {{ application.assigned_at.strftime('%d %b %Y, %H:%M') if application.assigned_at else '—' }}</span>
+                            <span class="ig-muted">since {{ application.assigned_at.strftime('%d %b %Y, %H:%M') if application.assigned_at else '—' }}</span>
                         </div>
                     {% else %}
-                        <span class="ad-assign-icon" aria-hidden="true">{{ ad.icon('alert') }}</span>
+                        <span class="ig-assign-icon" aria-hidden="true">{{ ad.icon('alert') }}</span>
                         <div>
                             <strong>Not assigned</strong>
-                            <span class="ad-muted">Assign it to yourself to review and decide on it.</span>
+                            <span class="ig-muted">Assign it to yourself to review and decide on it.</span>
                         </div>
                     {% endif %}
                 </div>
@@ -201,18 +201,18 @@
                     <form method="post" action="{{ url_for('release_application', application_id=application.id) }}"
                           onsubmit="return confirm('Unassign yourself so another admin can assign this application to themselves?');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="ad-btn ad-btn--ghost ad-btn--block ad-mt">Unassign</button>
+                        <button type="submit" class="ig-btn ig-btn--ghost ig-btn--block ig-mt">Unassign</button>
                     </form>
                 {% elif owner %}
-                    <p class="ad-hint ad-mt">You can view this application, but only {{ owner.name or owner.email }} can work on it until they unassign themselves.</p>
+                    <p class="ig-hint ig-mt">You can view this application, but only {{ owner.name or owner.email }} can work on it until they unassign themselves.</p>
                 {% else %}
-                    <form method="post" action="{{ url_for('assign_application', application_id=application.id) }}" class="ad-mt">
+                    <form method="post" action="{{ url_for('assign_application', application_id=application.id) }}" class="ig-mt">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="ad-btn ad-btn--primary ad-btn--block">Assign to me</button>
+                        <button type="submit" class="ig-btn ig-btn--primary ig-btn--block">Assign to me</button>
                     </form>
                 {% endif %}
                 {% if assignable_admins %}
-                    <form method="post" action="{{ url_for('assign_application_to', application_id=application.id) }}" class="ad-form ad-assign-to ad-mt">
+                    <form method="post" action="{{ url_for('assign_application_to', application_id=application.id) }}" class="ig-form ig-assign-to ig-mt">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <label for="assign_admin_id">{{ 'Reassign to' if owner else 'Assign to' }}</label>
                         <select name="admin_id" id="assign_admin_id" required>
@@ -221,13 +221,13 @@
                                 <option value="{{ a.id }}">{{ a.name or a.email }}</option>
                             {% endfor %}
                         </select>
-                        <button type="submit" class="ad-btn ad-btn--ghost ad-btn--block ad-mt">{{ 'Reassign' if owner else 'Assign' }}</button>
+                        <button type="submit" class="ig-btn ig-btn--ghost ig-btn--block ig-mt">{{ 'Reassign' if owner else 'Assign' }}</button>
                     </form>
                 {% endif %}
             </section>
 {% if is_mine %}
-            <section class="ad-card ad-decision">
-                <div class="ad-card-head">
+            <section class="ig-card ig-decision">
+                <div class="ig-card-head">
                     <h2>Review decision</h2>
                     {{ ad.status_badge(application.status) }}
                 </div>
@@ -235,13 +235,13 @@
                 {% set decline_only = director_flags|length > 0 %}
                 {% set flagged_names = director_flags|map(attribute=0)|unique|map(attribute='initials_surname')|list %}
                 {% if decline_only %}
-                    <div class="ad-director-alert ad-director-alert--decision" role="alert">
-                        <span class="ad-assign-icon" aria-hidden="true">{{ ad.icon('alert') }}</span>
+                    <div class="ig-director-alert ig-director-alert--decision" role="alert">
+                        <span class="ig-assign-icon" aria-hidden="true">{{ ad.icon('alert') }}</span>
                         <div>
                             <strong>This application can only be declined</strong>
-                            <ul class="ad-director-list">
+                            <ul class="ig-director-list">
                                 {% for director, other, other_director in director_flags %}
-                                    <li><strong>{{ director.initials_surname }}</strong> ({{ director.role }}, <span class="ad-mono">{{ director.id_number }}</span>)
+                                    <li><strong>{{ director.initials_surname }}</strong> ({{ director.role }}, <span class="ig-mono">{{ director.id_number }}</span>)
                                         is already {{ other_director.role|lower }} at
                                         <a href="{{ url_for('admin_application_detail', application_id=other.id) }}">{{ other.company_name }}</a>.</li>
                                 {% endfor %}
@@ -250,7 +250,7 @@
                     </div>
                 {% endif %}
 
-                <form method="post" action="{{ url_for('update_application', application_id=application.id) }}" id="reviewForm" class="ad-form{% if decline_only %} is-decline-only{% endif %}">
+                <form method="post" action="{{ url_for('update_application', application_id=application.id) }}" id="reviewForm" class="ig-form{% if decline_only %} is-decline-only{% endif %}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                     <label for="documents_status">Documents</label>
@@ -265,65 +265,65 @@
 {%- if decline_only and not application.review_comments -%}
 Your application cannot be accepted because {{ flagged_names|join(', ') }} {{ 'is' if flagged_names|length == 1 else 'are' }} already linked to another supplier registered on this portal. A director, shareholder or owner may only be part of one supplier.
 {%- else -%}{{ application.review_comments or '' }}{%- endif -%}</textarea>
-                    <p class="ad-form-error" id="commentError" hidden>Please add a comment so the supplier knows what to fix.</p>
+                    <p class="ig-form-error" id="commentError" hidden>Please add a comment so the supplier knows what to fix.</p>
 
-                    <div class="ad-decision-actions">
+                    <div class="ig-decision-actions">
                         {% set off = ' disabled aria-disabled="true" title="Not available: a director/shareholder is already linked to another supplier"'|safe if decline_only else '' %}
-                        <button type="submit" name="status" value="approved" class="ad-btn ad-btn--success ad-btn--block"{{ off }}>Approve</button>
-                        <button type="submit" name="status" value="on_file" class="ad-btn ad-btn--onfile ad-btn--block"
+                        <button type="submit" name="status" value="approved" class="ig-btn ig-btn--success ig-btn--block"{{ off }}>Approve</button>
+                        <button type="submit" name="status" value="on_file" class="ig-btn ig-btn--onfile ig-btn--block"
                                 {% if not decline_only %}title="Everything is in order. The supplier is told their details are kept on file and that we'll contact them when needed."{% endif %}{{ off }}>Accept &amp; keep on file</button>
-                        <button type="submit" name="status" value="under_review" class="ad-btn ad-btn--ghost ad-btn--block"{{ off }}>Mark under review</button>
-                        <button type="submit" name="status" value="returned_for_update" class="ad-btn ad-btn--warning ad-btn--block" data-needs-comment{{ off }}>Return to supplier</button>
-                        <button type="submit" name="status" value="declined" class="ad-btn ad-btn--danger ad-btn--block" data-needs-comment>Decline</button>
+                        <button type="submit" name="status" value="under_review" class="ig-btn ig-btn--ghost ig-btn--block"{{ off }}>Mark under review</button>
+                        <button type="submit" name="status" value="returned_for_update" class="ig-btn ig-btn--warning ig-btn--block" data-needs-comment{{ off }}>Return to supplier</button>
+                        <button type="submit" name="status" value="declined" class="ig-btn ig-btn--danger ig-btn--block" data-needs-comment>Decline</button>
                     </div>
-                    <button type="submit" name="status" value="{{ application.status }}" class="ad-link ad-link--block"{{ off }}>Save comments only</button>
+                    <button type="submit" name="status" value="{{ application.status }}" class="ig-link ig-link--block"{{ off }}>Save comments only</button>
                 </form>
             </section>
 {% else %}
-            <section class="ad-card">
-                <div class="ad-card-head">
+            <section class="ig-card">
+                <div class="ig-card-head">
                     <h2>Review</h2>
                     {{ ad.status_badge(application.status) }}
                 </div>
-                <dl class="ad-fields ad-fields--1">
-                    <div class="ad-field"><dt>Documents</dt><dd>{{ (application.documents_status or 'pending')|title }}</dd></div>
-                    <div class="ad-field"><dt>Comments to supplier</dt><dd>{% if application.review_comments %}<span class="ad-prewrap">{{ application.review_comments }}</span>{% else %}<span class="ad-muted">None</span>{% endif %}</dd></div>
+                <dl class="ig-fields ig-fields--1">
+                    <div class="ig-field"><dt>Documents</dt><dd>{{ (application.documents_status or 'pending')|title }}</dd></div>
+                    <div class="ig-field"><dt>Comments to supplier</dt><dd>{% if application.review_comments %}<span class="ig-prewrap">{{ application.review_comments }}</span>{% else %}<span class="ig-muted">None</span>{% endif %}</dd></div>
                 </dl>
-                <p class="ad-hint ad-mt">{{ 'Only the assigned admin can record a decision.' if application.assigned_admin_id else 'Assign this application to yourself to record a decision.' }}</p>
+                <p class="ig-hint ig-mt">{{ 'Only the assigned admin can record a decision.' if application.assigned_admin_id else 'Assign this application to yourself to record a decision.' }}</p>
             </section>
 {% endif %}
 
             {#- The account only matters once the supplier has been onboarded; before that there's nothing to activate. -#}
             {% if supplier and application.status in ['approved', 'on_file'] %}
-                <section class="ad-card">
-                    <div class="ad-card-head">
+                <section class="ig-card">
+                    <div class="ig-card-head">
                         <h2>Supplier account</h2>
-                        {% if supplier.active %}<span class="ad-badge ad-badge--active">Active</span>{% else %}<span class="ad-badge ad-badge--inactive">Inactive</span>{% endif %}
+                        {% if supplier.active %}<span class="ig-badge ig-badge--active">Active</span>{% else %}<span class="ig-badge ig-badge--inactive">Inactive</span>{% endif %}
                     </div>
-                    <dl class="ad-fields ad-fields--1">
+                    <dl class="ig-fields ig-fields--1">
                         {{ field('Registered', supplier.created_at.strftime('%d %b %Y') if supplier.created_at else '') }}
                         {{ field('Contact', supplier.contact_name ~ ' · ' ~ supplier.phone) }}
                     </dl>
                     {% if is_mine %}
-                    <form method="post" action="{{ url_for('toggle_supplier', supplier_id=supplier.id) }}" class="ad-mt"
+                    <form method="post" action="{{ url_for('toggle_supplier', supplier_id=supplier.id) }}" class="ig-mt"
                           onsubmit="return confirm('{{ 'Deactivate' if supplier.active else 'Activate' }} this supplier account?');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="next" value="{{ request.path }}">
-                        <button type="submit" class="ad-btn ad-btn--ghost ad-btn--block">{{ 'Deactivate account' if supplier.active else 'Activate account' }}</button>
+                        <button type="submit" class="ig-btn ig-btn--ghost ig-btn--block">{{ 'Deactivate account' if supplier.active else 'Activate account' }}</button>
                     </form>
                     {% endif %}
                 </section>
             {% endif %}
             {% if admin.can('ict') %}
-                <section class="ad-card ad-danger">
-                    <div class="ad-card-head"><h2>Delete application</h2></div>
+                <section class="ig-card ig-danger">
+                    <div class="ig-card-head"><h2>Delete application</h2></div>
                     <p>Permanently deletes this application with its documents, directors and history. The supplier's login stays, so they can apply again. This can't be undone.</p>
-                    <form method="post" action="{{ url_for('admin_delete_application', application_id=application.id) }}" class="ad-form"
+                    <form method="post" action="{{ url_for('admin_delete_application', application_id=application.id) }}" class="ig-form"
                           onsubmit="return confirm('Permanently delete this application? This cannot be undone.');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <label for="confirm_name">Type <strong>{{ application.company_name }}</strong> to confirm</label>
                         <input type="text" id="confirm_name" name="confirm_name" autocomplete="off" required>
-                        <button type="submit" class="ad-btn ad-btn--danger ad-btn--block ad-mt">{{ ad.icon('trash') }} Delete application</button>
+                        <button type="submit" class="ig-btn ig-btn--danger ig-btn--block ig-mt">{{ ad.icon('trash') }} Delete application</button>
                     </form>
                 </section>
             {% endif %}

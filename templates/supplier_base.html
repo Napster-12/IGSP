@@ -10,77 +10,77 @@
     <link rel="stylesheet" href="{{ static_url('css/icebolethu.css') }}">
     {% block head %}{% endblock %}
 </head>
-<body class="ad-body">
-    <div class="ad-shell">
-        <aside class="ad-sidebar">
-            <a class="ad-brand" href="{{ url_for('dashboard') }}">
+<body class="ig-body">
+    <div class="ig-shell">
+        <aside class="ig-sidebar">
+            <a class="ig-brand" href="{{ url_for('dashboard') }}">
                 <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Icebolethu Group">
                 <span>Supplier Portal</span>
             </a>
 
-            <button type="button" class="ad-menu-toggle" data-menu-toggle aria-controls="ad-menu" aria-expanded="false">
+            <button type="button" class="ig-menu-toggle" data-menu-toggle aria-controls="ig-menu" aria-expanded="false">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
                 <span>Menu</span>
             </button>
 
-            <div class="ad-sidebar-menu" id="ad-menu">
-                <nav class="ad-nav" aria-label="Supplier">
-                    <a href="{{ url_for('dashboard') }}" class="ad-nav-link{% if request.endpoint == 'dashboard' %} is-active{% endif %}" {% if request.endpoint == 'dashboard' %}aria-current="page"{% endif %}>
+            <div class="ig-sidebar-menu" id="ig-menu">
+                <nav class="ig-nav" aria-label="Supplier">
+                    <a href="{{ url_for('dashboard') }}" class="ig-nav-link{% if request.endpoint == 'dashboard' %} is-active{% endif %}" {% if request.endpoint == 'dashboard' %}aria-current="page"{% endif %}>
                         {{ ad.icon('dashboard') }}<span>Dashboard</span>
                     </a>
                     {% set app_url = url_for('application_detail', application_id=supplier_application.id) if supplier_application else url_for('onboarding_profile') %}
-                    <a href="{{ app_url }}" class="ad-nav-link{% if request.endpoint in app_endpoints %} is-active{% endif %}" {% if request.endpoint in app_endpoints %}aria-current="page"{% endif %}>
+                    <a href="{{ app_url }}" class="ig-nav-link{% if request.endpoint in app_endpoints %} is-active{% endif %}" {% if request.endpoint in app_endpoints %}aria-current="page"{% endif %}>
                         {{ ad.icon('applications') }}<span>{{ 'My application' if supplier_application else 'Apply now' }}</span>
                     </a>
                     {% if supplier_application and supplier_application.status != 'draft' %}
-                        <a href="{{ url_for('supplier_certificates') }}" class="ad-nav-link{% if request.endpoint == 'supplier_certificates' %} is-active{% endif %}" {% if request.endpoint == 'supplier_certificates' %}aria-current="page"{% endif %}>
+                        <a href="{{ url_for('supplier_certificates') }}" class="ig-nav-link{% if request.endpoint == 'supplier_certificates' %} is-active{% endif %}" {% if request.endpoint == 'supplier_certificates' %}aria-current="page"{% endif %}>
                             {{ ad.icon('file') }}<span>Certificates</span>
                         </a>
                     {% endif %}
                     {% if user.active %}
                         {% set inv = request.endpoint in ['inventory', 'product_form'] %}
-                        <a href="{{ url_for('inventory') }}" class="ad-nav-link{% if inv %} is-active{% endif %}" {% if inv %}aria-current="page"{% endif %}>
+                        <a href="{{ url_for('inventory') }}" class="ig-nav-link{% if inv %} is-active{% endif %}" {% if inv %}aria-current="page"{% endif %}>
                             {{ ad.icon('box') }}<span>Inventory</span>
                         </a>
                     {% endif %}
-                    <a href="{{ url_for('supplier_settings') }}" class="ad-nav-link{% if request.endpoint == 'supplier_settings' %} is-active{% endif %}" {% if request.endpoint == 'supplier_settings' %}aria-current="page"{% endif %}>
+                    <a href="{{ url_for('supplier_settings') }}" class="ig-nav-link{% if request.endpoint == 'supplier_settings' %} is-active{% endif %}" {% if request.endpoint == 'supplier_settings' %}aria-current="page"{% endif %}>
                         {{ ad.icon('settings') }}<span>Settings</span>
                     </a>
                 </nav>
 
-                <div class="ad-account">
-                    <div class="ad-avatar" aria-hidden="true">{{ ((user.contact_name or user.company_name or 'S')[:1])|upper }}</div>
-                    <div class="ad-account-text">
+                <div class="ig-account">
+                    <div class="ig-avatar" aria-hidden="true">{{ ((user.contact_name or user.company_name or 'S')[:1])|upper }}</div>
+                    <div class="ig-account-text">
                         <strong>{{ user.company_name }}</strong>
                         <span>{{ user.supplier_id or user.email }}</span>
                     </div>
-                    <a href="{{ url_for('logout') }}" class="ad-logout">{{ ad.icon('logout') }}<span>Log out</span></a>
+                    <a href="{{ url_for('logout') }}" class="ig-logout">{{ ad.icon('logout') }}<span>Log out</span></a>
                 </div>
             </div>
         </aside>
 
-        <main class="ad-main">
-            <header class="ad-page-head">
-                <div class="ad-page-title">
+        <main class="ig-main">
+            <header class="ig-page-head">
+                <div class="ig-page-title">
                     {% block breadcrumb %}{% endblock %}
                     <h1>{% block page_title %}{% endblock %}</h1>
-                    <p class="ad-subtitle">{% block page_subtitle %}{% endblock %}</p>
+                    <p class="ig-subtitle">{% block page_subtitle %}{% endblock %}</p>
                 </div>
-                <div class="ad-page-tools">
-                    <div class="ad-page-actions">{% block page_actions %}{% endblock %}</div>
+                <div class="ig-page-tools">
+                    <div class="ig-page-actions">{% block page_actions %}{% endblock %}</div>
                     {{ ad.notification_bell(url_for('notifications'), unread_notifications, request.endpoint == 'notifications') }}
                 </div>
             </header>
 
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% for category, message in messages %}
-                    <div class="ad-flash ad-flash--{{ category }}" role="status">{{ message }}</div>
+                    <div class="ig-flash ig-flash--{{ category }}" role="status">{{ message }}</div>
                 {% endfor %}
             {% endwith %}
 
             {% block content %}{% endblock %}
 
-            <p class="ad-disclaimer">NB: Approved suppliers may remain on our database without being used until a suitable need arises. Being approved does not mean orders will start immediately.</p>
+            <p class="ig-disclaimer">NB: Approved suppliers may remain on our database without being used until a suitable need arises. Being approved does not mean orders will start immediately.</p>
         </main>
     </div>
     <script src="{{ url_for('static', filename='js/shell.js') }}"></script>

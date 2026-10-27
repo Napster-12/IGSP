@@ -3,14 +3,14 @@
 {% import "form_macros.html" as f with context %}
 
 {% block title %}Edit application{% endblock %}
-{% block breadcrumb %}<a href="{{ url_for('application_detail', application_id=application.id) }}" class="ad-crumb">{{ ad.icon('back') }} My application</a>{% endblock %}
+{% block breadcrumb %}<a href="{{ url_for('application_detail', application_id=application.id) }}" class="ig-crumb">{{ ad.icon('back') }} My application</a>{% endblock %}
 {% block page_title %}{{ 'Update & resubmit' if application.status in ['returned_for_update', 'declined'] else 'Edit application' }} {{ ad.status_badge(application.status) }}{% endblock %}
 {% block page_subtitle %}Change any details below; only upload files for documents you want to replace.{% endblock %}
 
 {% block content %}
     {% if application.review_comments %}
-        <div class="ad-comment ad-comment--card">
-            <span class="ad-comment-label">Comments from Icebolethu Group</span>
+        <div class="ig-comment ig-comment--card">
+            <span class="ig-comment-label">Comments from Icebolethu Group</span>
             <p>{{ application.review_comments }}</p>
         </div>
     {% endif %}
@@ -18,16 +18,16 @@
     {% set by_type = {} %}
     {% for doc in documents %}{% set _ = by_type.update({doc.document_type: doc}) %}{% endfor %}
 
-    <form class="ad-form ad-stack" method="post" enctype="multipart/form-data">
+    <form class="ig-form ig-stack" method="post" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-        <section class="ad-card">
-            <div class="ad-card-head"><h2>Account</h2></div>
-            <div class="ad-form-grid">
+        <section class="ig-card">
+            <div class="ig-card-head"><h2>Account</h2></div>
+            <div class="ig-form-grid">
                 {{ f.input('company_name', 'Company name', application.company_name, required=true) }}
                 {{ f.input('contact_name', 'Key contact', application.contact_name, required=true) }}
                 {{ f.input('phone', 'Phone number', application.phone, required=true, type='tel') }}
-                <div class="ad-field-row">
+                <div class="ig-field-row">
                     <label for="email">Login email</label>
                     <input id="email" type="email" value="{{ application.email }}" readonly title="Your login email can't be changed here.">
                 </div>
@@ -37,16 +37,16 @@
         {% set values = application %}
         {% include "_profile_sections.html" %}
 
-        <section class="ad-card">
-            <div class="ad-card-head"><h2>Supplier category</h2></div>
+        <section class="ig-card">
+            <div class="ig-card-head"><h2>Supplier category</h2></div>
             {{ f.category_picker(selected_categories, selected_details) }}
         </section>
 
-        <section class="ad-card">
-            <div class="ad-card-head">
+        <section class="ig-card">
+            <div class="ig-card-head">
                 <div><h2>Documents</h2><p>Choose a new PDF only for documents you want to replace</p></div>
             </div>
-            <div class="ad-slots">
+            <div class="ig-slots">
                 {{ f.document_slot('document_file_company_profile', 'Company profile', by_type.get('Company Profile'), number='P', required=false) }}
                 {% for doc_type in doc_types %}
                     {{ f.document_slot('document_file_' ~ loop.index, doc_type, by_type.get(doc_type), number=loop.index) }}
@@ -55,9 +55,9 @@
             </div>
         </section>
 
-        <div class="ad-form-actions ad-form-actions--sticky">
-            <a href="{{ url_for('application_detail', application_id=application.id) }}" class="ad-btn ad-btn--ghost">Cancel</a>
-            <button type="submit" class="ad-btn ad-btn--primary">{{ 'Save & resubmit for review' if application.status in ['returned_for_update', 'declined'] else 'Save changes' }}</button>
+        <div class="ig-form-actions ig-form-actions--sticky">
+            <a href="{{ url_for('application_detail', application_id=application.id) }}" class="ig-btn ig-btn--ghost">Cancel</a>
+            <button type="submit" class="ig-btn ig-btn--primary">{{ 'Save & resubmit for review' if application.status in ['returned_for_update', 'declined'] else 'Save changes' }}</button>
         </div>
     </form>
 {% endblock %}

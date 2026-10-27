@@ -8,33 +8,33 @@
 
 {% block content %}
     {% if application.expiry_suspended %}
-        <div class="ad-callout ad-callout--danger">
+        <div class="ig-callout ig-callout--danger">
             <strong>Your supplier account is deactivated</strong> because a certificate expired. Upload the renewed certificate below and it will be reactivated automatically.
         </div>
     {% endif %}
 
     {% if registration %}
-        <section class="ad-card">
-            <div class="ad-card-head">
+        <section class="ig-card">
+            <div class="ig-card-head">
                 <div><h2>Supplier registration certificate</h2><p>Issued by Icebolethu Group when your application was approved</p></div>
-                <a href="{{ url_for('supplier_registration_certificate') }}" class="ad-btn ad-btn--primary">{{ ad.icon('download') }} View &amp; download</a>
+                <a href="{{ url_for('supplier_registration_certificate') }}" class="ig-btn ig-btn--primary">{{ ad.icon('download') }} View &amp; download</a>
             </div>
-            <dl class="ad-fields">
-                <div class="ad-field"><dt>Supplier No.</dt><dd class="ad-mono">{{ registration.supplier_number }}</dd></div>
-                <div class="ad-field"><dt>Goods / Services</dt><dd>{{ registration.services }}</dd></div>
-                <div class="ad-field"><dt>Date registered</dt><dd>{{ registration.registered.strftime('%d %b %Y') }}</dd></div>
-                <div class="ad-field"><dt>Valid until</dt><dd>{{ registration.valid_until.strftime('%d %b %Y') }}</dd></div>
+            <dl class="ig-fields">
+                <div class="ig-field"><dt>Supplier No.</dt><dd class="ig-mono">{{ registration.supplier_number }}</dd></div>
+                <div class="ig-field"><dt>Goods / Services</dt><dd>{{ registration.services }}</dd></div>
+                <div class="ig-field"><dt>Date registered</dt><dd>{{ registration.registered.strftime('%d %b %Y') }}</dd></div>
+                <div class="ig-field"><dt>Valid until</dt><dd>{{ registration.valid_until.strftime('%d %b %Y') }}</dd></div>
             </dl>
         </section>
     {% endif %}
 
-    <form class="ad-form ad-stack" method="post" action="{{ url_for('supplier_certificates') }}" enctype="multipart/form-data">
+    <form class="ig-form ig-stack" method="post" action="{{ url_for('supplier_certificates') }}" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <section class="ad-card">
-            <div class="ad-card-head">
+        <section class="ig-card">
+            <div class="ig-card-head">
                 <div><h2>Dated certificates</h2><p>Choose the renewed PDF and enter its issue and expiry dates</p></div>
             </div>
-            <div class="ad-slots">
+            <div class="ig-slots">
                 {% for field, doc_type in slots.items() %}
                     {% set doc = documents.get(doc_type) %}
                     {% set help %}{% if doc %}{{ ad.document_dates(doc) }}{% endif %}{% endset %}
@@ -43,9 +43,9 @@
             </div>
         </section>
 
-        <div class="ad-form-actions">
-            <a href="{{ url_for('dashboard') }}" class="ad-btn ad-btn--ghost">Cancel</a>
-            <button type="submit" class="ad-btn ad-btn--primary">Upload renewed certificate</button>
+        <div class="ig-form-actions">
+            <a href="{{ url_for('dashboard') }}" class="ig-btn ig-btn--ghost">Cancel</a>
+            <button type="submit" class="ig-btn ig-btn--primary">Upload renewed certificate</button>
         </div>
     </form>
 {% endblock %}

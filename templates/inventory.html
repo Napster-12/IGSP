@@ -5,69 +5,69 @@
 {% block page_title %}Inventory{% endblock %}
 {% block page_subtitle %}Products and services you offer Icebolethu Group · {{ listed_count }} of {{ total_count }} listed in the catalogue{% endblock %}
 {% block page_actions %}
-    <a href="{{ url_for('product_form') }}" class="ad-btn ad-btn--primary">{{ ad.icon('plus') }} Add product</a>
+    <a href="{{ url_for('product_form') }}" class="ig-btn ig-btn--primary">{{ ad.icon('plus') }} Add product</a>
 {% endblock %}
 
 {% block content %}
     {% if total_count == 0 %}
-        <section class="ad-card ad-hero">
+        <section class="ig-card ig-hero">
             <div>
                 <h2>Add your first product or service</h2>
                 <p>Congratulations on being approved! List what you supply, with your prices and availability. Icebolethu Group's procurement team uses your inventory to compare prices and will contact you directly to place orders.</p>
-                <a href="{{ url_for('product_form') }}" class="ad-btn ad-btn--primary ad-btn--lg ad-mt">{{ ad.icon('plus') }} Add product</a>
+                <a href="{{ url_for('product_form') }}" class="ig-btn ig-btn--primary ig-btn--lg ig-mt">{{ ad.icon('plus') }} Add product</a>
             </div>
-            <ol class="ad-howto">
+            <ol class="ig-howto">
                 <li><strong>Add products</strong><span>Name, price, unit and how many you have available</span></li>
                 <li><strong>List them</strong><span>Listed items appear in the Icebolethu Group catalogue</span></li>
                 <li><strong>Keep it current</strong><span>Update prices and stock so the team sees accurate information</span></li>
             </ol>
         </section>
     {% else %}
-        <section class="ad-stats ad-stats--3" aria-label="Inventory summary">
-            <div class="ad-stat"><span class="ad-stat-label">Products</span><span class="ad-stat-value">{{ total_count }}</span><span class="ad-stat-sub">in your inventory</span></div>
-            <div class="ad-stat"><span class="ad-stat-label">Listed</span><span class="ad-stat-value">{{ listed_count }}</span><span class="ad-stat-sub">visible to Icebolethu Group</span></div>
-            <div class="ad-stat"><span class="ad-stat-label">Out of stock</span><span class="ad-stat-value">{{ out_of_stock_count }}</span><span class="ad-stat-sub">shown as unavailable</span></div>
+        <section class="ig-stats ig-stats--3" aria-label="Inventory summary">
+            <div class="ig-stat"><span class="ig-stat-label">Products</span><span class="ig-stat-value">{{ total_count }}</span><span class="ig-stat-sub">in your inventory</span></div>
+            <div class="ig-stat"><span class="ig-stat-label">Listed</span><span class="ig-stat-value">{{ listed_count }}</span><span class="ig-stat-sub">visible to Icebolethu Group</span></div>
+            <div class="ig-stat"><span class="ig-stat-label">Out of stock</span><span class="ig-stat-value">{{ out_of_stock_count }}</span><span class="ig-stat-sub">shown as unavailable</span></div>
         </section>
 
-        <section class="ad-card">
-            <form method="get" class="ad-toolbar">
-                <label class="ad-search">
-                    {{ ad.icon('search') }}<span class="ad-sr">Search</span>
+        <section class="ig-card">
+            <form method="get" class="ig-toolbar">
+                <label class="ig-search">
+                    {{ ad.icon('search') }}<span class="ig-sr">Search</span>
                     <input type="search" name="search" value="{{ search }}" placeholder="Search your products">
                 </label>
-                <select name="show" class="ad-select" onchange="this.form.submit()" aria-label="Show">
+                <select name="show" class="ig-select" onchange="this.form.submit()" aria-label="Show">
                     <option value="" {% if not show %}selected{% endif %}>All products</option>
                     <option value="listed" {% if show == 'listed' %}selected{% endif %}>Listed only</option>
                     <option value="hidden" {% if show == 'hidden' %}selected{% endif %}>Hidden only</option>
                 </select>
-                <button type="submit" class="ad-btn ad-btn--primary">Search</button>
+                <button type="submit" class="ig-btn ig-btn--primary">Search</button>
             </form>
 
             {% if products %}
-                <div class="ad-table-wrap ad-table-wrap--cards-md">
-                    <table class="ad-table ad-table--cards-md">
-                        <thead><tr><th>Product</th><th>Category</th><th class="ad-num">Price</th><th class="ad-num">In stock</th><th>Lead time</th><th>Catalogue</th><th class="ad-cell-action">Actions</th></tr></thead>
+                <div class="ig-table-wrap ig-table-wrap--cards-md">
+                    <table class="ig-table ig-table--cards-md">
+                        <thead><tr><th>Product</th><th>Category</th><th class="ig-num">Price</th><th class="ig-num">In stock</th><th>Lead time</th><th>Catalogue</th><th class="ig-cell-action">Actions</th></tr></thead>
                         <tbody>
                             {% for product in products %}
                                 <tr>
                                     <td>
-                                        <a class="ad-row-link" href="{{ url_for('product_form', product_id=product.id) }}">{{ product.name }}</a>
-                                        {% if product.description %}<span class="ad-cell-sub ad-clamp">{{ product.description }}</span>{% endif %}
+                                        <a class="ig-row-link" href="{{ url_for('product_form', product_id=product.id) }}">{{ product.name }}</a>
+                                        {% if product.description %}<span class="ig-cell-sub ig-clamp">{{ product.description }}</span>{% endif %}
                                     </td>
                                     <td>{{ product.category }}</td>
-                                    <td class="ad-num ad-nowrap">{{ product.price|zar }} <span class="ad-muted">{{ product.unit }}</span></td>
-                                    <td class="ad-num">{% if product.quantity_available is none %}<span class="ad-muted">Not tracked</span>{% elif product.quantity_available == 0 %}<span class="ad-doc-status ad-doc-status--pending">0</span>{% else %}{{ product.quantity_available }}{% endif %}</td>
-                                    <td class="ad-nowrap">{% if product.lead_time_days is not none %}{{ product.lead_time_days }} day{{ '' if product.lead_time_days == 1 else 's' }}{% else %}<span class="ad-muted">—</span>{% endif %}</td>
-                                    <td>{% if product.is_listed %}<span class="ad-badge ad-badge--listed">Listed</span>{% else %}<span class="ad-badge ad-badge--hidden">Hidden</span>{% endif %}</td>
-                                    <td class="ad-cell-action">
-                                        <a href="{{ url_for('product_form', product_id=product.id) }}" class="ad-btn ad-btn--ghost ad-btn--sm">Edit</a>
+                                    <td class="ig-num ig-nowrap">{{ product.price|zar }} <span class="ig-muted">{{ product.unit }}</span></td>
+                                    <td class="ig-num">{% if product.quantity_available is none %}<span class="ig-muted">Not tracked</span>{% elif product.quantity_available == 0 %}<span class="ig-doc-status ig-doc-status--pending">0</span>{% else %}{{ product.quantity_available }}{% endif %}</td>
+                                    <td class="ig-nowrap">{% if product.lead_time_days is not none %}{{ product.lead_time_days }} day{{ '' if product.lead_time_days == 1 else 's' }}{% else %}<span class="ig-muted">—</span>{% endif %}</td>
+                                    <td>{% if product.is_listed %}<span class="ig-badge ig-badge--listed">Listed</span>{% else %}<span class="ig-badge ig-badge--hidden">Hidden</span>{% endif %}</td>
+                                    <td class="ig-cell-action">
+                                        <a href="{{ url_for('product_form', product_id=product.id) }}" class="ig-btn ig-btn--ghost ig-btn--sm">Edit</a>
                                         <form method="post" action="{{ url_for('toggle_product', product_id=product.id) }}">
                                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                            <button type="submit" class="ad-btn ad-btn--ghost ad-btn--sm">{{ 'Hide' if product.is_listed else 'List' }}</button>
+                                            <button type="submit" class="ig-btn ig-btn--ghost ig-btn--sm">{{ 'Hide' if product.is_listed else 'List' }}</button>
                                         </form>
                                         <form method="post" action="{{ url_for('delete_product', product_id=product.id) }}" onsubmit="return confirm('Remove “{{ product.name }}” from your inventory?');">
                                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                            <button type="submit" class="ad-btn ad-btn--danger ad-btn--sm">Remove</button>
+                                            <button type="submit" class="ig-btn ig-btn--danger ig-btn--sm">Remove</button>
                                         </form>
                                     </td>
                                 </tr>
@@ -76,7 +76,7 @@
                     </table>
                 </div>
             {% else %}
-                <div class="ad-empty"><strong>No products match</strong><span>Try a different search.</span></div>
+                <div class="ig-empty"><strong>No products match</strong><span>Try a different search.</span></div>
             {% endif %}
         </section>
     {% endif %}

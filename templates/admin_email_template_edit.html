@@ -2,64 +2,64 @@
 {% import "admin_macros.html" as ad with context %}
 
 {% block title %}{{ template.name }} · Email templates{% endblock %}
-{% block breadcrumb %}<a href="{{ url_for('admin_email_templates') }}" class="ad-crumb">{{ ad.icon('back') }} Email templates</a>{% endblock %}
+{% block breadcrumb %}<a href="{{ url_for('admin_email_templates') }}" class="ig-crumb">{{ ad.icon('back') }} Email templates</a>{% endblock %}
 {% block page_title %}{{ template.name }}{% endblock %}
 {% block page_subtitle %}{{ template.description }}{% if saved %} · Edited {{ saved.updated_at.strftime('%d %b %Y, %H:%M') if saved.updated_at else '' }}{% if saved.updated_by %} by {{ saved.updated_by }}{% endif %}{% endif %}{% endblock %}
 
 {% block content %}
-    <div class="ad-detail">
-        <div class="ad-detail-main">
-            <section class="ad-card">
-                <div class="ad-card-head">
+    <div class="ig-detail">
+        <div class="ig-detail-main">
+            <section class="ig-card">
+                <div class="ig-card-head">
                     <h2>Edit email</h2>
-                    {% if saved %}<span class="ad-badge ad-badge--under_review">Edited</span>{% else %}<span class="ad-badge ad-badge--inactive">Default</span>{% endif %}
+                    {% if saved %}<span class="ig-badge ig-badge--under_review">Edited</span>{% else %}<span class="ig-badge ig-badge--inactive">Default</span>{% endif %}
                 </div>
-                <form method="post" class="ad-form">
+                <form method="post" class="ig-form">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <label for="subject">Subject</label>
                     <input type="text" id="subject" name="subject" value="{{ subject }}" maxlength="200" required>
                     <label for="body">Message</label>
                     <textarea id="body" name="body" rows="9" required>{{ body }}</textarea>
-                    <p class="ad-hint">Leave an empty line between paragraphs. The greeting (“Hello …”), the application summary, the button and the sign-off are added automatically.</p>
-                    <div class="ad-filter-actions ad-mt">
-                        <button type="submit" class="ad-btn ad-btn--primary">Save</button>
-                        <a href="{{ url_for('admin_email_templates') }}" class="ad-btn ad-btn--ghost">Cancel</a>
+                    <p class="ig-hint">Leave an empty line between paragraphs. The greeting (“Hello …”), the application summary, the button and the sign-off are added automatically.</p>
+                    <div class="ig-filter-actions ig-mt">
+                        <button type="submit" class="ig-btn ig-btn--primary">Save</button>
+                        <a href="{{ url_for('admin_email_templates') }}" class="ig-btn ig-btn--ghost">Cancel</a>
                     </div>
                 </form>
                 {% if saved %}
-                    <form method="post" action="{{ url_for('admin_email_template_reset', key=key) }}" class="ad-mt"
+                    <form method="post" action="{{ url_for('admin_email_template_reset', key=key) }}" class="ig-mt"
                           onsubmit="return confirm('Go back to the default text for this email? Your edits will be lost.');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="ad-link">Reset to default text</button>
+                        <button type="submit" class="ig-link">Reset to default text</button>
                     </form>
                 {% endif %}
             </section>
 
-            <section class="ad-card">
-                <div class="ad-card-head"><h2>Preview</h2><span class="ad-muted">Saved version, with example values</span></div>
-                <iframe class="ad-email-preview" title="Email preview" sandbox srcdoc="{{ preview }}"></iframe>
+            <section class="ig-card">
+                <div class="ig-card-head"><h2>Preview</h2><span class="ig-muted">Saved version, with example values</span></div>
+                <iframe class="ig-email-preview" title="Email preview" sandbox srcdoc="{{ preview }}"></iframe>
             </section>
         </div>
 
-        <aside class="ad-detail-side">
-            <section class="ad-card">
-                <div class="ad-card-head"><h2>Placeholders</h2></div>
+        <aside class="ig-detail-side">
+            <section class="ig-card">
+                <div class="ig-card-head"><h2>Placeholders</h2></div>
                 {% if template.placeholders %}
-                    <p class="ad-hint">Type these exactly, including the curly brackets. They're replaced when the email is sent.</p>
-                    <dl class="ad-fields ad-fields--1 ad-mt">
+                    <p class="ig-hint">Type these exactly, including the curly brackets. They're replaced when the email is sent.</p>
+                    <dl class="ig-fields ig-fields--1 ig-mt">
                         {% for name, (description, example) in template.placeholders.items() %}
-                            <div class="ad-field"><dt class="ad-mono">{{ '{' ~ name ~ '}' }}</dt><dd>{{ description }}<span class="ad-cell-sub">e.g. {{ example|trim }}</span></dd></div>
+                            <div class="ig-field"><dt class="ig-mono">{{ '{' ~ name ~ '}' }}</dt><dd>{{ description }}<span class="ig-cell-sub">e.g. {{ example|trim }}</span></dd></div>
                         {% endfor %}
                     </dl>
                 {% else %}
-                    <p class="ad-hint">This email has no placeholders.</p>
+                    <p class="ig-hint">This email has no placeholders.</p>
                 {% endif %}
             </section>
-            <section class="ad-card">
-                <div class="ad-card-head"><h2>Default text</h2></div>
-                <dl class="ad-fields ad-fields--1">
-                    <div class="ad-field"><dt>Subject</dt><dd>{{ template.subject }}</dd></div>
-                    <div class="ad-field"><dt>Message</dt><dd class="ad-prewrap">{{ template.body }}</dd></div>
+            <section class="ig-card">
+                <div class="ig-card-head"><h2>Default text</h2></div>
+                <dl class="ig-fields ig-fields--1">
+                    <div class="ig-field"><dt>Subject</dt><dd>{{ template.subject }}</dd></div>
+                    <div class="ig-field"><dt>Message</dt><dd class="ig-prewrap">{{ template.body }}</dd></div>
                 </dl>
             </section>
         </aside>

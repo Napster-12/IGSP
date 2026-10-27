@@ -7,19 +7,19 @@
 {% block page_subtitle %}{{ total_count }} application{{ '' if total_count == 1 else 's' }}{% endblock %}
 
 {% block content %}
-    <section class="ad-card">
+    <section class="ig-card">
         {% if applications %}
-            <div class="ad-table-wrap">
-                <table class="ad-table">
-                    <thead><tr><th>Company</th><th>Category</th><th>Status</th><th>Submitted</th><th><span class="ad-sr">Open</span></th></tr></thead>
+            <div class="ig-table-wrap">
+                <table class="ig-table">
+                    <thead><tr><th>Company</th><th>Category</th><th>Status</th><th>Submitted</th><th><span class="ig-sr">Open</span></th></tr></thead>
                     <tbody>
                         {% for application in applications %}
                             <tr>
-                                <td><a class="ad-row-link" href="{{ url_for('application_detail', application_id=application.id) }}">{{ application.company_name }}</a></td>
+                                <td><a class="ig-row-link" href="{{ url_for('application_detail', application_id=application.id) }}">{{ application.company_name }}</a></td>
                                 <td>{{ application.category_names|join(', ') or '—' }}</td>
                                 <td>{{ ad.status_badge(application.status) }}</td>
-                                <td class="ad-nowrap">{{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}</td>
-                                <td class="ad-cell-action"><a href="{{ url_for('application_detail', application_id=application.id) }}" class="ad-btn ad-btn--ghost ad-btn--sm">View</a></td>
+                                <td class="ig-nowrap">{{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}</td>
+                                <td class="ig-cell-action"><a href="{{ url_for('application_detail', application_id=application.id) }}" class="ig-btn ig-btn--ghost ig-btn--sm">View</a></td>
                             </tr>
                         {% endfor %}
                     </tbody>
@@ -27,10 +27,10 @@
             </div>
             {{ ui.render_pagination(pagination, 'applications') }}
         {% else %}
-            <div class="ad-empty">
+            <div class="ig-empty">
                 <strong>No applications yet</strong>
                 <span>Start your supplier application to get registered.</span>
-                <a href="{{ url_for('onboarding_profile') }}" class="ad-btn ad-btn--primary ad-mt">Start application</a>
+                <a href="{{ url_for('onboarding_profile') }}" class="ig-btn ig-btn--primary ig-mt">Start application</a>
             </div>
         {% endif %}
     </section>

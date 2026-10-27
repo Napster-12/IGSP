@@ -6,28 +6,28 @@
 {% block page_subtitle %}{{ templates|length }} emails sent to suppliers · {{ saved|length }} edited{% endblock %}
 
 {% block content %}
-    <section class="ad-card">
-        <div class="ad-table-wrap">
-            <table class="ad-table">
+    <section class="ig-card">
+        <div class="ig-table-wrap">
+            <table class="ig-table">
                 <thead><tr><th>Email</th><th>Subject</th><th>Text</th><th></th></tr></thead>
                 <tbody>
                     {% for key, template in templates.items() %}
                         {% set edited = saved.get(key) %}
                         <tr>
                             <td>
-                                <a href="{{ url_for('admin_email_template_edit', key=key) }}" class="ad-row-link">{{ template.name }}</a>
-                                <span class="ad-cell-sub">{{ template.description }}</span>
+                                <a href="{{ url_for('admin_email_template_edit', key=key) }}" class="ig-row-link">{{ template.name }}</a>
+                                <span class="ig-cell-sub">{{ template.description }}</span>
                             </td>
                             <td>{{ edited.subject if edited else template.subject }}</td>
-                            <td class="ad-nowrap">
+                            <td class="ig-nowrap">
                                 {% if edited %}
-                                    <span class="ad-badge ad-badge--under_review">Edited</span>
-                                    <span class="ad-cell-sub">{{ edited.updated_at.strftime('%d %b %Y') if edited.updated_at else '' }}{% if edited.updated_by %} · {{ edited.updated_by }}{% endif %}</span>
+                                    <span class="ig-badge ig-badge--under_review">Edited</span>
+                                    <span class="ig-cell-sub">{{ edited.updated_at.strftime('%d %b %Y') if edited.updated_at else '' }}{% if edited.updated_by %} · {{ edited.updated_by }}{% endif %}</span>
                                 {% else %}
-                                    <span class="ad-badge ad-badge--inactive">Default</span>
+                                    <span class="ig-badge ig-badge--inactive">Default</span>
                                 {% endif %}
                             </td>
-                            <td><a href="{{ url_for('admin_email_template_edit', key=key) }}" class="ad-btn ad-btn--ghost">{{ ad.icon('edit') }} Edit</a></td>
+                            <td><a href="{{ url_for('admin_email_template_edit', key=key) }}" class="ig-btn ig-btn--ghost">{{ ad.icon('edit') }} Edit</a></td>
                         </tr>
                     {% endfor %}
                 </tbody>

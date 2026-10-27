@@ -27,7 +27,7 @@
 
     // File inputs: show the chosen file name in the slot.
     function showFileName(input) {
-        var slot = input.closest('.ad-slot');
+        var slot = input.closest('.ig-slot');
         var label = slot && slot.querySelector('[data-file-name]');
         if (!label || !input.files || !input.files[0]) { return; }
         label.textContent = 'Selected: ' + input.files[0].name + ' (uploads when you continue)';

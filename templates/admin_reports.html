@@ -9,19 +9,19 @@
 {% block page_title %}Reports{% endblock %}
 {% block page_subtitle %}{{ total_applications }} application{{ '' if total_applications == 1 else 's' }}{% if page_args %} matching your filters{% endif %}{% endblock %}
 {% block page_actions %}
-    <a href="{{ url_for('admin_reports_export', **page_args) }}" class="ad-btn ad-btn--primary">{{ ad.icon('download') }} Export CSV</a>
+    <a href="{{ url_for('admin_reports_export', **page_args) }}" class="ig-btn ig-btn--primary">{{ ad.icon('download') }} Export CSV</a>
 {% endblock %}
 
 {% block content %}
     {% set kind = 'applications' %}
     {% include "_report_tabs.html" %}
-    <section class="ad-card">
-        <form method="get" class="ad-filters" id="reportFilters">
-            <label class="ad-filter ad-filter--grow">
+    <section class="ig-card">
+        <form method="get" class="ig-filters" id="reportFilters">
+            <label class="ig-filter ig-filter--grow">
                 <span>Search</span>
                 <input type="search" name="search" value="{{ search or '' }}" placeholder="Company or contact — press Enter">
             </label>
-            <label class="ad-filter">
+            <label class="ig-filter">
                 <span>Status</span>
                 <select name="status">
                     <option value="">All statuses</option>
@@ -30,7 +30,7 @@
                     {% endfor %}
                 </select>
             </label>
-            <label class="ad-filter">
+            <label class="ig-filter">
                 <span>Category</span>
                 <select name="category">
                     <option value="">All categories</option>
@@ -39,53 +39,53 @@
                     {% endfor %}
                 </select>
             </label>
-            <label class="ad-filter">
+            <label class="ig-filter">
                 <span>From</span>
                 <input type="date" name="date_from" value="{{ date_from or '' }}">
             </label>
-            <label class="ad-filter">
+            <label class="ig-filter">
                 <span>To</span>
                 <input type="date" name="date_to" value="{{ date_to or '' }}">
             </label>
-            <div class="ad-filter-actions">
-                <button type="submit" class="ad-btn ad-btn--primary">Apply</button>
-                {% if page_args %}<a href="{{ url_for('admin_reports') }}" class="ad-btn ad-btn--ghost">Reset</a>{% endif %}
+            <div class="ig-filter-actions">
+                <button type="submit" class="ig-btn ig-btn--primary">Apply</button>
+                {% if page_args %}<a href="{{ url_for('admin_reports') }}" class="ig-btn ig-btn--ghost">Reset</a>{% endif %}
             </div>
         </form>
     </section>
 
-    <section class="ad-stats ad-stats--6" aria-label="Report totals">
-        <div class="ad-stat"><span class="ad-stat-label">Applications</span><span class="ad-stat-value">{{ total_applications }}</span></div>
-        <div class="ad-stat"><span class="ad-stat-label">Pending review</span><span class="ad-stat-value">{{ pending_count }}</span></div>
-        <div class="ad-stat"><span class="ad-stat-label">Approved</span><span class="ad-stat-value">{{ approved_count }}</span></div>
-        <div class="ad-stat"><span class="ad-stat-label">Declined</span><span class="ad-stat-value">{{ rejected_count }}</span></div>
-        <div class="ad-stat"><span class="ad-stat-label">Active suppliers</span><span class="ad-stat-value">{{ active_suppliers }}</span></div>
-        <div class="ad-stat"><span class="ad-stat-label">Inactive suppliers</span><span class="ad-stat-value">{{ inactive_suppliers }}</span></div>
+    <section class="ig-stats ig-stats--6" aria-label="Report totals">
+        <div class="ig-stat"><span class="ig-stat-label">Applications</span><span class="ig-stat-value">{{ total_applications }}</span></div>
+        <div class="ig-stat"><span class="ig-stat-label">Pending review</span><span class="ig-stat-value">{{ pending_count }}</span></div>
+        <div class="ig-stat"><span class="ig-stat-label">Approved</span><span class="ig-stat-value">{{ approved_count }}</span></div>
+        <div class="ig-stat"><span class="ig-stat-label">Declined</span><span class="ig-stat-value">{{ rejected_count }}</span></div>
+        <div class="ig-stat"><span class="ig-stat-label">Active suppliers</span><span class="ig-stat-value">{{ active_suppliers }}</span></div>
+        <div class="ig-stat"><span class="ig-stat-label">Inactive suppliers</span><span class="ig-stat-value">{{ inactive_suppliers }}</span></div>
     </section>
 
-    <div class="ad-grid ad-grid--2">
-        <section class="ad-card">
-            <div class="ad-card-head"><div><h2>Applications per month</h2><p>By submission date</p></div></div>
-            <div class="ad-chart"><canvas id="monthlyChart" role="img" aria-label="Applications submitted per month"></canvas></div>
+    <div class="ig-grid ig-grid--2">
+        <section class="ig-card">
+            <div class="ig-card-head"><div><h2>Applications per month</h2><p>By submission date</p></div></div>
+            <div class="ig-chart"><canvas id="monthlyChart" role="img" aria-label="Applications submitted per month"></canvas></div>
         </section>
-        <section class="ad-card">
-            <div class="ad-card-head"><div><h2>By status</h2><p>Where applications are in the review process</p></div></div>
-            <div class="ad-chart" style="height: {{ [90, 48 * (status_breakdown.values()|select('gt', 0)|list|length) + 50]|max }}px"><canvas id="statusChart" role="img" aria-label="Applications by status"></canvas></div>
+        <section class="ig-card">
+            <div class="ig-card-head"><div><h2>By status</h2><p>Where applications are in the review process</p></div></div>
+            <div class="ig-chart" style="height: {{ [90, 48 * (status_breakdown.values()|select('gt', 0)|list|length) + 50]|max }}px"><canvas id="statusChart" role="img" aria-label="Applications by status"></canvas></div>
         </section>
-        <section class="ad-card">
-            <div class="ad-card-head"><div><h2>By category</h2><p>Applications per supplier category</p></div></div>
-            <div class="ad-chart" style="height: {{ [90, 44 * (category_breakdown_sorted|length) + 50]|max }}px"><canvas id="categoryChart" role="img" aria-label="Applications by category"></canvas></div>
+        <section class="ig-card">
+            <div class="ig-card-head"><div><h2>By category</h2><p>Applications per supplier category</p></div></div>
+            <div class="ig-chart" style="height: {{ [90, 44 * (category_breakdown_sorted|length) + 50]|max }}px"><canvas id="categoryChart" role="img" aria-label="Applications by category"></canvas></div>
         </section>
-        <section class="ad-card">
-            <div class="ad-card-head"><div><h2>Document completeness</h2><p>Applications with all required documents</p></div></div>
+        <section class="ig-card">
+            <div class="ig-card-head"><div><h2>Document completeness</h2><p>Applications with all required documents</p></div></div>
             {% set docs_total = doc_status_breakdown.complete + doc_status_breakdown.pending %}
             {% set docs_pct = ((doc_status_breakdown.complete / docs_total * 100)|round|int) if docs_total else 0 %}
-            <div class="ad-meter-block">
-                <div class="ad-meter-figure"><strong>{{ docs_pct }}%</strong><span>complete</span></div>
-                <div class="ad-meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ docs_pct }}" aria-label="Documents complete">
+            <div class="ig-meter-block">
+                <div class="ig-meter-figure"><strong>{{ docs_pct }}%</strong><span>complete</span></div>
+                <div class="ig-meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ docs_pct }}" aria-label="Documents complete">
                     <span style="width: {{ docs_pct }}%"></span>
                 </div>
-                <dl class="ad-meter-legend">
+                <dl class="ig-meter-legend">
                     <div><dt>Complete</dt><dd>{{ doc_status_breakdown.complete }}</dd></div>
                     <div><dt>Pending</dt><dd>{{ doc_status_breakdown.pending }}</dd></div>
                 </dl>
@@ -93,23 +93,23 @@
         </section>
     </div>
 
-    <section class="ad-card">
-        <div class="ad-card-head">
+    <section class="ig-card">
+        <div class="ig-card-head">
             <div><h2>Applications</h2><p>Newest first</p></div>
         </div>
         {% if recent_applications %}
-            <div class="ad-table-wrap">
-                <table class="ad-table">
+            <div class="ig-table-wrap">
+                <table class="ig-table">
                     <thead><tr><th>Company</th><th>Contact</th><th>Category</th><th>Documents</th><th>Status</th><th>Submitted</th></tr></thead>
                     <tbody>
                         {% for application in recent_applications %}
                             <tr>
-                                <td><a class="ad-row-link" href="{{ url_for('admin_application_detail', application_id=application.id) }}">{{ application.company_name }}</a></td>
+                                <td><a class="ig-row-link" href="{{ url_for('admin_application_detail', application_id=application.id) }}">{{ application.company_name }}</a></td>
                                 <td>{{ application.contact_name }}</td>
                                 <td>{{ application.category_names|join(', ') or '—' }}</td>
-                                <td><span class="ad-doc-status ad-doc-status--{{ application.documents_status }}">{{ (application.documents_status or 'pending')|title }}</span></td>
+                                <td><span class="ig-doc-status ig-doc-status--{{ application.documents_status }}">{{ (application.documents_status or 'pending')|title }}</span></td>
                                 <td>{{ ad.status_badge(application.status) }}</td>
-                                <td class="ad-nowrap">{{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}</td>
+                                <td class="ig-nowrap">{{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}</td>
                             </tr>
                         {% endfor %}
                     </tbody>
@@ -117,7 +117,7 @@
             </div>
             {{ ui.render_pagination(pagination, 'admin_reports', page_args) }}
         {% else %}
-            <div class="ad-empty"><strong>No applications match these filters</strong><span>Try widening the date range or clearing filters.</span></div>
+            <div class="ig-empty"><strong>No applications match these filters</strong><span>Try widening the date range or clearing filters.</span></div>
         {% endif %}
     </section>
 
@@ -141,8 +141,8 @@ document.querySelectorAll('#reportFilters select').forEach(function (el) {
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     if (!window.Chart) {
-        document.querySelectorAll('.ad-chart').forEach(function (el) {
-            el.innerHTML = '<p class="ad-muted ad-chart-fallback">Charts could not load (no internet connection?). The figures above and the table below are unaffected.</p>';
+        document.querySelectorAll('.ig-chart').forEach(function (el) {
+            el.innerHTML = '<p class="ig-muted ig-chart-fallback">Charts could not load (no internet connection?). The figures above and the table below are unaffected.</p>';
         });
         return;
     }
@@ -202,7 +202,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function emptyChart(id, message) {
         var box = document.getElementById(id).parentNode;
-        box.innerHTML = '<p class="ad-muted ad-chart-fallback">' + message + '</p>';
+        box.innerHTML = '<p class="ig-muted ig-chart-fallback">' + message + '</p>';
     }
 
     // Only statuses that actually have applications, in review-process order.

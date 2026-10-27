@@ -18,23 +18,23 @@
     <link rel="stylesheet" href="{{ static_url('css/icebolethu.css') }}">
     {% block head %}{% endblock %}
 </head>
-<body class="ad-body">
-    <div class="ad-shell">
-        <aside class="ad-sidebar">
-            <a class="ad-brand" href="{{ url_for(admin.home_endpoint) }}">
+<body class="ig-body">
+    <div class="ig-shell">
+        <aside class="ig-sidebar">
+            <a class="ig-brand" href="{{ url_for(admin.home_endpoint) }}">
                 <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Icebolethu Group">
                 <span>Supplier Portal Admin</span>
             </a>
 
-            <button type="button" class="ad-menu-toggle" data-menu-toggle aria-controls="ad-menu" aria-expanded="false">
+            <button type="button" class="ig-menu-toggle" data-menu-toggle aria-controls="ig-menu" aria-expanded="false">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
                 <span>Menu</span>
             </button>
 
-            <div class="ad-sidebar-menu" id="ad-menu">
-                <nav class="ad-nav" aria-label="Admin">
+            <div class="ig-sidebar-menu" id="ig-menu">
+                <nav class="ig-nav" aria-label="Admin">
                     {% for section, endpoint, label, icon_name, active_for in nav if admin.can(section) %}
-                        <a href="{{ url_for(endpoint) }}" class="ad-nav-link{% if request.endpoint in active_for %} is-active{% endif %}"
+                        <a href="{{ url_for(endpoint) }}" class="ig-nav-link{% if request.endpoint in active_for %} is-active{% endif %}"
                            {% if request.endpoint in active_for %}aria-current="page"{% endif %}>
                             {{ ad.icon(icon_name) }}
                             <span>{{ label }}</span>
@@ -42,34 +42,34 @@
                     {% endfor %}
                 </nav>
 
-                <div class="ad-account">
-                    <div class="ad-avatar" aria-hidden="true">{{ ((admin.name or admin.email)[:1])|upper }}</div>
-                    <div class="ad-account-text">
+                <div class="ig-account">
+                    <div class="ig-avatar" aria-hidden="true">{{ ((admin.name or admin.email)[:1])|upper }}</div>
+                    <div class="ig-account-text">
                         <strong>{{ admin.name or 'Administrator' }}</strong>
                         <span>{{ admin.email }}</span>
-                        <span class="ad-account-role">{{ admin.role_label }}</span>
+                        <span class="ig-account-role">{{ admin.role_label }}</span>
                     </div>
-                    <a href="{{ url_for('admin_logout') }}" class="ad-logout">{{ ad.icon('logout') }}<span>Log out</span></a>
+                    <a href="{{ url_for('admin_logout') }}" class="ig-logout">{{ ad.icon('logout') }}<span>Log out</span></a>
                 </div>
             </div>
         </aside>
 
-        <main class="ad-main">
-            <header class="ad-page-head">
-                <div class="ad-page-title">
+        <main class="ig-main">
+            <header class="ig-page-head">
+                <div class="ig-page-title">
                     {% block breadcrumb %}{% endblock %}
                     <h1>{% block page_title %}{% endblock %}</h1>
-                    <p class="ad-subtitle">{% block page_subtitle %}{% endblock %}</p>
+                    <p class="ig-subtitle">{% block page_subtitle %}{% endblock %}</p>
                 </div>
-                <div class="ad-page-tools">
-                    <div class="ad-page-actions">{% block page_actions %}{% endblock %}</div>
+                <div class="ig-page-tools">
+                    <div class="ig-page-actions">{% block page_actions %}{% endblock %}</div>
                     {{ ad.notification_bell(url_for('admin_notifications'), unread_notifications, request.endpoint == 'admin_notifications') }}
                 </div>
             </header>
 
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% for category, message in messages %}
-                    <div class="ad-flash ad-flash--{{ category }}" role="status">{{ message }}</div>
+                    <div class="ig-flash ig-flash--{{ category }}" role="status">{{ message }}</div>
                 {% endfor %}
             {% endwith %}
 

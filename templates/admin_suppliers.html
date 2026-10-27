@@ -40,24 +40,24 @@
                   url_for('admin_suppliers', account=account_filter or None, search=search or None) if application_filter else none,
                   aria='Filter by application status', variant='dense') }}
 
-    <section class="ad-card">
-        <form method="get" class="ad-toolbar">
+    <section class="ig-card">
+        <form method="get" class="ig-toolbar">
             {% if account_filter %}<input type="hidden" name="account" value="{{ account_filter }}">{% endif %}
             {% if application_filter %}<input type="hidden" name="application" value="{{ application_filter }}">{% endif %}
-            <label class="ad-search">
+            <label class="ig-search">
                 {{ ad.icon('search') }}
-                <span class="ad-sr">Search</span>
+                <span class="ig-sr">Search</span>
                 <input type="search" name="search" value="{{ search }}" placeholder="Search company, contact, email or supplier ID">
             </label>
-            <button type="submit" class="ad-btn ad-btn--primary">Search</button>
-            {% if search %}<a href="{{ url_for('admin_suppliers', account=account_filter or None, application=application_filter or None) }}" class="ad-btn ad-btn--ghost">Clear</a>{% endif %}
+            <button type="submit" class="ig-btn ig-btn--primary">Search</button>
+            {% if search %}<a href="{{ url_for('admin_suppliers', account=account_filter or None, application=application_filter or None) }}" class="ig-btn ig-btn--ghost">Clear</a>{% endif %}
         </form>
 
         {% if suppliers %}
-            <div class="ad-table-wrap ad-table-wrap--cards-md">
-                <table class="ad-table ad-table--cards-md">
+            <div class="ig-table-wrap ig-table-wrap--cards-md">
+                <table class="ig-table ig-table--cards-md">
                     <thead>
-                        <tr><th>Supplier</th><th>Contact</th><th>Phone</th><th>Application</th><th>Account</th><th class="ad-cell-action">Actions</th></tr>
+                        <tr><th>Supplier</th><th>Contact</th><th>Phone</th><th>Application</th><th>Account</th><th class="ig-cell-action">Actions</th></tr>
                     </thead>
                     <tbody>
                         {% for supplier in suppliers %}
@@ -65,36 +65,36 @@
                             <tr>
                                 <td>
                                     <strong>{{ supplier.company_name }}</strong>
-                                    <span class="ad-cell-sub ad-mono">{{ supplier.supplier_id or '—' }}</span>
+                                    <span class="ig-cell-sub ig-mono">{{ supplier.supplier_id or '—' }}</span>
                                 </td>
                                 <td>
                                     {{ supplier.contact_name }}
-                                    <span class="ad-cell-sub">{{ supplier.email }}</span>
+                                    <span class="ig-cell-sub">{{ supplier.email }}</span>
                                 </td>
-                                <td class="ad-nowrap">{{ supplier.phone }}</td>
+                                <td class="ig-nowrap">{{ supplier.phone }}</td>
                                 <td>
                                     {% if application %}
-                                        <a href="{{ url_for('admin_application_detail', application_id=application.id) }}" class="ad-badge-link">{{ ad.status_badge(application.status) }}</a>
+                                        <a href="{{ url_for('admin_application_detail', application_id=application.id) }}" class="ig-badge-link">{{ ad.status_badge(application.status) }}</a>
                                     {% else %}
-                                        <span class="ad-muted">Not submitted</span>
+                                        <span class="ig-muted">Not submitted</span>
                                     {% endif %}
                                 </td>
                                 <td>
                                     {% if supplier.active %}
-                                        <span class="ad-badge ad-badge--active">Active</span>
+                                        <span class="ig-badge ig-badge--active">Active</span>
                                     {% else %}
-                                        <span class="ad-badge ad-badge--inactive">Inactive</span>
+                                        <span class="ig-badge ig-badge--inactive">Inactive</span>
                                     {% endif %}
                                 </td>
-                                <td class="ad-cell-action">
+                                <td class="ig-cell-action">
                                     <form method="post" action="{{ url_for('toggle_supplier', supplier_id=supplier.id) }}"
                                           onsubmit="return confirm(this.querySelector('[data-confirm]').dataset.confirm);">
                                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <input type="hidden" name="next" value="{{ request.full_path }}">
                                         {% if supplier.active %}
-                                            <button type="submit" class="ad-btn ad-btn--ghost ad-btn--sm" data-confirm="Deactivate {{ supplier.company_name }}?">Deactivate</button>
+                                            <button type="submit" class="ig-btn ig-btn--ghost ig-btn--sm" data-confirm="Deactivate {{ supplier.company_name }}?">Deactivate</button>
                                         {% else %}
-                                            <button type="submit" class="ad-btn ad-btn--success ad-btn--sm" data-confirm="Activate {{ supplier.company_name }}?">Activate</button>
+                                            <button type="submit" class="ig-btn ig-btn--success ig-btn--sm" data-confirm="Activate {{ supplier.company_name }}?">Activate</button>
                                         {% endif %}
                                     </form>
                                 </td>
@@ -109,7 +109,7 @@
             {% if application_filter %}{% set _ = page_args.update({'application': application_filter}) %}{% endif %}
             {{ ui.render_pagination(pagination, 'admin_suppliers', page_args) }}
         {% else %}
-            <div class="ad-empty">
+            <div class="ig-empty">
                 <strong>No suppliers found</strong>
                 <span>{% if search or account_filter or application_filter %}No suppliers match the selected cards{% if search %} and search{% endif %}. Pick another card or clear a filter.{% else %}Suppliers appear here once they register.{% endif %}</span>
             </div>
