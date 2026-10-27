@@ -50,11 +50,13 @@ html{
 
 body{
     background:var(--background);
-    font-family:"Segoe UI",Tahoma,Geneva,Verdana,sans-serif;
+    font-family:"Montserrat","Segoe UI",Tahoma,Geneva,Verdana,sans-serif;
     color:var(--text);
     font-size:15px;
     line-height:1.6;
 }
+/* Form controls don't inherit the page font by default. */
+button, input, select, textarea{ font-family:inherit; }
 
 .landing-page{
     height:100vh;
