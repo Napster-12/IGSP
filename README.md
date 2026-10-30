@@ -36,6 +36,26 @@ The local development database has five test admins for each role. They all use 
 
 To create them in another local database, run `flask --app app create-admin --email <email> --name "<name>" --role <super|applications|reports|ict> --password 'Password123!'` for each account. The role key in brackets is what `--role` takes.
 
+## Admin sign-in through Cognito (staging and production)
+
+On AWS, Icebolethu staff sign in through the company's Cognito user pool, the same one the other Icebolethu systems use. **Continue with Microsoft** goes through Cognito to Microsoft; "Sign in with your Icebolethu login" opens Cognito's own sign-in page. It's switched on by the `COGNITO_*` settings (see `.env.example`).
+
+Access is managed in Cognito, not in the portal. Add a person to **one** of these Cognito groups:
+
+| Cognito group | Portal role |
+| --- | --- |
+| `IGSP_PROCUREMENT_TEAMLEAD` | Procurement Team Lead (`super`) |
+| `IGSP_PROCUREMENT_ICT` | ICT Admin (`ict`) |
+| `IGSP_PROCUREMENT_OFFICER` | Procurement Officer (`applications`) |
+| `IGSP_PROCUREMENT_MANAGER` | Procurement Manager (`reports`) |
+
+- Their admin account is created the first time they sign in, with the role from their group. If they're in more than one group, the highest role in the list above wins.
+- Their role follows their group: change the group and the new role applies at their next sign-in.
+- Anyone signing in who isn't in one of these groups is refused, and the refusal shows in the user audit.
+- Someone signing in with Microsoft for the first time only appears in Cognito after that first attempt (as `AzureAD_...`). Add them to their group then, and they sign in again.
+
+The email and password login still works for admins created with `create-admin`.
+
 ## Production
 
 ```bash
