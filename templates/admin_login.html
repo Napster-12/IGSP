@@ -31,10 +31,13 @@
 
             {% if step == "options" %}
                 <div class="adm-login-panel">
-                    <a href="{{ url_for('admin_login_microsoft') }}" class="adm-login-btn adm-login-btn--ms">
+                    <a href="{{ url_for('admin_login_cognito', provider='microsoft') if COGNITO_ENABLED else url_for('admin_login_microsoft') }}" class="adm-login-btn adm-login-btn--ms">
                         <svg width="18" height="18" viewBox="0 0 23 23" aria-hidden="true"><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
                         Continue with Microsoft (Azure AD)
                     </a>
+                    {% if COGNITO_ENABLED %}
+                        <p class="adm-login-links">No Microsoft account? <a href="{{ url_for('admin_login_cognito') }}">Sign in with your Icebolethu login</a></p>
+                    {% endif %}
 
                     <div class="adm-login-or"><span>or sign in with username and password</span></div>
 

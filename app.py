@@ -114,6 +114,26 @@ if MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET:
         client_kwargs={"scope": " ".join(MICROSOFT_SCOPE)},
     )
 
+# Admin sign-in through Icebolethu's AWS Cognito user pool, the same pool (and Microsoft link) the other
+# Icebolethu systems use. The admin's role comes from their Cognito group (see COGNITO_GROUP_ROLES).
+# When this is configured, "Continue with Microsoft" goes through Cognito instead of MICROSOFT_* above.
+COGNITO_REGION = os.getenv("COGNITO_REGION", "af-south-1")
+COGNITO_USER_POOL_ID = os.getenv("COGNITO_USER_POOL_ID", "")
+COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID", "")
+COGNITO_CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET", "")
+COGNITO_MICROSOFT_PROVIDER = os.getenv("COGNITO_MICROSOFT_PROVIDER", "AzureAD")
+COGNITO_ENABLED = bool(COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID and COGNITO_CLIENT_SECRET)
+
+if COGNITO_ENABLED:
+    oauth.register(
+        name="cognito",
+        client_id=COGNITO_CLIENT_ID,
+        client_secret=COGNITO_CLIENT_SECRET,
+        server_metadata_url=(f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/"
+                             f"{COGNITO_USER_POOL_ID}/.well-known/openid-configuration"),
+        client_kwargs={"scope": "openid email profile"},
+    )
+
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
@@ -659,6 +679,21 @@ ROLE_SECTIONS = {
 FULL_ACCESS_ROLES = {"super", "ict"}
 # Roles that receive application notifications (ICT can open applications but isn't part of the review workflow).
 NOTIFIED_ROLES = ["super", "applications"]
+# The Cognito group that grants each role, highest first: someone in more than one group gets the first match.
+COGNITO_GROUP_ROLES = [
+    ("IGSP_PROCUREMENT_TEAMLEAD", "super"),
+    ("IGSP_PROCUREMENT_ICT", "ict"),
+    ("IGSP_PROCUREMENT_OFFICER", "applications"),
+    ("IGSP_PROCUREMENT_MANAGER", "reports"),
+]
+
+
+def role_from_cognito_groups(groups):
+    """The admin role a Cognito user's groups grant, or None if they're in no Supplier Portal group."""
+    groups = set(groups or [])
+    return next((role for group, role in COGNITO_GROUP_ROLES if group in groups), None)
+
+
 # Where each section starts, in sidebar order; an admin lands on the first one they can open.
 SECTION_HOMES = [
     ("dashboard", "admin_dashboard"),
@@ -1262,6 +1297,8 @@ AUDIT_ACTIONS = {
     "admin_login": "Admin signed in",
     "admin_login_failed": "Admin sign-in failed",
     "admin_logout": "Admin signed out",
+    "admin_created": "Admin account created",
+    "admin_role_changed": "Admin role changed",
     "application_deleted": "Application deleted",
     "director_deleted": "Director deleted",
     "email_template_updated": "Email template edited",
@@ -1371,6 +1408,7 @@ def inject_globals():
 
     return {
         "MICROSOFT_CLIENT_ID": MICROSOFT_CLIENT_ID,
+        "COGNITO_ENABLED": COGNITO_ENABLED,
         "SUPPLIER_CATEGORIES": cats,
         "CATEGORY_SECTIONS": get_category_sections(),
         "PROVINCES": PROVINCES,
@@ -2781,6 +2819,65 @@ def admin_login_microsoft_callback():
         return redirect(url_for("admin_login_options"))
 
     audit("admin_login", "Microsoft", actor=admin)
+    DB.session.commit()
+    session["admin_id"] = admin.id
+    mark_active()
+    session.permanent = True
+    flash(f"Welcome, {admin.name or admin.email}", "success")
+    return redirect(url_for(admin.home_endpoint))
+
+
+@app.route("/admin/login/cognito")
+def admin_login_cognito():
+    """Sign in through Cognito. ?provider=microsoft goes straight to Microsoft, otherwise Cognito's own page."""
+    if not COGNITO_ENABLED:
+        flash("Icebolethu sign-in is not configured.", "error")
+        return redirect(url_for("admin_login_options"))
+    extra = {"identity_provider": COGNITO_MICROSOFT_PROVIDER} if request.args.get("provider") == "microsoft" else {}
+    return oauth.cognito.authorize_redirect(url_for("admin_login_cognito_callback", _external=True), **extra)
+
+
+@app.route("/admin/login/cognito/callback")
+def admin_login_cognito_callback():
+    """Cognito is the source of truth for these admins: their group sets their role on every sign-in,
+    and their admin account is created on first sign-in. No Supplier Portal group, no access."""
+    if not COGNITO_ENABLED:
+        return redirect(url_for("admin_login_options"))
+    try:
+        token = oauth.cognito.authorize_access_token()
+    except Exception as exc:  # noqa: BLE001
+        app.logger.error("Cognito authentication failed: %s", exc)
+        flash("Sign-in failed. Please try again.", "error")
+        return redirect(url_for("admin_login_options"))
+
+    claims = token.get("userinfo") or {}
+    email = normalize_email(claims.get("email"))
+    if not email:
+        flash("Could not retrieve an email address from your account.", "error")
+        return redirect(url_for("admin_login_options"))
+
+    admin = find_admin_by_email(email)
+    role = role_from_cognito_groups(claims.get("cognito:groups"))
+    if not role:
+        audit("admin_login_failed", "Signed in with Cognito but not in a Supplier Portal group",
+              actor=admin, actor_type="admin", email=email)
+        DB.session.commit()
+        flash("Your account doesn't have access to the Supplier Portal yet. Please ask ICT to add you "
+              "to a Supplier Portal group, then sign in again.", "error")
+        return redirect(url_for("admin_login_options"))
+
+    if not admin:
+        admin = Admin(email=email, name=(claims.get("name") or "")[:100], role=role)
+        admin.set_password(secrets.token_urlsafe(32))  # signs in through Cognito, so no usable password here
+        DB.session.add(admin)
+        DB.session.flush()
+        audit("admin_created", f"Created on first Cognito sign-in as {admin.role_label}", actor=admin)
+    elif admin.role != role:
+        old_label = admin.role_label
+        admin.role = role
+        audit("admin_role_changed", f"{old_label} to {admin.role_label} (Cognito group)", actor=admin)
+
+    audit("admin_login", "Cognito", actor=admin)
     DB.session.commit()
     session["admin_id"] = admin.id
     mark_active()
