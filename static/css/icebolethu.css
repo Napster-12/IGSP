@@ -4069,6 +4069,12 @@ table tr:hover{
 
 /* ---- Notification bell (top right of every signed-in page, after the page's buttons) ---- */
 .ig-page-tools{ display:flex; align-items:center; gap:10px; margin-left:auto; align-self:flex-start; flex-wrap:wrap; justify-content:flex-end; }
+/* Supplier header: Icebolethu Group social media links. */
+.ig-social{ display:flex; gap:14px; padding:0 6px; list-style:none; margin:0; }
+.ig-social a{ display:flex; color:var(--brand-orange); transition:color var(--transition); }
+.ig-social a:hover, .ig-social a:focus-visible{ color:var(--primary-dark); }
+.ig-social svg{ width:18px; height:18px; fill:currentColor; }
+.ig-social svg[fill="none"]{ fill:none; }
 .ig-bell{
     position:relative;
     flex-shrink:0;
