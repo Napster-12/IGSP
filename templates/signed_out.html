@@ -24,6 +24,8 @@
             <h1>You have been signed out</h1>
             {% if idle %}
                 <p class="adm-login-lead">There was no activity for {{ idle_minutes }} minutes, so we signed you out to keep your account safe.</p>
+            {% elif replaced %}
+                <p class="adm-login-lead">Your account was signed in on another device, and it can only be signed in on one device at a time. If that wasn't you, sign in again and change your password.</p>
             {% endif %}
 
             <div class="adm-login-panel">
