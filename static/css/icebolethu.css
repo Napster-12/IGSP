@@ -4075,6 +4075,7 @@ table tr:hover{
 .ig-social a:hover, .ig-social a:focus-visible{ color:var(--primary-dark); }
 .ig-social svg{ width:18px; height:18px; fill:currentColor; }
 .ig-social svg[fill="none"]{ fill:none; }
+.ig-social--menu{ display:none; }
 .ig-bell{
     position:relative;
     flex-shrink:0;
@@ -4753,6 +4754,9 @@ a.ig-stat:hover{
         box-shadow:0 12px 24px rgba(35,31,32,.12);
     }
     .ig-menu-open .ig-sidebar-menu{ display:flex; }
+    /* Social links move from the page header into the menu. */
+    .ig-page-tools .ig-social{ display:none; }
+    .ig-social--menu{ display:flex; padding:4px 12px; }
     .ig-nav-link{ padding:12px; }
     .ig-nav-link.is-active::before{ display:none; }
     .ig-account{ margin-top:0; }
