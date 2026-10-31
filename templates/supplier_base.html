@@ -54,6 +54,8 @@
                     </a>
                 </nav>
 
+                {% with menu=True %}{% include "_social.html" %}{% endwith %}
+
                 <div class="ig-account">
                     <div class="ig-avatar" aria-hidden="true">{{ ((user.contact_name or user.company_name or 'S')[:1])|upper }}</div>
                     <div class="ig-account-text">
