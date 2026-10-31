@@ -16,6 +16,8 @@ import zipfile
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from email.mime.image import MIMEImage
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from functools import wraps
 from urllib.parse import quote_plus, urlparse
@@ -792,21 +794,38 @@ def _ses():
     return _ses_client
 
 
+# The logo travels inside each email (referenced as cid:logo) rather than as a link to the portal: a link only
+# works when the portal is reachable from the internet, and many mail apps block linked images anyway.
+EMAIL_LOGO_CID = "logo"
+EMAIL_LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "images", "logo.png")
+
+
+def build_email_message(to_email, subject, body, subtype):
+    msg = MIMEText(body, subtype, "utf-8")
+    if subtype == "html" and f"cid:{EMAIL_LOGO_CID}" in body:
+        with open(EMAIL_LOGO_PATH, "rb") as fh:
+            logo = MIMEImage(fh.read(), "png")
+        logo.add_header("Content-ID", f"<{EMAIL_LOGO_CID}>")
+        logo.add_header("Content-Disposition", "inline", filename="logo.png")
+        related = MIMEMultipart("related")
+        related.attach(msg)
+        related.attach(logo)
+        msg = related
+    msg["Subject"] = subject
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_email
+    return msg
+
+
 def _deliver(to_email, subject, body, subtype):
+    msg = build_email_message(to_email, subject, body, subtype)
     if MAIL_PROVIDER == "ses":
         _ses().send_email(
             FromEmailAddress=SMTP_FROM,
             Destination={"ToAddresses": [to_email]},
-            Content={"Simple": {
-                "Subject": {"Data": subject, "Charset": "UTF-8"},
-                "Body": {"Html" if subtype == "html" else "Text": {"Data": body, "Charset": "UTF-8"}},
-            }},
+            Content={"Raw": {"Data": msg.as_bytes()}},
         )
         return
-    msg = MIMEText(body, subtype, "utf-8")
-    msg["Subject"] = subject
-    msg["From"] = SMTP_FROM
-    msg["To"] = to_email
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
         server.starttls()
         server.login(SMTP_USER, SMTP_PASSWORD)
@@ -952,8 +971,10 @@ def email_text(key, **values):
     return fill_placeholders(subject, values), fill_placeholders(body, values)
 
 
-def render_email(subject, message, recipient_name, application=None, action_url=None, action_label=None, code=None):
-    """`code`, if given, is shown large on its own (the verification code)."""
+def render_email(subject, message, recipient_name, application=None, action_url=None, action_label=None, code=None,
+                 logo_url=f"cid:{EMAIL_LOGO_CID}"):
+    """`code`, if given, is shown large on its own (the verification code). The logo is attached to the email
+    itself (see _deliver); pass a normal URL instead to show the email in a browser."""
     return render_template(
         "email/notification.html",
         subject=subject,
@@ -963,7 +984,7 @@ def render_email(subject, message, recipient_name, application=None, action_url=
         application=application,
         action_url=action_url,
         action_label=action_label,
-        logo_url=url_for("static", filename="images/logo.png", _external=True),
+        logo_url=logo_url,
     )
 
 
@@ -4337,7 +4358,8 @@ def admin_email_template_edit(key):
 
     samples = {name: example for name, (_, example) in template["placeholders"].items()}
     preview = render_email(fill_placeholders(subject, samples), fill_placeholders(body, samples), "Jane Dube",
-                           code=samples.get("code") if key == "verification_code" else None)
+                           code=samples.get("code") if key == "verification_code" else None,
+                           logo_url=url_for("static", filename="images/logo.png"))
     return render_template(
         "admin_email_template_edit.html", admin=get_current_admin(), key=key, template=template, saved=saved,
         subject=subject, body=body, preview=preview,

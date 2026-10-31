@@ -12,3 +12,4 @@ static/uploads/*
 .kilo/
 instance/
 .pytest_cache/
+tests/
