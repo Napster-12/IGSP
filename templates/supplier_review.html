@@ -141,7 +141,7 @@
                 <form method="post" class="rv-submit-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <label class="rv-confirm">
                         <input type="checkbox" name="accept_terms" value="1" required oninvalid="this.setCustomValidity('Please accept the Terms &amp; Conditions.')" onchange="this.setCustomValidity('')" {% if not can_submit %}disabled{% endif %}>
-                        <span>I have read and accept the <a href="{{ url_for('application_terms') }}" target="_blank" rel="noopener">Supplier Application Terms &amp; Conditions</a> on behalf of the business applying.</span>
+                        <span>I have read and accept the <a href="{{ url_for('application_terms') }}" target="_blank" rel="noopener">Supplier Terms &amp; Conditions</a> on behalf of the business applying.</span>
                     </label>
                     <button type="submit" class="rv-submit" {% if not can_submit %}disabled{% endif %}>Submit Application</button>
                     {% if not can_submit %}

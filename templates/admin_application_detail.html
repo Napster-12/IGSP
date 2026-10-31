@@ -16,7 +16,7 @@
     {% if supplier and supplier.supplier_id %}<span class="ig-mono">{{ supplier.supplier_id }}</span> · {% endif %}
     Submitted {{ application.created_at.strftime('%d %b %Y') if application.created_at else '—' }}
     {% if application.updated_at and application.created_at and application.updated_at > application.created_at %} · Updated {{ application.updated_at.strftime('%d %b %Y') }}{% endif %}
-    {% if application.terms_accepted_at %} · Application Terms {{ application.terms_version }} accepted {{ application.terms_accepted_at.strftime('%d %b %Y') }}{% endif %}
+    {% if application.terms_accepted_at %} · Supplier Terms {{ application.terms_version }} accepted {{ application.terms_accepted_at.strftime('%d %b %Y') }}{% endif %}
 {% endblock %}
 {% block page_actions %}
     <a href="{{ url_for('admin_application_history', application_id=application.id) }}" class="ig-btn ig-btn--ghost">{{ ad.icon('clock') }} History <span class="ig-count">{{ history_count }}</span></a>

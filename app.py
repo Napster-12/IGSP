@@ -300,7 +300,7 @@ RESEND_COOLDOWN_SECONDS = 30
 TERMS_VERSION = "2026-10"
 TERMS_REQUIRED_MESSAGE = "Please accept our Terms & Conditions."
 # Bump when templates/application_terms_content.html changes materially; each application records the version accepted.
-APPLICATION_TERMS_VERSION = "2026-10"
+APPLICATION_TERMS_VERSION = "2026-10-31"
 PASSWORD_RESET_MAX_AGE = 3600
 
 
@@ -1918,7 +1918,7 @@ def terms():
 
 @app.route("/application-terms")
 def application_terms():
-    return render_template("terms.html", page_title="Supplier Application Terms and Conditions",
+    return render_template("terms.html", page_title="Supplier Terms and Conditions",
                            content_template="application_terms_content.html", version=APPLICATION_TERMS_VERSION)
 
 
@@ -2394,7 +2394,7 @@ def onboarding_review():
             document.application_id = application.id
 
         log_event(application, "submitted", to_status="pending_review",
-                  summary=f"Submitted with {len(documents)} document(s); accepted Application Terms {APPLICATION_TERMS_VERSION}")
+                  summary=f"Submitted with {len(documents)} document(s); accepted Supplier Terms {APPLICATION_TERMS_VERSION}")
         notify_admins(
             f"New application: {user.company_name}",
             f"{user.company_name} ({user.contact_name}) applied for {application.supplier_category}.",
@@ -5186,7 +5186,7 @@ SUPPLIER_INTENTS = [
            f"You can reach the supplier onboarding team at {CONTACT_DETAILS}."),
     Intent("terms", ["terms", "conditions", "terms and conditions", "t&c", "ts and cs"],
            "There are two sets of terms: the Portal Terms (/terms), which you accept when you sign up or log in, and "
-           "the Supplier Application Terms (/application-terms), which you accept before you submit an application."),
+           "the Supplier Terms and Conditions (/application-terms), which you accept before you submit an application."),
     Intent("declaration", ["declaration", "declaration form", "declaration of interest", "conflict of interest"],
            "The Declaration of Interest form is one of the 7 required documents. Download it on the documents step "
            "(/onboarding/documents), fill it in and sign it, then upload it as a PDF. Declare any relationship with "
@@ -5547,7 +5547,7 @@ ADMIN_INTENTS = [
     Intent("supplier_process", ["how does the supplier apply", "supplier steps", "onboarding", "required documents",
                                 "what documents"],
            "Suppliers sign up, then apply in 4 steps: company profile (with directors), category, the 7 required PDF "
-           "documents, and review (accepting the Supplier Application Terms). VAT and B-BBEE certificates carry "
+           "documents, and review (accepting the Supplier Terms and Conditions). VAT and B-BBEE certificates carry "
            "expiry dates; reminders go out 30 and 7 days before, and expiry deactivates the account until renewed."),
     # ---- Frequently asked questions ----
     Intent("bot_identity", ["who are you", "are you a robot", "are you a bot", "your name", "what is cebelihle", "bot"],
