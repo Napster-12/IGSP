@@ -630,6 +630,8 @@ class User(DB.Model):
     verification_code_expires = DB.Column(DB.DateTime, nullable=True)
     terms_version = DB.Column(DB.String(20), nullable=True)
     terms_accepted_at = DB.Column(DB.DateTime, nullable=True)
+    # Matches the session of the one browser signed in to this account (see start_session).
+    session_token = DB.Column(DB.String(64), nullable=True)
     created_at = DB.Column(DB.DateTime, default=utcnow)
 
     def set_password(self, password):
@@ -715,6 +717,8 @@ class Admin(DB.Model):
     password_hash = DB.Column(DB.String(256), nullable=False)
     name = DB.Column(DB.String(100), nullable=False, default="")
     role = DB.Column(DB.String(20), nullable=False, default="super")
+    # Matches the session of the one browser signed in to this account (see start_session).
+    session_token = DB.Column(DB.String(64), nullable=True)
     created_at = DB.Column(DB.DateTime, default=utcnow)
 
     @property
@@ -1157,10 +1161,22 @@ IDLE_TIMEOUT_SECONDS = int(float(os.getenv("IDLE_TIMEOUT_MINUTES", "5")) * 60)
 # The browser reports activity at most once a minute, so the server allows one extra minute before it steps in.
 IDLE_SERVER_GRACE_SECONDS = 60
 IDLE_SIGNED_OUT_MESSAGE = "You have been signed out."
+REPLACED_SIGNED_OUT_MESSAGE = "You have been signed out because your account was signed in on another device."
 
 
 def mark_active():
     session["last_seen"] = time.time()
+
+
+def start_session(account):
+    """Sign `account` in on this browser. An account can be signed in on one device at a time: the new token
+    replaces the old one, so a browser signed in earlier is signed out on its next request. Caller commits."""
+    kind = "admin" if isinstance(account, Admin) else "user"
+    account.session_token = secrets.token_urlsafe(32)
+    session[f"{kind}_id"] = account.id
+    session[f"{kind}_session"] = account.session_token
+    mark_active()
+    session.permanent = True
 
 
 def end_session():
@@ -1170,13 +1186,29 @@ def end_session():
     g.pop("admin", None)
 
 
-def signed_out_url(who, idle=False, saved=False):
+def signed_out_url(who, idle=False, saved=False, replaced=False):
     args = {"who": who}
     if idle:
         args["reason"] = "idle"
+    if replaced:
+        args["reason"] = "replaced"
     if saved:
         args["saved"] = 1
     return url_for("signed_out", **args)
+
+
+def signed_in_elsewhere(admin_id, user_id):
+    """'admin' or 'supplier' when this browser's sign-in was replaced by a newer one on another device, else None.
+    Sessions from before tokens existed carry none and are left alone until the account next signs in."""
+    admin = DB.session.get(Admin, admin_id) if admin_id else None
+    if admin and admin.session_token and admin.session_token != session.get("admin_session"):
+        audit("admin_logout", "Signed out because the account was signed in on another device", actor=admin)
+        DB.session.commit()
+        return "admin"
+    user = DB.session.get(User, user_id) if user_id else None
+    if user and user.session_token and user.session_token != session.get("user_session"):
+        return "supplier"
+    return None
 
 
 @app.before_request
@@ -1186,6 +1218,13 @@ def sign_out_idle_sessions():
     signed_in_admin_id, signed_in_user_id = session.get("admin_id"), session.get("user_id")
     if not signed_in_admin_id and not signed_in_user_id:
         return None
+    replaced = signed_in_elsewhere(signed_in_admin_id, signed_in_user_id)
+    if replaced:
+        end_session()
+        destination = signed_out_url(replaced, replaced=True)
+        if request.path in ("/session/keepalive", "/chat", "/admin/chat") or request.is_json:
+            return jsonify(signed_out=True, reply=REPLACED_SIGNED_OUT_MESSAGE, redirect=destination), 401
+        return redirect(destination)
     last_seen = session.get("last_seen")
     if last_seen is not None and time.time() - last_seen > IDLE_TIMEOUT_SECONDS + IDLE_SERVER_GRACE_SECONDS:
         admin = DB.session.get(Admin, signed_in_admin_id) if signed_in_admin_id else None
@@ -1954,7 +1993,8 @@ def signed_out():
     """Shown after every sign-out. Tells the browser to forget cached pages and stored data for the portal."""
     who = "admin" if request.args.get("who") == "admin" else "supplier"
     response = make_response(render_template(
-        "signed_out.html", who=who, idle=request.args.get("reason") == "idle", saved=bool(request.args.get("saved")),
+        "signed_out.html", who=who, idle=request.args.get("reason") == "idle",
+        replaced=request.args.get("reason") == "replaced", saved=bool(request.args.get("saved")),
         idle_minutes=IDLE_TIMEOUT_SECONDS // 60,
     ))
     # Signed-in pages are already sent with "no-store", so Back can't show them; the page itself clears what the
@@ -1985,9 +2025,7 @@ def verify_email():
             next_url = session.pop("login_next", "") or url_for("dashboard")
             for key in ("pending_user_id", "verify_attempts", "code_sent_at"):
                 session.pop(key, None)
-            session["user_id"] = user.id
-            mark_active()
-            session.permanent = True
+            start_session(user)
             user.email_verified = True
             user.clear_verification_code()
             DB.session.commit()
@@ -2791,10 +2829,8 @@ def admin_login():
 
         login_limiter.reset(limiter_key)
         audit("admin_login", "Email and password", actor=admin)
+        start_session(admin)
         DB.session.commit()
-        session["admin_id"] = admin.id
-        mark_active()
-        session.permanent = True
         return redirect(url_for(admin.home_endpoint))
 
     return render_template("admin_login.html", step="start")
@@ -2840,10 +2876,8 @@ def admin_login_microsoft_callback():
         return redirect(url_for("admin_login_options"))
 
     audit("admin_login", "Microsoft", actor=admin)
+    start_session(admin)
     DB.session.commit()
-    session["admin_id"] = admin.id
-    mark_active()
-    session.permanent = True
     flash(f"Welcome, {admin.name or admin.email}", "success")
     return redirect(url_for(admin.home_endpoint))
 
@@ -2899,10 +2933,8 @@ def admin_login_cognito_callback():
         audit("admin_role_changed", f"{old_label} to {admin.role_label} (Cognito group)", actor=admin)
 
     audit("admin_login", "Cognito", actor=admin)
+    start_session(admin)
     DB.session.commit()
-    session["admin_id"] = admin.id
-    mark_active()
-    session.permanent = True
     flash(f"Welcome, {admin.name or admin.email}", "success")
     return redirect(url_for(admin.home_endpoint))
 
@@ -4761,12 +4793,13 @@ def migrate_mysql_schema():
         "verification_code_expires": "DATETIME NULL",
         "terms_version": "VARCHAR(20) NULL",
         "terms_accepted_at": "DATETIME NULL",
+        "session_token": "VARCHAR(64) NULL",
     })
     name_col = _columns("users").get("name")
     if name_col is not None and name_col[4] is None:
         DB.session.execute(text("ALTER TABLE users MODIFY COLUMN name VARCHAR(100) NOT NULL DEFAULT ''"))
 
-    _add_missing_columns("admins", {"role": "VARCHAR(20) NOT NULL DEFAULT 'super'"})
+    _add_missing_columns("admins", {"role": "VARCHAR(20) NOT NULL DEFAULT 'super'", "session_token": "VARCHAR(64) NULL"})
 
     _add_missing_columns("supplier_applications", {
         "assigned_admin_id": "INT NULL",
