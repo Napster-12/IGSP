@@ -74,6 +74,7 @@
                 </div>
                 <div class="ig-page-tools">
                     <div class="ig-page-actions">{% block page_actions %}{% endblock %}</div>
+                    {% include "_social.html" %}
                     {{ ad.notification_bell(url_for('notifications'), unread_notifications, request.endpoint == 'notifications') }}
                 </div>
             </header>
