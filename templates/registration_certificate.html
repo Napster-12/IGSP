@@ -88,7 +88,7 @@
         .cert-statement { margin: 14px 0 0; max-width: 760px; font-size: 14px; line-height: 1.65; }
 
         .cert-facts {
-            display: grid; grid-template-columns: repeat(4, 1fr); width: 860px; margin-top: 18px;
+            display: grid; grid-template-columns: 1fr 1fr 1.5fr 1fr 1fr; width: 880px; margin-top: 18px;
             border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
         }
         .cert-facts div { padding: 12px 10px; }
@@ -124,9 +124,19 @@
             font-size: 9.5px; line-height: 1.4; color: var(--muted); text-align: center;
         }
 
+        /* "Are you still there?" warning before the automatic sign-out (_idle.html) */
+        .idle-warning { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(35,31,32,.45); font-family: "Montserrat", sans-serif; }
+        .idle-warning[hidden] { display: none; }
+        .idle-card { width: 100%; max-width: 360px; padding: 22px 22px 20px; background: #fff; border-radius: 14px; box-shadow: 0 18px 48px rgba(35,31,32,.25); text-align: center; }
+        .idle-card strong { display: block; font-size: 18px; color: #231F20; }
+        .idle-card p { margin: 8px 0 16px; font-size: 14px; line-height: 1.5; color: #5f5a5b; }
+        .idle-card [data-idle-countdown] { font-weight: 700; color: #231F20; }
+        .idle-card button { width: 100%; padding: 10px 16px; border: 0; border-radius: 8px; background: #F26522; color: #fff; font: 600 14px "Montserrat", sans-serif; cursor: pointer; }
+        .idle-card button:hover { background: #C9501A; }
+
         @media print {
             body { background: none; }
-            .cert-toolbar { display: none; }
+            .cert-toolbar, .idle-warning { display: none !important; }
             .cert-stage { padding: 0; }
             .cert { box-shadow: none; transform: none !important; width: 297mm; height: 210mm; }
             .cert-stage { height: auto !important; }
@@ -162,6 +172,7 @@
 
                 <dl class="cert-facts">
                     <div><dt>Supplier No.</dt><dd>{{ cert.supplier_number }}</dd></div>
+                    <div><dt>Vendor Code</dt><dd>{{ cert.vendor_code }}</dd></div>
                     <div><dt>Goods / Services</dt><dd class="cert-services">{{ cert.services }}{% if cert.service_details %}<small>{{ cert.service_details }}</small>{% endif %}</dd></div>
                     <div><dt>Date Registered</dt><dd>{{ cert.registered.strftime('%d %b %Y') }}</dd></div>
                     <div><dt>Valid Until</dt><dd>{{ cert.valid_until.strftime('%d %b %Y') }}</dd></div>
@@ -209,5 +220,6 @@
             fit();
         })();
     </script>
+    {% include "_idle.html" %}
 </body>
 </html>

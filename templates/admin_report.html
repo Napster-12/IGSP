@@ -115,6 +115,9 @@ document.addEventListener('DOMContentLoaded', function () {
         return lines;
     }
 
+    // Wait for Montserrat: Chart.js sizes the label axis from the font it measures with, so measuring with the
+    // fallback font clips the first letters of long labels once Montserrat is drawn.
+    (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(function () {
     charts.forEach(function (spec) {
         var canvas = document.getElementById(spec.id);
         if (!canvas || !spec.labels || !spec.labels.length) { return; }
@@ -139,6 +142,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 scales: horizontal ? { x: valueAxis, y: labelAxis } : { x: labelAxis, y: valueAxis }
             }
         });
+    });
     });
 });
 </script>

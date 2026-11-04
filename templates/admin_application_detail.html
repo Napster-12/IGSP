@@ -260,23 +260,52 @@
                         {% endfor %}
                     </select>
 
-                    <label for="review_comments">Comments to supplier</label>
-                    <textarea name="review_comments" id="review_comments" rows="5" placeholder="Required when declining or returning an application. The supplier sees this.">
+                    <div class="ig-decision-actions">
+                        {% set off = ' disabled aria-disabled="true" title="Not available: a director/shareholder is already linked to another supplier"'|safe if decline_only else '' %}
+                        <button type="submit" name="status" value="approved" class="ig-btn ig-btn--success ig-btn--block"
+                                {% if supplier and application.status != 'approved' %}data-needs-vendor-code{% endif %}{{ off }}>Approve</button>
+                        <button type="submit" name="status" value="on_file" class="ig-btn ig-btn--onfile ig-btn--block" data-comment-step
+                                data-comment-hint="Everything is in order. The supplier is told their details are kept on file and that we'll contact them when needed."
+                                {% if not decline_only %}title="Everything is in order. The supplier is told their details are kept on file and that we'll contact them when needed."{% endif %}{{ off }}>Accept &amp; keep on file</button>
+                        <button type="submit" name="status" value="under_review" class="ig-btn ig-btn--ghost ig-btn--block" data-comment-step{{ off }}>Mark under review</button>
+                        <button type="submit" name="status" value="returned_for_update" class="ig-btn ig-btn--warning ig-btn--block" data-comment-step data-comment-required
+                                data-comment-hint="Tell the supplier what to fix before they resubmit.">Return to supplier</button>
+                        <button type="submit" name="status" value="declined" class="ig-btn ig-btn--danger ig-btn--block" data-comment-step data-comment-required
+                                data-comment-hint="The supplier will be notified that their application was declined.">Decline</button>
+                    </div>
+                    <button type="submit" name="status" value="{{ application.status }}" class="ig-link ig-link--block" data-comment-step
+                            data-comment-title="Comments to supplier"{{ off }}>Save comments only</button>
+
+                    {#- Opened by every decision except Approve; the confirm button takes the status of the button that opened it. -#}
+                    <dialog class="ig-dialog" id="commentDialog" aria-labelledby="commentDialogTitle">
+                        <h2 id="commentDialogTitle">Comments to supplier</h2>
+                        <p class="ig-hint" id="commentDialogHint"></p>
+                        <label for="review_comments">Comments to supplier</label>
+                        <textarea name="review_comments" id="review_comments" rows="5" placeholder="The supplier sees this.">
 {%- if decline_only and not application.review_comments -%}
 Your application cannot be accepted because {{ flagged_names|join(', ') }} {{ 'is' if flagged_names|length == 1 else 'are' }} already linked to another supplier registered on this portal. A director, shareholder or owner may only be part of one supplier.
 {%- else -%}{{ application.review_comments or '' }}{%- endif -%}</textarea>
-                    <p class="ig-form-error" id="commentError" hidden>Please add a comment so the supplier knows what to fix.</p>
+                        <p class="ig-form-error" id="commentError" hidden>Please add a comment so the supplier knows what to fix.</p>
+                        <div class="ig-dialog-actions">
+                            <button type="button" class="ig-btn ig-btn--ghost" data-dialog-cancel>Cancel</button>
+                            <button type="submit" name="status" value="" class="ig-btn" data-comment-confirm>Save</button>
+                        </div>
+                    </dialog>
 
-                    <div class="ig-decision-actions">
-                        {% set off = ' disabled aria-disabled="true" title="Not available: a director/shareholder is already linked to another supplier"'|safe if decline_only else '' %}
-                        <button type="submit" name="status" value="approved" class="ig-btn ig-btn--success ig-btn--block"{{ off }}>Approve</button>
-                        <button type="submit" name="status" value="on_file" class="ig-btn ig-btn--onfile ig-btn--block"
-                                {% if not decline_only %}title="Everything is in order. The supplier is told their details are kept on file and that we'll contact them when needed."{% endif %}{{ off }}>Accept &amp; keep on file</button>
-                        <button type="submit" name="status" value="under_review" class="ig-btn ig-btn--ghost ig-btn--block"{{ off }}>Mark under review</button>
-                        <button type="submit" name="status" value="returned_for_update" class="ig-btn ig-btn--warning ig-btn--block" data-needs-comment{{ off }}>Return to supplier</button>
-                        <button type="submit" name="status" value="declined" class="ig-btn ig-btn--danger ig-btn--block" data-needs-comment>Decline</button>
-                    </div>
-                    <button type="submit" name="status" value="{{ application.status }}" class="ig-link ig-link--block"{{ off }}>Save comments only</button>
+                    {% if supplier and application.status != 'approved' %}
+                        {#- Opened by the Approve button: the vendor code is printed on the supplier's certificate. -#}
+                        <dialog class="ig-dialog" id="vendorDialog" aria-labelledby="vendorDialogTitle">
+                            <h2 id="vendorDialogTitle">Approve {{ application.company_name }}</h2>
+                            <p class="ig-hint">Enter the supplier's vendor code.</p>
+                            <label for="vendor_code">Vendor code</label>
+                            <input type="text" id="vendor_code" name="vendor_code" maxlength="30" autocomplete="off" value="{{ supplier.vendor_code or '' }}">
+                            <p class="ig-form-error" id="vendorCodeError" hidden>Please enter the vendor code to approve.</p>
+                            <div class="ig-dialog-actions">
+                                <button type="button" class="ig-btn ig-btn--ghost" data-dialog-cancel>Cancel</button>
+                                <button type="submit" name="status" value="approved" class="ig-btn ig-btn--success" data-vendor-confirm>Approve</button>
+                            </div>
+                        </dialog>
+                    {% endif %}
                 </form>
             </section>
 {% else %}
@@ -302,6 +331,7 @@ Your application cannot be accepted because {{ flagged_names|join(', ') }} {{ 'i
                     </div>
                     <dl class="ig-fields ig-fields--1">
                         {{ field('Registered', supplier.created_at.strftime('%d %b %Y') if supplier.created_at else '') }}
+                        {{ field('Vendor code', supplier.vendor_code, mono=true) }}
                         {{ field('Contact', supplier.contact_name ~ ' · ' ~ supplier.phone) }}
                     </dl>
                     {% if is_mine %}
@@ -335,21 +365,60 @@ Your application cannot be accepted because {{ flagged_names|join(', ') }} {{ 'i
 <script>
     // Declining or returning needs a comment for the supplier; the server enforces this too.
     var reviewForm = document.getElementById('reviewForm');
+    // Approving asks for the vendor code first; the server enforces this too.
+    var vendorDialog = document.getElementById('vendorDialog');
+    if (vendorDialog) {
+        var vendorInput = document.getElementById('vendor_code');
+        vendorDialog.querySelector('[data-dialog-cancel]').addEventListener('click', function () { vendorDialog.close(); });
+        vendorInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                vendorDialog.querySelector('[data-vendor-confirm]').click();
+            }
+        });
+    }
+    // Every decision except Approve asks for comments in a pop-up; Return and Decline need one.
+    var commentDialog = document.getElementById('commentDialog');
+    var commentConfirm = commentDialog && commentDialog.querySelector('[data-comment-confirm]');
+    if (commentDialog) {
+        commentDialog.querySelector('[data-dialog-cancel]').addEventListener('click', function () { commentDialog.close(); });
+    }
     if (reviewForm) reviewForm.addEventListener('submit', function (e) {
         var button = e.submitter;
         var comments = document.getElementById('review_comments');
         var error = document.getElementById('commentError');
+        if (button && button.hasAttribute('data-comment-step') && commentDialog) {
+            e.preventDefault();
+            var label = button.textContent.trim();
+            var required = button.hasAttribute('data-comment-required');
+            document.getElementById('commentDialogTitle').textContent = button.getAttribute('data-comment-title') || label;
+            document.getElementById('commentDialogHint').textContent = button.getAttribute('data-comment-hint') || '';
+            comments.placeholder = required ? 'Required. The supplier sees this.' : 'Optional. The supplier sees this.';
+            commentConfirm.value = button.value;
+            commentConfirm.textContent = button.hasAttribute('data-comment-title') ? 'Save comments' : label;
+            commentConfirm.className = button.className.replace('ig-btn--block', '').replace('ig-link--block', '').replace('ig-link', 'ig-btn ig-btn--primary');
+            commentConfirm.toggleAttribute('data-needs-comment', required);
+            error.hidden = true;
+            if (!commentDialog.open) commentDialog.showModal();
+            comments.focus();
+            return;
+        }
+        if (button && button.hasAttribute('data-needs-vendor-code') && vendorDialog) {
+            e.preventDefault();
+            if (!vendorDialog.open) vendorDialog.showModal();
+            vendorInput.focus();
+            return;
+        }
+        if (button && button.hasAttribute('data-vendor-confirm') && !vendorInput.value.trim()) {
+            e.preventDefault();
+            document.getElementById('vendorCodeError').hidden = false;
+            vendorInput.focus();
+            return;
+        }
         if (button && button.hasAttribute('data-needs-comment') && !comments.value.trim()) {
             e.preventDefault();
             error.hidden = false;
             comments.focus();
-            return;
-        }
-        if (button && button.value === 'declined' && !confirm('Decline this application? The supplier will be notified.')) {
-            e.preventDefault();
-        }
-        if (button && button.value === 'on_file' && !confirm('Keep this application on file? The supplier will be told everything is in order and that we will contact them when we need their services.')) {
-            e.preventDefault();
         }
     });
 </script>

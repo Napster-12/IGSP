@@ -1,0 +1,66 @@
+{#- Asks before signing out, then counts down. Include with `logout_url` on signed-in pages; it opens from any .ig-logout link. -#}
+<dialog class="ig-dialog ig-logout-dialog" id="logoutDialog" aria-labelledby="logoutDialogTitle">
+    <div data-logout-ask>
+        <h2 id="logoutDialogTitle">Log out</h2>
+        <p class="ig-hint">Are you sure you want to log out?</p>
+        <div class="ig-dialog-actions">
+            <button type="button" class="ig-btn ig-btn--flash ig-btn--flash-no" data-logout-no>No</button>
+            <button type="button" class="ig-btn ig-btn--flash ig-btn--flash-yes" data-logout-yes>Yes</button>
+        </div>
+    </div>
+    <div data-logout-counting hidden>
+        <h2>Logging out</h2>
+        <p class="ig-logout-count" aria-live="polite"><span data-logout-seconds>3</span></p>
+        <p class="ig-hint">You'll be signed out in <span data-logout-seconds>3</span> seconds.</p>
+        <div class="ig-dialog-actions">
+            <button type="button" class="ig-btn ig-btn--flash ig-btn--flash-no" data-logout-no>Cancel</button>
+        </div>
+    </div>
+</dialog>
+<script>
+    (function () {
+        var dialog = document.getElementById('logoutDialog');
+        if (!dialog || !dialog.showModal) return;
+        var ask = dialog.querySelector('[data-logout-ask]');
+        var counting = dialog.querySelector('[data-logout-counting]');
+        var timer = null;
+
+        function reset() {
+            clearInterval(timer);
+            timer = null;
+            ask.hidden = false;
+            counting.hidden = true;
+        }
+        function show(seconds) {
+            dialog.querySelectorAll('[data-logout-seconds]').forEach(function (el) { el.textContent = seconds; });
+        }
+
+        document.querySelectorAll('.ig-logout').forEach(function (link) {
+            link.addEventListener('click', function (e) {
+                e.preventDefault();
+                reset();
+                dialog.showModal();
+                ask.querySelector('[data-logout-no]').focus();
+            });
+        });
+        dialog.querySelectorAll('[data-logout-no]').forEach(function (button) {
+            button.addEventListener('click', function () { dialog.close(); });
+        });
+        dialog.addEventListener('close', reset);
+        dialog.querySelector('[data-logout-yes]').addEventListener('click', function () {
+            var seconds = 3;
+            ask.hidden = true;
+            counting.hidden = false;
+            show(seconds);
+            counting.querySelector('[data-logout-no]').focus();
+            timer = setInterval(function () {
+                seconds -= 1;
+                show(Math.max(seconds, 0));
+                if (seconds <= 0) {
+                    clearInterval(timer);
+                    window.location.href = '{{ logout_url }}';
+                }
+            }, 1000);
+        });
+    })();
+</script>

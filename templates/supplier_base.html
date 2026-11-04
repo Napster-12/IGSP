@@ -57,7 +57,7 @@
                 {% with menu=True %}{% include "_social.html" %}{% endwith %}
 
                 <div class="ig-account">
-                    <div class="ig-avatar" aria-hidden="true">{{ ((user.contact_name or user.company_name or 'S')[:1])|upper }}</div>
+                    {{ ad.role_icon('supplier') }}
                     <div class="ig-account-text">
                         <strong>{{ user.company_name }}</strong>
                         <span>{{ user.supplier_id or user.email }}</span>
@@ -98,5 +98,6 @@
     {% block scripts %}{% endblock %}
     {% with chat_url=url_for('supplier_chat') %}{% include "_chatbot.html" %}{% endwith %}
     {% with logout_url=url_for('logout', idle=1) %}{% include "_idle.html" %}{% endwith %}
+    {% with logout_url=url_for('logout') %}{% include "_logout_confirm.html" %}{% endwith %}
 </body>
 </html>
