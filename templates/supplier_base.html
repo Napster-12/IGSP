@@ -19,9 +19,12 @@
 <body class="ig-body">
     <div class="ig-shell">
         <aside class="ig-sidebar">
-            <a class="ig-brand" href="{{ url_for('dashboard') }}">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Icebolethu Group">
-                <span>Supplier Portal</span>
+            <a class="ig-brand ig-brand--mark" href="{{ url_for('dashboard') }}">
+                <img src="{{ url_for('static', filename='images/favicon.png') }}" alt="Icebolethu Group">
+                <span class="ig-wordmark" aria-label="ICE Supplier Portal">
+                    <strong><b>ICE</b> Supplier</strong>
+                    <small>Portal</small>
+                </span>
             </a>
 
             <button type="button" class="ig-menu-toggle" data-menu-toggle aria-controls="ig-menu" aria-expanded="false">
