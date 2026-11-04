@@ -3879,6 +3879,42 @@ table tr:hover{
     text-transform:uppercase;
     color:var(--text-light);
 }
+/* Admin brand: the handshake mark over an "ICE Supplier" wordmark. */
+.ig-brand--mark{
+    align-items:center;
+    gap:8px;
+    padding:0 10px 16px;
+    border-bottom:1px solid var(--border);
+    text-align:center;
+}
+.ig-brand--mark img{
+    width:44px;
+    height:44px;
+}
+.ig-brand--mark .ig-wordmark{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    letter-spacing:normal;
+    text-transform:none;
+    white-space:nowrap;
+}
+.ig-wordmark strong{
+    font-size:18px;
+    font-weight:800;
+    line-height:1.1;
+    letter-spacing:-0.4px;
+    color:var(--primary);
+}
+.ig-wordmark b{
+    font-weight:inherit;
+    color:var(--brand-black);
+}
+.ig-wordmark small{
+    font-size:11px;
+    font-weight:500;
+    color:var(--text-light);
+}
 .ig-nav{
     display:flex;
     flex-direction:column;
@@ -3931,37 +3967,45 @@ table tr:hover{
     font-weight:700;
     text-align:center;
 }
+/* Signed-in account: one tinted card with initials, name, role and a compact log-out button. */
 .ig-account{
     margin-top:auto;
     display:flex;
+    flex-wrap:wrap;
     align-items:center;
-    gap:10px;
-    padding:12px 10px 0;
-    border-top:1px solid var(--border);
+    gap:9px;
+    padding:9px 9px 9px 10px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:var(--background);
 }
 .ig-avatar{
     flex-shrink:0;
-    width:36px;
-    height:36px;
+    width:34px;
+    height:34px;
     border-radius:50%;
     display:flex;
     align-items:center;
     justify-content:center;
     background:var(--primary);
     color:#fff;
+    font-size:12px;
     font-weight:700;
+    letter-spacing:.02em;
 }
 .ig-account-text{
+    flex:1;
     min-width:0;
     display:flex;
     flex-direction:column;
-    line-height:1.3;
+    gap:2px;
+    line-height:1.25;
 }
 .ig-account-text strong{
-    font-size:13px;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
+    font-size:14px;
+    font-weight:700;
+    color:var(--text);
+    overflow-wrap:anywhere;
 }
 .ig-account-text span{
     font-size:12px;
@@ -3970,8 +4014,27 @@ table tr:hover{
     overflow:hidden;
     text-overflow:ellipsis;
 }
-.ig-account{ flex-wrap:wrap; }
-.ig-account-text .ig-account-role{ color:var(--primary); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+.ig-account-text .ig-account-role{ white-space:normal; color:var(--primary-text); font-weight:500; }
+/* An icon per kind of account, so who is signed in is clear at a glance. */
+.ig-role-badge{
+    flex-shrink:0;
+    position:relative;
+    width:38px;
+    height:38px;
+    border-radius:11px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color:#fff;
+    background:linear-gradient(135deg, var(--brand-orange), var(--brand-deep-orange));
+    box-shadow:0 4px 10px rgba(242,101,34,.28), inset 0 1px 0 rgba(255,255,255,.25);
+}
+.ig-role-badge svg{ width:20px; height:20px; }
+.ig-role-badge--lead{ background:linear-gradient(135deg, #FDD56E, #F08422); color:var(--brand-black); box-shadow:0 4px 10px rgba(240,132,34,.3), inset 0 1px 0 rgba(255,255,255,.45); }
+.ig-role-badge--officer{ background:linear-gradient(135deg, #F08422, #C9501A); }
+.ig-role-badge--manager{ background:linear-gradient(135deg, #4A4344, #231F20); color:var(--brand-yellow); box-shadow:0 4px 10px rgba(35,31,32,.25), inset 0 1px 0 rgba(255,255,255,.12); }
+.ig-role-badge--ict{ background:linear-gradient(135deg, #231F20, #5A3A2A); color:#FDB37A; box-shadow:0 4px 10px rgba(35,31,32,.25), inset 0 1px 0 rgba(255,255,255,.12); }
+.ig-role-badge--supplier{ background:linear-gradient(135deg, #F26522, #F08422 60%, #FDD56E); }
 .ig-assign-to label{ font-size:12px; font-weight:600; }
 .ig-sidebar-menu{ display:flex; flex-direction:column; gap:24px; flex:1; min-height:0; }
 .ig-menu-toggle{
@@ -4624,7 +4687,45 @@ a.ig-stat:hover{
 .ig-form-error{ font-size:12px; color:var(--danger); }
 .ig-decision-actions{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; margin-top:12px; }
 .ig-decision-actions .ig-btn{ white-space:normal; text-align:center; }
+/* Small modal for a decision that needs one more answer (e.g. the vendor code on approval). */
+.ig-dialog{
+    /* The global reset zeroes margins, which is what centres a modal dialog. */
+    position:fixed;
+    inset:0;
+    margin:auto;
+    height:fit-content;
+    max-height:calc(100vh - 32px);
+    overflow:auto;
+    width:min(420px, calc(100vw - 32px));
+    padding:22px;
+    border:none;
+    border-radius:var(--radius);
+    background:var(--white);
+    color:var(--text);
+    box-shadow:var(--shadow-lg);
+}
+.ig-dialog::backdrop{ background:rgba(35,31,32,.55); }
+.ig-dialog h2{ margin:0 0 6px; font-size:18px; }
+.ig-dialog label{ display:block; margin:14px 0 6px; }
+.ig-dialog input, .ig-dialog textarea{ width:100%; }
+.ig-dialog-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
 .ig-decision-actions .ig-btn--success{ grid-column:1 / -1; }
+/* Log out confirmation: Yes (green) and No (red) pulse to draw the eye. */
+.ig-logout-dialog{ text-align:center; }
+.ig-logout-count{ font-size:40px; font-weight:700; line-height:1; color:var(--primary); margin:14px 0 4px; font-variant-numeric:tabular-nums; }
+.ig-logout-dialog .ig-dialog-actions{ justify-content:center; gap:12px; }
+.ig-btn--flash{ min-width:96px; justify-content:center; color:#fff; border:none; animation:ig-flash 1.2s ease-in-out infinite; }
+.ig-btn--flash-yes{ background:#1f8a3e; --flash:rgba(31,138,62,.55); }
+.ig-btn--flash-yes:hover{ background:#18702f; color:#fff; }
+.ig-btn--flash-no{ background:#dc3545; --flash:rgba(220,53,69,.55); }
+.ig-btn--flash-no:hover{ background:#b42335; color:#fff; }
+@keyframes ig-flash{
+    0%, 100%{ box-shadow:0 0 0 0 var(--flash); filter:brightness(1); }
+    50%{ box-shadow:0 0 0 8px transparent; filter:brightness(1.15); }
+}
+@media (prefers-reduced-motion: reduce){
+    .ig-btn--flash{ animation:none; }
+}
 
 /* ---- Reports ---- */
 .ig-chart{ position:relative; height:260px; }
@@ -4736,6 +4837,10 @@ a.ig-stat:hover{
     }
     .ig-brand span{ display:none; }
     .ig-brand img{ width:96px; }
+    .ig-brand--mark{ flex-direction:row; gap:10px; padding:0; border-bottom:none; text-align:left; }
+    .ig-brand--mark img{ width:32px; height:32px; }
+    .ig-wordmark strong{ font-size:16px; }
+    .ig-wordmark small{ font-size:10.5px; }
     .ig-sidebar{ justify-content:space-between; }
     /* The menu opens as a panel under the top bar (static/js/shell.js). */
     .ig-menu-toggle{ display:inline-flex; }

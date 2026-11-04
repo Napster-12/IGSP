@@ -199,7 +199,7 @@ LEGACY_CATEGORY_MAP = {
 REQUIRED_DOCUMENTS = [
     "CIPC Company Registration Document",
     "Certified ID copies of all Directors",
-    "SARS VAT Certificate",
+    "SARS Tax Clearance",
     "Confirmation of Bank Account Letter (not older than 3 months)",
     "Valid B-BBEE certificate, letter from Accountant or Sworn Affidavit",
     "Proof of Company residential address (not older than 3 months)",
@@ -207,8 +207,12 @@ REQUIRED_DOCUMENTS = [
 ]
 # Certificates that carry an issue and expiry date. Both dates are mandatory whenever these are uploaded.
 DATED_DOCUMENTS = {
-    "SARS VAT Certificate": "SARS VAT certificate",
+    "SARS Tax Clearance": "SARS tax clearance",
     "Valid B-BBEE certificate, letter from Accountant or Sworn Affidavit": "B-BBEE certificate, accountant's letter or affidavit",
+}
+# Old document names still in the database -> current name (moved over at startup, see migrate_renamed_documents).
+RENAMED_DOCUMENTS = {
+    "SARS VAT Certificate": "SARS Tax Clearance",
 }
 EXPIRY_WARNING_DAYS = 30
 # Reminders go out this many days before expiry (largest first); expiry itself deactivates the account.
@@ -617,6 +621,8 @@ class User(DB.Model):
 
     id = DB.Column(DB.Integer, primary_key=True)
     supplier_id = DB.Column(DB.String(20), unique=True, nullable=True)
+    # Icebolethu's own vendor code for the supplier, entered by the admin on approval; shown on the certificate.
+    vendor_code = DB.Column(DB.String(30), unique=True, nullable=True)
     name = DB.Column("name", DB.String(100), nullable=False, default="")
     email = DB.Column(DB.String(120), unique=True, nullable=False)
     password_hash = DB.Column(DB.String(256), nullable=False)
@@ -925,7 +931,7 @@ EMAIL_TEMPLATES = {
         "subject": "Your {certificate} expires {when}",
         "body": "Your {certificate} for {company_name} expires on {expiry_date}. Please upload the renewed "
                 "certificate.{consequence}",
-        "placeholders": {"certificate": ("Which certificate", "SARS VAT certificate"),
+        "placeholders": {"certificate": ("Which certificate", "SARS tax clearance"),
                          "company_name": ("The supplier's company name", "Acme Caskets"),
                          "when": ("\"in 7 days\", \"today\" etc.", "in 7 days"),
                          "expiry_date": ("The expiry date", "29 Oct 2026"),
@@ -938,7 +944,7 @@ EMAIL_TEMPLATES = {
         "subject": "Certificate expired: account deactivated",
         "body": "Your {certificate} for {company_name} expired on {expiry_date}, so your supplier account is "
                 "deactivated. Upload the renewed certificate to reactivate it.",
-        "placeholders": {"certificate": ("Which certificate", "SARS VAT certificate"),
+        "placeholders": {"certificate": ("Which certificate", "SARS tax clearance"),
                          "company_name": ("The supplier's company name", "Acme Caskets"),
                          "expiry_date": ("The expiry date", "22 Oct 2026")},
     },
@@ -947,7 +953,7 @@ EMAIL_TEMPLATES = {
         "description": "Sent when a certificate expires for a supplier whose account isn't active.",
         "subject": "Your {certificate} has expired",
         "body": "Your {certificate} for {company_name} expired on {expiry_date}. Please upload the renewed certificate.",
-        "placeholders": {"certificate": ("Which certificate", "SARS VAT certificate"),
+        "placeholders": {"certificate": ("Which certificate", "SARS tax clearance"),
                          "company_name": ("The supplier's company name", "Acme Caskets"),
                          "expiry_date": ("The expiry date", "22 Oct 2026")},
     },
@@ -3348,6 +3354,19 @@ def update_application(application_id):
               f"{'declined' if new_status == 'declined' else 'being returned'}.", "error")
         return redirect(url_for("admin_application_detail", application_id=application.id))
 
+    supplier = get_application_supplier(application)
+    # Approving needs the supplier's vendor code; it's printed on their certificate.
+    vendor_code = request.form.get("vendor_code", "").strip()
+    approving = new_status == "approved" and old_status != "approved" and supplier is not None
+    if approving:
+        taken = vendor_code and User.query.filter(User.vendor_code == vendor_code, User.id != supplier.id).first()
+        error = ("Please enter the supplier's vendor code to approve the application." if not vendor_code
+                 else "The vendor code can be at most 30 characters." if len(vendor_code) > 30
+                 else f"Vendor code {vendor_code} is already used by {taken.company_name}." if taken else "")
+        if error:
+            flash(error, "error")
+            return redirect(url_for("admin_application_detail", application_id=application.id))
+
     if new_status == "on_file":
         new_doc_status = "complete"  # being put on file means the documents were checked and are in order
 
@@ -3363,6 +3382,9 @@ def update_application(application_id):
         changes.append({"field": "Documents status", "old": (old_doc_status or "").title(), "new": new_doc_status.title()})
     if application.review_comments != old_comments:
         changes.append({"field": "Review comments", "old": old_comments, "new": application.review_comments})
+    if approving and supplier.vendor_code != vendor_code:
+        changes.append({"field": "Vendor code", "old": supplier.vendor_code or "", "new": vendor_code})
+        supplier.vendor_code = vendor_code
     if old_status != new_status:
         log_event(application, "status_changed", summary=f"{status_label(old_status)} → {status_label(new_status)}",
                   from_status=old_status, to_status=new_status, changes=changes)
@@ -3370,7 +3392,6 @@ def update_application(application_id):
         log_event(application, "review_updated", summary=", ".join(c["field"] for c in changes) + " updated",
                   changes=changes)
 
-    supplier = get_application_supplier(application)
     if supplier:
         if old_status != application.status:
             if application.status == "on_file":
@@ -3662,7 +3683,7 @@ def admin_reports():
     active_suppliers = sum(1 for s in suppliers.values() if s.active)
     return render_template(
         "admin_reports.html",
-        report_kinds=REPORT_KINDS,
+        report_kinds=report_kinds_for(get_current_admin()),
         admin=get_current_admin(),
         total_suppliers=len(suppliers),
         active_suppliers=active_suppliers,
@@ -3698,8 +3719,12 @@ def admin_reports():
 REPORT_KINDS = [
     ("applications", "Applications"),
     ("suppliers", "Suppliers"),
+    ("onboarding", "Onboarding"),
+    ("review", "Review workload"),
+    ("compliance", "Certificates"),
     ("inventory", "Inventory"),
     ("activity", "Admin activity"),
+    ("signins", "Sign-ins"),
 ]
 REPORT_PERIODS = [("30d", "Last 30 days"), ("90d", "Last 90 days"), ("12m", "Last 12 months"),
                   ("ytd", "This year"), ("all", "All time")]
@@ -3919,13 +3944,370 @@ def activity_report(start, end=None):
     }
 
 
-REPORT_BUILDERS = {"suppliers": suppliers_report,
-                   "inventory": inventory_report, "activity": activity_report}
+def day_buckets(days_list, edges=((0, 2, "0–2 days"), (3, 7, "3–7 days"), (8, 14, "8–14 days"),
+                                  (15, 30, "15–30 days"), (31, None, "Over 30 days"))):
+    """Count whole-day ages into fixed buckets (all buckets kept, in order, so the chart reads left to right)."""
+    counts = {label: 0 for _, _, label in edges}
+    for days in days_list:
+        for low, high, label in edges:
+            if days >= low and (high is None or days <= high):
+                counts[label] += 1
+                break
+    return list(counts), [float(v) for v in counts.values()]
+
+
+OPEN_STATUSES = ["submitted", "pending_review", "under_review", "returned_for_update"]
+DECISION_STATUSES = {"approved", "declined", "on_file", "returned_for_update"}
+
+
+def onboarding_report(start, end=None):
+    """Sign-up to approval: email verification, saved drafts (save for later), terms, submission, vendor code and
+    registration certificate."""
+    query = User.query
+    if start:
+        query = query.filter(User.created_at >= start)
+    if end:
+        query = query.filter(User.created_at < end)
+    suppliers = query.order_by(User.created_at.desc()).all()
+    apps = users_by_email_applications(suppliers)
+    ids = [u.id for u in suppliers]
+    drafts = {d.user_id: d for d in ApplicationDraft.query.filter(ApplicationDraft.user_id.in_(ids))} if ids else {}
+    app_ids = [a.id for a in apps.values()]
+    issued = {app_id for (app_id,) in DB.session.query(ApplicationEvent.application_id).filter(
+        ApplicationEvent.application_id.in_(app_ids), ApplicationEvent.action == "registration_certificate_issued")} if app_ids else set()
+
+    def application_of(u):
+        a = apps.get(normalize_email(u.email))
+        return a if a and a.status != "draft" else None
+
+    def stage(u):
+        a = application_of(u)
+        if a and a.status in ("approved", "on_file"):
+            return "Approved", "approved"
+        if a and a.status == "declined":
+            return "Declined", "declined"
+        if a:
+            return "Submitted", "submitted"
+        if u.id in drafts:
+            return "Saved for later", "pending_review"
+        if u.email_verified:
+            return "Not started", "inactive"
+        return "Email not verified", "hidden"
+
+    verified = [u for u in suppliers if u.email_verified]
+    submitted = [u for u in suppliers if application_of(u)]
+    approved = [u for u in submitted if application_of(u).status in ("approved", "on_file")]
+    open_drafts = [u for u in suppliers if u.id in drafts and not application_of(u)]
+    with_code = [u for u in approved if u.vendor_code]
+    certified = [u for u in approved if application_of(u).id in issued]
+    now = utcnow()
+    days_to_submit = [(application_of(u).created_at - u.created_at).days for u in submitted
+                      if u.created_at and application_of(u).created_at]
+    draft_ages = [(now - drafts[u.id].updated_at).days for u in open_drafts if drafts[u.id].updated_at]
+    # Supplier Terms and Conditions accepted with the application (APPLICATION_TERMS_VERSION is the current one).
+    terms = defaultdict(int)
+    for u in submitted:
+        version = application_of(u).terms_version
+        terms[("Current" if version == APPLICATION_TERMS_VERSION else "Earlier") + f" ({version})" if version
+              else "Before terms were added"] += 1
+
+    def pct(part, whole):
+        return f"{round(100 * len(part) / len(whole))}% of registered" if whole else "—"
+
+    return {
+        "kpis": [
+            ("Registered", len(suppliers), "new supplier accounts"),
+            ("Email verified", len(verified), pct(verified, suppliers)),
+            ("Saved for later", len(open_drafts), "started, not yet submitted"),
+            ("Submitted", len(submitted), pct(submitted, suppliers)),
+            ("Approved", len(approved), f"{len(with_code)} with vendor code, {len(certified)} certificates issued"),
+        ],
+        "charts": [
+            {"id": "c1", "title": "Onboarding funnel", "subtitle": "How far suppliers registered in this period got",
+             "horizontal": True,
+             "labels": ["Registered", "Email verified", "Started application", "Submitted", "Approved",
+                        "Vendor code assigned", "Certificate issued"],
+             "values": [float(n) for n in (len(suppliers), len(verified), len(open_drafts) + len(submitted),
+                                           len(submitted), len(approved), len(with_code), len(certified))]},
+            {"id": "c2", "title": "Saved applications waiting", "subtitle": "Days since the draft was last saved",
+             **dict(zip(("labels", "values"), day_buckets(draft_ages) if draft_ages else ([], []))), "horizontal": True},
+            {"id": "c3", "title": "Time from sign-up to submission", "subtitle": "Submitted applications",
+             **dict(zip(("labels", "values"), day_buckets(days_to_submit) if days_to_submit else ([], []))),
+             "horizontal": True},
+            {"id": "c4", "title": "Supplier Terms and Conditions", "subtitle": "Version accepted with each application",
+             "horizontal": True, **dict(zip(("labels", "values"), top_n(terms)))},
+        ],
+        "columns": ["Supplier", "Registered", "Email", "Stage", "Draft last saved", "Submitted", "Vendor code",
+                    "Certificate", "Terms"],
+        "rows": [[
+            cell(u.company_name, href=url_for("admin_application_detail", application_id=application_of(u).id)
+                 if application_of(u) else None),
+            cell(u.created_at.strftime("%d %b %Y") if u.created_at else ""),
+            cell("Verified" if u.email_verified else "Not verified", badge="active" if u.email_verified else "inactive"),
+            cell(stage(u)[0], badge=stage(u)[1]),
+            cell(drafts[u.id].updated_at.strftime("%d %b %Y") if u.id in drafts and drafts[u.id].updated_at else "—"),
+            cell(application_of(u).created_at.strftime("%d %b %Y") if application_of(u) and application_of(u).created_at else "—"),
+            cell(u.vendor_code or "—", mono=True),
+            cell("Issued" if application_of(u) and application_of(u).id in issued else "—"),
+            cell((application_of(u).terms_version or "Not recorded") if application_of(u) else "—"),
+        ] for u in suppliers],
+    }
+
+
+def review_report(start, end=None):
+    """Application assignment and review: the open queue right now, plus decisions and turnaround in the period."""
+    admins = {a.id: a for a in Admin.query.all()}
+    open_apps = (SupplierApplication.query.filter(SupplierApplication.status.in_(OPEN_STATUSES))
+                 .order_by(SupplierApplication.created_at).all())
+    flagged = director_matches(open_apps)
+    now = utcnow()
+
+    decisions = ApplicationEvent.query.filter(ApplicationEvent.action == "status_changed",
+                                              ApplicationEvent.actor_type == "admin",
+                                              ApplicationEvent.to_status.in_(list(DECISION_STATUSES)))
+    if start:
+        decisions = decisions.filter(ApplicationEvent.created_at >= start)
+    if end:
+        decisions = decisions.filter(ApplicationEvent.created_at < end)
+    decisions = decisions.all()
+    decided = {a.id: a for a in SupplierApplication.query.filter(
+        SupplierApplication.id.in_({e.application_id for e in decisions}))} if decisions else {}
+
+    # Turnaround: submission to approval, for approvals made in the period.
+    turnaround, per_admin_turnaround = [], defaultdict(list)
+    for e in decisions:
+        a = decided.get(e.application_id)
+        if e.to_status == "approved" and a and a.created_at and e.created_at:
+            days = (e.created_at - a.created_at).total_seconds() / 86400
+            turnaround.append(days)
+            per_admin_turnaround[e.actor_name or "Unknown"].append(days)
+
+    open_per_admin, decisions_per_admin, outcomes = defaultdict(int), defaultdict(int), defaultdict(int)
+    for a in open_apps:
+        owner = admins.get(a.assigned_admin_id)
+        open_per_admin[(owner.name or owner.email) if owner else "Unassigned"] += 1
+    for e in decisions:
+        decisions_per_admin[e.actor_name or "Unknown"] += 1
+        outcomes[status_label(e.to_status)] += 1
+    unassigned = sum(1 for a in open_apps if not a.assigned_admin_id)
+    waiting = [(now - a.created_at).days for a in open_apps if a.created_at]
+    average = sum(turnaround) / len(turnaround) if turnaround else None
+    fastest = min(per_admin_turnaround.items(), key=lambda kv: sum(kv[1]) / len(kv[1]))[0] if per_admin_turnaround else None
+
+    return {
+        "kpis": [
+            ("Open applications", len(open_apps), "waiting for a decision now"),
+            ("Unassigned", unassigned, "no admin responsible yet"),
+            ("Decisions", len(decisions), "approved, declined, on file or returned"),
+            ("Avg. days to approve", f"{average:.1f}" if average is not None else "—",
+             f"from submission, {len(turnaround)} approvals"),
+            ("Director matches", len(flagged), "open applications flagged"),
+        ],
+        "charts": [
+            {"id": "c1", "title": "Open applications per admin", "subtitle": "Current workload", "horizontal": True,
+             **dict(zip(("labels", "values"), top_n(open_per_admin, 15)))},
+            {"id": "c2", "title": "Decisions per admin", "subtitle": "In this period", "horizontal": True,
+             **dict(zip(("labels", "values"), top_n(decisions_per_admin, 15)))},
+            {"id": "c3", "title": "How long open applications have waited", "subtitle": "Days since submission",
+             "horizontal": True, **dict(zip(("labels", "values"), day_buckets(waiting) if waiting else ([], [])))},
+            {"id": "c4", "title": "Decision outcomes", "subtitle": "In this period", "horizontal": True,
+             **dict(zip(("labels", "values"), top_n(outcomes)))},
+            {"id": "c5", "title": "Average days to approve, per admin",
+             "subtitle": f"Approvals in this period{f' — fastest: {fastest}' if fastest else ''}", "horizontal": True,
+             "labels": sorted(per_admin_turnaround, key=lambda k: sum(per_admin_turnaround[k]) / len(per_admin_turnaround[k])),
+             "values": [round(sum(v) / len(v), 1) for v in sorted(per_admin_turnaround.values(), key=lambda v: sum(v) / len(v))]},
+        ],
+        "columns": ["Application", "Status", "Assigned to", "Assigned on", "Submitted", "Waiting", "Director match"],
+        "rows": [[
+            cell(a.company_name, href=url_for("admin_application_detail", application_id=a.id)),
+            cell(status_label(a.status), badge=a.status),
+            cell((admins[a.assigned_admin_id].name or admins[a.assigned_admin_id].email)
+                 if a.assigned_admin_id in admins else "Unassigned"),
+            cell(a.assigned_at.strftime("%d %b %Y") if a.assigned_at else "—"),
+            cell(a.created_at.strftime("%d %b %Y") if a.created_at else ""),
+            cell(f"{(now - a.created_at).days} days" if a.created_at else "—", num=True),
+            cell("Yes" if a.id in flagged else "No", badge="declined" if a.id in flagged else None),
+        ] for a in sorted(open_apps, key=lambda a: a.created_at or now)],
+    }
+
+
+def compliance_report(start, end=None):
+    """SARS tax clearance and B-BBEE certificates: their state right now, plus reminders, expiries and renewals
+    in the period."""
+    rows = (DB.session.query(SupplierDocument, SupplierApplication)
+            .join(SupplierApplication, SupplierDocument.application_id == SupplierApplication.id)
+            .filter(SupplierDocument.document_type.in_(list(DATED_DOCUMENTS)),
+                    SupplierApplication.status.in_(list(EXPIRY_WATCHED_STATUSES)))
+            .order_by(SupplierDocument.expiry_date.is_(None), SupplierDocument.expiry_date).all())
+    suppliers = users_by_email([a for _, a in rows])
+    today = date.today()
+    states = defaultdict(int)
+    for d, _ in rows:
+        states[d.expiry_state or "no_date"] += 1
+    suspended = SupplierApplication.query.filter(SupplierApplication.expiry_suspended.is_(True)).count()
+
+    events = ApplicationEvent.query.filter(ApplicationEvent.action.in_(
+        ["certificate_reminder", "certificate_expired", "certificates_renewed"]))
+    if start:
+        events = events.filter(ApplicationEvent.created_at >= start)
+    if end:
+        events = events.filter(ApplicationEvent.created_at < end)
+    events = events.all()
+    reminders = [e for e in events if e.action == "certificate_reminder"]
+    renewals = [e for e in events if e.action == "certificates_renewed"]
+    months, renewal_monthly = monthly_series(((e.created_at, 1) for e in renewals), start, end)
+    horizon = month_range(today.strftime("%Y-%m"), (today + timedelta(days=330)).strftime("%Y-%m"))
+    upcoming = defaultdict(int)
+    for d, _ in rows:
+        if d.expiry_date and d.expiry_date >= today:
+            upcoming[d.expiry_date.strftime("%Y-%m")] += 1
+    by_type = defaultdict(int)
+    for d, _ in rows:
+        if d.expiry_state in ("expired", "expiring"):
+            by_type[DATED_DOCUMENTS[d.document_type]] += 1
+
+    state_labels = {"valid": ("Valid", "active"), "expiring": (f"Expires within {EXPIRY_WARNING_DAYS} days", "pending_review"),
+                    "expired": ("Expired", "declined"), "no_date": ("No expiry date", "inactive")}
+    notice_labels = {"": "—", "30": "30-day reminder", "7": "7-day reminder", "expired": "Expiry notice"}
+
+    def account(a):
+        s = suppliers.get(normalize_email(a.email))
+        if a.expiry_suspended:
+            return cell("Suspended", badge="declined")
+        return cell("Active", badge="active") if s and s.active else cell("Inactive", badge="inactive")
+
+    return {
+        "kpis": [
+            ("Valid", states["valid"], "certificates in date now"),
+            ("Expiring soon", states["expiring"], f"within {EXPIRY_WARNING_DAYS} days"),
+            ("Expired", states["expired"], "need renewing now"),
+            ("Accounts suspended", suspended, "deactivated until renewed"),
+            ("Reminders sent", len(reminders), f"in this period, {len(renewals)} renewals"),
+        ],
+        "charts": [
+            {"id": "c1", "title": "Certificate status", "subtitle": "Right now", "horizontal": True,
+             "labels": [state_labels[k][0] for k in state_labels if states[k]],
+             "values": [float(states[k]) for k in state_labels if states[k]]},
+            {"id": "c2", "title": "Expiring or expired, by certificate", "subtitle": "Right now", "horizontal": True,
+             **dict(zip(("labels", "values"), top_n(by_type)))},
+            {"id": "c3", "title": "Certificates expiring per month", "subtitle": "Next 12 months", "months": True,
+             "labels": horizon if upcoming else [], "values": [float(upcoming.get(m, 0)) for m in horizon] if upcoming else []},
+            {"id": "c4", "title": "Renewals per month", "subtitle": "Renewed certificates uploaded by suppliers",
+             "labels": months, "values": renewal_monthly, "months": True},
+        ],
+        "columns": ["Supplier", "Certificate", "Issued", "Expires", "Days left", "Status", "Last notice sent", "Account"],
+        "rows": [[
+            cell(a.company_name, href=url_for("admin_application_detail", application_id=a.id)),
+            cell(DATED_DOCUMENTS[d.document_type]),
+            cell(d.issue_date.strftime("%d %b %Y") if d.issue_date else "—"),
+            cell(d.expiry_date.strftime("%d %b %Y") if d.expiry_date else "—"),
+            cell(str((d.expiry_date - today).days) if d.expiry_date else "—", num=True),
+            cell(state_labels[d.expiry_state or "no_date"][0], badge=state_labels[d.expiry_state or "no_date"][1]),
+            cell(notice_labels.get(d.expiry_notice, d.expiry_notice)),
+            account(a),
+        ] for d, a in rows],
+    }
+
+
+SIGN_IN_ACTIONS = ["admin_login", "admin_login_failed", "admin_logout"]
+
+
+def signins_report(start, end=None):
+    """Admin sign-ins (Cognito, Microsoft, password), failed attempts, and automatic sign-outs: idle time-outs
+    and sign-ins replaced by another device."""
+    query = AuditLog.query.filter(AuditLog.actor_type == "admin", AuditLog.action.in_(SIGN_IN_ACTIONS))
+    if start:
+        query = query.filter(AuditLog.created_at >= start)
+    if end:
+        query = query.filter(AuditLog.created_at < end)
+    entries = query.order_by(AuditLog.created_at.desc()).all()
+
+    def kind(e):
+        if e.action == "admin_login":
+            return "Signed in", "active"
+        if e.action == "admin_login_failed":
+            return "Failed sign-in", "declined"
+        if "another device" in e.detail:
+            return "Signed in elsewhere", "returned_for_update"
+        if "without activity" in e.detail:
+            return "Idle sign-out", "pending_review"
+        return "Signed out", "inactive"
+
+    logins = [e for e in entries if e.action == "admin_login"]
+    failed = [e for e in entries if e.action == "admin_login_failed"]
+    idle = [e for e in entries if kind(e)[0] == "Idle sign-out"]
+    replaced = [e for e in entries if kind(e)[0] == "Signed in elsewhere"]
+    per_admin, methods, reasons, endings = defaultdict(int), defaultdict(int), defaultdict(int), defaultdict(int)
+    for e in logins:
+        per_admin[e.actor_name or e.actor_email or "Unknown"] += 1
+        methods[e.detail or "Other"] += 1
+    for e in failed:
+        reasons[e.detail or "Not recorded"] += 1
+    for e in entries:
+        if e.action == "admin_logout":
+            endings[kind(e)[0]] += 1
+    months, monthly = monthly_series(((e.created_at, 1) for e in logins), start, end)
+
+    return {
+        "kpis": [
+            ("Sign-ins", len(logins), f"by {len(per_admin)} admin{'' if len(per_admin) == 1 else 's'}"),
+            ("Failed sign-ins", len(failed), "wrong password, no account or no group"),
+            ("Idle sign-outs", len(idle), f"after {IDLE_TIMEOUT_SECONDS // 60} minutes without activity"),
+            ("Signed in elsewhere", len(replaced), "replaced by a sign-in on another device"),
+            ("Sign-outs", sum(endings.values()), "manual and automatic"),
+        ],
+        "charts": [
+            {"id": "c1", "title": "Sign-ins per month", "subtitle": "Successful admin sign-ins",
+             "labels": months, "values": monthly, "months": True},
+            {"id": "c2", "title": "Sign-in method", "subtitle": "Successful sign-ins", "horizontal": True,
+             **dict(zip(("labels", "values"), top_n(methods)))},
+            {"id": "c3", "title": "How sessions ended", "subtitle": "Manual, idle or replaced by another device",
+             "horizontal": True, **dict(zip(("labels", "values"), top_n(endings)))},
+            {"id": "c4", "title": "Failed sign-ins by reason", "subtitle": "In this period", "horizontal": True,
+             **dict(zip(("labels", "values"), top_n(reasons)))},
+            {"id": "c5", "title": "Sign-ins per admin", "subtitle": "In this period", "horizontal": True,
+             **dict(zip(("labels", "values"), top_n(per_admin, 15)))},
+        ],
+        "columns": ["When (UTC)", "Admin", "Email", "Event", "Details"],
+        "rows": [[
+            cell(e.created_at.strftime("%d %b %Y, %H:%M") if e.created_at else ""),
+            cell(e.actor_name or "—"),
+            cell(e.actor_email or "—"),
+            cell(kind(e)[0], badge=kind(e)[1]),
+            cell(e.detail or "—"),
+        ] for e in entries[:500]],
+    }
+
+
+REPORT_BUILDERS = {"suppliers": suppliers_report, "onboarding": onboarding_report, "review": review_report,
+                   "compliance": compliance_report, "inventory": inventory_report, "activity": activity_report,
+                   "signins": signins_report}
 REPORT_DESCRIPTIONS = {
     "suppliers": "Supplier registrations, status and activity",
+    "onboarding": "From sign-up to approval: email verification, saved applications, terms, vendor codes and certificates",
+    "review": "Who is reviewing what, how long applications wait, and how fast they're decided",
+    "compliance": "SARS tax clearance and B-BBEE certificates: expiry, reminders, suspensions and renewals",
     "inventory": "What approved suppliers currently offer — a live snapshot",
     "activity": "What each admin has done, from the audit trail",
+    "signins": "Admin sign-ins, failed attempts and automatic sign-outs",
 }
+# Reports that need more than the "reports" section: kind -> the section the admin must also be able to open.
+REPORT_SECTIONS = {"signins": "ict"}  # sign-in security is for ICT only
+
+
+def report_kinds_for(admin):
+    """The report tabs this admin may see."""
+    return [(key, label) for key, label in REPORT_KINDS
+            if key not in REPORT_SECTIONS or admin.can(REPORT_SECTIONS[key])]
+
+
+def report_access_denied(kind):
+    """A redirect when the signed-in admin may not open report `kind`, else None."""
+    section = REPORT_SECTIONS.get(kind)
+    if section and not get_current_admin().can(section):
+        flash("You don't have access to that page.", "error")
+        return redirect(url_for("admin_reports"))
+    return None
 
 
 @app.route("/admin/reports/<kind>")
@@ -3936,12 +4318,15 @@ def admin_report(kind):
         return redirect(url_for("admin_reports", **request.args))
     if kind not in REPORT_BUILDERS:
         abort(404)
+    denied = report_access_denied(kind)
+    if denied:
+        return denied
     window = report_period(request.args)
     report = REPORT_BUILDERS[kind](window["start"], window["end"])
     return render_template(
         "admin_report.html", admin=get_current_admin(), kind=kind, report=report,
         title=dict(REPORT_KINDS)[kind], description=REPORT_DESCRIPTIONS[kind],
-        period=window["period"], periods=REPORT_PERIODS, report_kinds=REPORT_KINDS,
+        period=window["period"], periods=REPORT_PERIODS, report_kinds=report_kinds_for(get_current_admin()),
         date_from=window["date_from"], date_to=window["date_to"], range_args=window["args"],
     )
 
@@ -3952,6 +4337,9 @@ def admin_report(kind):
 def admin_report_export(kind):
     if kind not in REPORT_BUILDERS:
         abort(404)
+    denied = report_access_denied(kind)
+    if denied:
+        return denied
     window = report_period(request.args)
     report = REPORT_BUILDERS[kind](window["start"], window["end"])
     output = io.StringIO()
@@ -4625,6 +5013,7 @@ def certificate_details(application, supplier):
     return {
         "company_name": application.registered_vendor_name or application.company_name,
         "supplier_number": supplier.supplier_id if supplier and supplier.supplier_id else "—",
+        "vendor_code": supplier.vendor_code if supplier and supplier.vendor_code else "—",
         "services": " / ".join(category for category, _ in rows if category),
         "service_details": " / ".join(detail for _, detail in rows if detail),
         "registered": registered,
@@ -4636,10 +5025,11 @@ def certificate_details(application, supplier):
     }
 
 
-def render_certificate(application, supplier, back_url):
+def render_certificate(application, supplier, back_url, logout_url):
     details = certificate_details(application, supplier)
     filename = secure_filename(f"{details['company_name']} supplier certificate") or "supplier_certificate"
-    return render_template("registration_certificate.html", cert=details, back_url=back_url, filename=filename)
+    return render_template("registration_certificate.html", cert=details, back_url=back_url, filename=filename,
+                           logout_url=logout_url)
 
 
 @app.route("/certificate")
@@ -4650,7 +5040,7 @@ def supplier_registration_certificate():
     if not application or application.status != "approved":
         flash("Your supplier certificate is available once your application has been approved.", "error")
         return redirect(url_for("dashboard"))
-    return render_certificate(application, user, url_for("supplier_certificates"))
+    return render_certificate(application, user, url_for("supplier_certificates"), url_for("logout", idle=1))
 
 
 @app.route("/admin/applications/<int:application_id>/certificate")
@@ -4662,7 +5052,8 @@ def admin_registration_certificate(application_id):
     if application.status != "approved":
         flash("A supplier certificate is only issued for approved applications.", "error")
         return redirect(detail_url)
-    return render_certificate(application, get_application_supplier(application), detail_url)
+    return render_certificate(application, get_application_supplier(application), detail_url,
+                              url_for("admin_logout", idle=1))
 
 
 @app.route("/certificates", methods=["GET", "POST"])
@@ -4789,6 +5180,7 @@ def migrate_mysql_schema():
         "email_verified": "BOOLEAN NOT NULL DEFAULT FALSE",
         "active": "BOOLEAN NOT NULL DEFAULT FALSE",
         "supplier_id": "VARCHAR(20) NULL UNIQUE",
+        "vendor_code": "VARCHAR(30) NULL UNIQUE",
         "verification_code_hash": "VARCHAR(256) NULL",
         "verification_code_expires": "DATETIME NULL",
         "terms_version": "VARCHAR(20) NULL",
@@ -4855,6 +5247,17 @@ def migrate_legacy_categories():
                         changed, len(rows), products)
 
 
+def migrate_renamed_documents():
+    """Move uploaded documents from old document names onto the current ones. Safe to re-run."""
+    changed = SupplierDocument.query.filter(SupplierDocument.document_type.in_(list(RENAMED_DOCUMENTS))).update(
+        {SupplierDocument.document_type: case(RENAMED_DOCUMENTS, value=SupplierDocument.document_type)},
+        synchronize_session=False,
+    )
+    if changed:
+        DB.session.commit()
+        app.logger.info("Renamed %s uploaded document(s) to their current document names.", changed)
+
+
 def init_database():
     with app.app_context():
         try:
@@ -4862,6 +5265,7 @@ def init_database():
             if DB.engine.dialect.name == "mysql":
                 migrate_mysql_schema()
             migrate_legacy_categories()
+            migrate_renamed_documents()
         except Exception as exc:  # noqa: BLE001 — let the app boot so /health still answers
             DB.session.rollback()
             app.logger.warning("Database initialization skipped: %s", exc)
@@ -4959,7 +5363,7 @@ def _answer_my_certificates(user):
     application = _supplier_application(user)
     documents = [d for d in (documents_for_application(application, user) if application else [])
                  if d.document_type in DATED_DOCUMENTS and d.expiry_date]
-    general = ("Reminders are sent 30 and 7 days before your SARS VAT or B-BBEE certificate expires. If one expires, "
+    general = ("Reminders are sent 30 and 7 days before your SARS tax clearance or B-BBEE certificate expires. If one expires, "
                "your account is deactivated until you upload the renewed certificate at /certificates, which "
                "reactivates it automatically.")
     if not documents:
@@ -5318,7 +5722,7 @@ SUPPLIER_INTENTS = [
            f"387 Surrey Avenue, Ferndale, Randburg, 2194\nFor supplier questions, contact {CONTACT_DETAILS}."),
     Intent("vat_registration", ["vat", "vat registered", "not vat registered", "no vat", "dont have vat",
                                 "vat number", "vat vendor"],
-           "The SARS VAT certificate is one of the 7 required documents, and you enter its issue and expiry dates "
+           "The SARS tax clearance is one of the 7 required documents, and you enter its issue and expiry dates "
            f"when you upload it. If your business isn't VAT registered, please contact {CONTACT_DETAILS} before you apply."),
     Intent("bbbee", ["bbbee certificate", "no bbbee", "dont have bbbee", "affidavit", "sworn affidavit",
                      "accountant letter", "letter from accountant", "bee status", "bbbee level", "bee level",
@@ -5453,7 +5857,7 @@ SUPPLIER_INTENTS = [
            f"approval, company details are locked: please contact {CONTACT_DETAILS}."),
     Intent("certificate_dates", ["issue date", "expiry date", "which date", "what date", "dates on the certificate",
                                  "no expiry date", "date of issue"],
-           "When you upload your SARS VAT certificate and your B-BBEE certificate, letter or affidavit, enter the issue "
+           "When you upload your SARS tax clearance and your B-BBEE certificate, letter or affidavit, enter the issue "
            "date and the expiry date as they appear on the document. If it doesn't show an expiry date, contact "
            f"{CONTACT_DETAILS} for help."),
     Intent("bbbee_expired", ["bbbee expired", "bbbee has expired", "new bbbee not ready", "waiting for bbbee",
@@ -5486,7 +5890,7 @@ SUPPLIER_INTENTS = [
            "app (or the scan option in your phone's notes or files app) saves photos of documents as a PDF."),
     Intent("tax_number", ["tax number", "income tax", "tax reference", "tax pin", "tax clearance", "tax compliance",
                           "sars pin"],
-           "Enter your company's tax number on step 1. The SARS VAT certificate is the SARS document you upload. For "
+           "Enter your company's tax number on step 1. The SARS tax clearance is the SARS document you upload. For "
            f"other tax compliance questions, contact {CONTACT_DETAILS}."),
     Intent("primary_contact", ["primary contact", "contact person be different", "who should be the contact",
                                "different contact", "someone else as contact",
@@ -5884,12 +6288,18 @@ DEMO_COMPANIES = [
     ("Amandla Catering Services", "Catering"), ("Serenity Body Storage", "Body Storage, Cold-Room and other Burial Services"), ("Vukani Funeral Consultants", "Consulting"),
     ("Kwanele Casket Makers", "Caskets and Tombstones"), ("Phila Sound & Screens", "ICT Equipment, Media and Electronic Devices"), ("Bayede Luxury Cars", "Funeral Vehicles (Hearse / Family Car)"),
     ("Ithemba Memorial Stones", "Caskets and Tombstones"), ("Siphesihle Event Tents", "Tents, Draping and Décor"), ("Mzansi Lowering Devices", "Lowering Device"),
+    ("Umoya Caskets", "Caskets and Tombstones"), ("Sakhile Event Catering", "Catering"), ("Lindani Cold Storage", "Body Storage, Cold-Room and other Burial Services"),
+    ("Isibani Tents & Décor", "Tents, Draping and Décor"), ("Nompilo Flowers", "Flowers, crosses and plaques"), ("Qhawe Funeral Cars", "Funeral Vehicles (Hearse / Family Car)"),
+    ("Ekhaya Livestock Traders", "Livestock"), ("Hlanzeka Sanitation Hire", "Mobile toilet"), ("Khula Advisory Services", "Consulting"),
+    ("Sizakala Media Solutions", "ICT Equipment, Media and Electronic Devices"),
 ]
 DEMO_PEOPLE = ["Thandiwe Mkhize", "Sipho Ndlovu", "Lerato Mokoena", "Bongani Zulu", "Nomvula Dlamini", "Kagiso Molefe",
                "Zanele Khumalo", "Themba Nkosi", "Palesa Mahlangu", "Mandla Sithole", "Ayanda Cele", "Refilwe Masilo",
                "Lindiwe Ngcobo", "Tshepo Mabaso", "Nokuthula Shabalala", "Sibusiso Mthembu", "Precious Baloyi", "Vusi Mathebula",
                "Busisiwe Nxumalo", "Karabo Letsoalo", "Mpho Radebe", "Ntombi Gumede", "Andile Hadebe", "Kgomotso Moloi",
-               "Siyabonga Buthelezi", "Naledi Phiri", "Lwazi Mkhabela", "Dineo Sebola", "Xolani Zwane", "Hlengiwe Mbatha"]
+               "Siyabonga Buthelezi", "Naledi Phiri", "Lwazi Mkhabela", "Dineo Sebola", "Xolani Zwane", "Hlengiwe Mbatha",
+               "Sbu Mnguni", "Nonhlanhla Zondi", "Musa Ntuli", "Gugu Majozi", "Jabulani Khoza", "Zodwa Msimang",
+               "Nhlanhla Dube", "Phumzile Shange", "Sandile Mhlongo", "Thobeka Ximba"]
 DEMO_CITIES = {"KwaZulu-Natal": ["Durban", "Pietermaritzburg", "Richards Bay"], "Gauteng": ["Johannesburg", "Pretoria", "Soweto"],
                "Eastern Cape": ["Gqeberha", "East London", "Mthatha"], "Western Cape": ["Cape Town", "Paarl"],
                "Limpopo": ["Polokwane", "Thohoyandou"], "Mpumalanga": ["Mbombela", "eMalahleni"], "Free State": ["Bloemfontein"],
@@ -5963,18 +6373,21 @@ def remove_demo_data():
 @click.option("--months", default=6, show_default=True, help="Spread registrations over this many months.")
 @click.option("--remove", is_flag=True, help="Delete all demo data instead of creating it.")
 @click.option("--seed", default=2026, show_default=True, help="Random seed, for repeatable demo data.")
-def seed_demo_command(count, months, remove, seed):
+@click.option("--status", type=click.Choice(STATUSES[1:]), default=None,
+              help="Give every new application this status instead of a realistic mix.")
+def seed_demo_command(count, months, remove, seed, status):
     """Create (or --remove) realistic demo suppliers, applications and inventory.
 
     Demo suppliers use @demo-supplier.example addresses (undeliverable), password Password123!
+    Companies that already have demo data are skipped, so this can be re-run to add more, e.g.
+    `seed-demo --suppliers 10 --status submitted`.
     """
     import random
 
     if remove:
         click.echo(f"Removed {remove_demo_data()} demo suppliers and everything linked to them.")
         return
-    if User.query.filter(User.email.like(f"%@{DEMO_EMAIL_DOMAIN}")).first():
-        raise click.ClickException("Demo data already exists. Run `flask --app app seed-demo --remove` first to replace it.")
+    existing = {u.email for u in User.query.filter(User.email.like(f"%@{DEMO_EMAIL_DOMAIN}"))}
     # Only admins who can work on applications get demo applications assigned to them.
     admins = [a for a in Admin.query.order_by(Admin.id).all() if a.can("applications")]
     if not admins:
@@ -5986,6 +6399,7 @@ def seed_demo_command(count, months, remove, seed):
     status_pool = (["approved"] * 12 + ["on_file"] * 3 + ["pending_review"] * 5 + ["under_review"] * 4 + ["submitted"] * 2
                    + ["returned_for_update"] * 3 + ["declined"] * 2)
     rng.shuffle(status_pool)
+    fixed_status = status
     password_hash = generate_password_hash("Password123!")
 
     def event(application, when, actor, action, summary="", from_status=None, to_status=None, changes=None):
@@ -5998,16 +6412,20 @@ def seed_demo_command(count, months, remove, seed):
         ))
 
     created_users, approved = [], []
-    for i in range(min(count, len(DEMO_COMPANIES))):
-        company, category = DEMO_COMPANIES[i]
+    for i, (company, category) in enumerate(DEMO_COMPANIES):
+        if len(created_users) >= count:
+            break
         person = DEMO_PEOPLE[i % len(DEMO_PEOPLE)]
         slug = re.sub(r"[^a-z0-9]+", "", company.lower())
         email = f"{slug}@{DEMO_EMAIL_DOMAIN}"
+        if email in existing:
+            continue
+        n = len(created_users)
         province = rng.choice(list(DEMO_CITIES))
         city = rng.choice(DEMO_CITIES[province])
-        registered = period_start + timedelta(days=int(i * (30 * months - 7) / max(count, 1)), hours=rng.randint(7, 18), minutes=rng.randint(0, 59))
+        registered = period_start + timedelta(days=int(n * (30 * months - 7) / max(count, 1)), hours=rng.randint(7, 18), minutes=rng.randint(0, 59))
         phone = f"0{rng.choice([6, 7, 8])}{rng.randint(10000000, 99999999)}"
-        status = status_pool[i % len(status_pool)]
+        status = fixed_status or status_pool[n % len(status_pool)]
 
         user = User(supplier_id=generate_supplier_id(), name=person, email=email, password_hash=password_hash,
                     company_name=company, contact_name=person, phone=phone, address=f"{rng.randint(1, 250)} Main Road, {city}",
@@ -6085,6 +6503,7 @@ def seed_demo_command(count, months, remove, seed):
                                             related_application_id=application.id))
                 previous = step
             if status == "approved":
+                user.vendor_code = f"V{100000 + user.id}"
                 event(application, when, admin, "account_activated", summary="Supplier account activated automatically on approval",
                       changes=[{"field": "Account", "old": "Inactive", "new": "Active"}])
                 approved.append((user, category, when))
@@ -6107,10 +6526,55 @@ def seed_demo_command(count, months, remove, seed):
     DB.session.flush()
 
     DB.session.commit()
+    if not created_users:
+        raise click.ClickException("Every demo company already exists. Add names to DEMO_COMPANIES, or --remove first.")
     click.echo(f"Created {len(created_users)} demo suppliers ({len(approved)} approved, {len(products)} products) "
                f"over the last {months} months.")
     click.echo(f"Demo supplier logins: <company>@{DEMO_EMAIL_DOMAIN} / Password123!   Remove with: flask --app app seed-demo --remove")
 
+
+
+DEMO_ADMIN_EMAIL_DOMAIN = "demo-admin.example"  # reserved .example TLD: can never receive real email
+DEMO_ADMINS = [
+    ("Ndukenhle Mathe", "applications"), ("Lihle Mzelemu", "applications"), ("Thembinkosi Ngubane", "applications"),
+    ("Thandeka Ngubane", "applications"), ("Nosihle Maduna", "super"), ("Bongiwe Majola", "reports"),
+    ("Nqobile Khumalo", "reports"),
+]
+
+
+@app.cli.command("seed-demo-admins")
+@click.option("--remove", is_flag=True, help="Delete the demo admins instead of creating them.")
+def seed_demo_admins_command(remove):
+    """Create (or --remove) the demo procurement admins, one per person in DEMO_ADMINS.
+
+    Demo admins use firstname.lastname@demo-admin.example addresses (undeliverable), password Password123!
+    Re-running resets their names, roles and passwords.
+    """
+    demo_admins = Admin.query.filter(Admin.email.like(f"%@{DEMO_ADMIN_EMAIL_DOMAIN}")).all()
+    if remove:
+        ids = [a.id for a in demo_admins]
+        if ids:
+            SupplierApplication.query.filter(SupplierApplication.assigned_admin_id.in_(ids)).update(
+                {SupplierApplication.assigned_admin_id: None, SupplierApplication.assigned_at: None},
+                synchronize_session=False)
+            Notification.query.filter(Notification.admin_id.in_(ids)).delete(synchronize_session=False)
+            for admin in demo_admins:
+                DB.session.delete(admin)
+            DB.session.commit()
+        click.echo(f"Removed {len(ids)} demo admins.")
+        return
+
+    password_hash = generate_password_hash("Password123!")
+    for name, role in DEMO_ADMINS:
+        email = f"{name.lower().replace(' ', '.')}@{DEMO_ADMIN_EMAIL_DOMAIN}"
+        admin = find_admin_by_email(email)
+        if not admin:
+            admin = Admin(email=email)
+            DB.session.add(admin)
+        admin.name, admin.role, admin.password_hash = name, role, password_hash
+        click.echo(f"{email:45} {admin.role_label}")
+    DB.session.commit()
+    click.echo(f"{len(DEMO_ADMINS)} demo admins ready. Password: Password123!")
 
 
 # Dummy user-audit entries use the 198.51.100.0/24 documentation range (RFC 5737), which no real visitor can have,
@@ -6170,7 +6634,7 @@ def seed_audit_command(days, remove, seed):
                 template = rng.choice(templates)
                 add(start + timedelta(minutes=rng.randint(10, 120)), "email_template_updated", actor=admin, detail=template["name"])
             if admin.can("reports") and rng.random() < 0.1:
-                kind, label = rng.choice(REPORT_KINDS)
+                kind, label = rng.choice(report_kinds_for(admin))
                 add(start + timedelta(minutes=rng.randint(15, 240)), "report_exported", actor=admin,
                     detail=f"{label} report ({rng.choice(['30d', '90d', '12m', 'ytd'])})")
             if rng.random() < 0.6:

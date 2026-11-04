@@ -27,9 +27,12 @@
 <body class="ig-body">
     <div class="ig-shell">
         <aside class="ig-sidebar">
-            <a class="ig-brand" href="{{ url_for(admin.home_endpoint) }}">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Icebolethu Group">
-                <span>Supplier Portal Admin</span>
+            <a class="ig-brand ig-brand--mark" href="{{ url_for(admin.home_endpoint) }}">
+                <img src="{{ url_for('static', filename='images/favicon.png') }}" alt="Icebolethu Group">
+                <span class="ig-wordmark" aria-label="ICE Supplier Administration System">
+                    <strong><b>ICE</b> Supplier</strong>
+                    <small>Administration System</small>
+                </span>
             </a>
 
             <button type="button" class="ig-menu-toggle" data-menu-toggle aria-controls="ig-menu" aria-expanded="false">
@@ -49,10 +52,9 @@
                 </nav>
 
                 <div class="ig-account">
-                    <div class="ig-avatar" aria-hidden="true">{{ ((admin.name or admin.email)[:1])|upper }}</div>
+                    {{ ad.role_icon(admin.role) }}
                     <div class="ig-account-text">
                         <strong>{{ admin.name or 'Administrator' }}</strong>
-                        <span>{{ admin.email }}</span>
                         <span class="ig-account-role">{{ admin.role_label }}</span>
                     </div>
                     <a href="{{ url_for('admin_logout') }}" class="ig-logout">{{ ad.icon('logout') }}<span>Log out</span></a>
@@ -87,5 +89,6 @@
     <script src="{{ url_for('static', filename='js/pdf-viewer.js') }}"></script>
     {% with chat_url=url_for('admin_chat') %}{% include "_chatbot.html" %}{% endwith %}
     {% with logout_url=url_for('admin_logout', idle=1) %}{% include "_idle.html" %}{% endwith %}
+    {% with logout_url=url_for('admin_logout') %}{% include "_logout_confirm.html" %}{% endwith %}
 </body>
 </html>

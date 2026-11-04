@@ -23,8 +23,20 @@
     {%- elif name == 'mail' -%}<rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22 6 12 13 2 6"/>
     {%- elif name == 'trash' -%}<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
     {%- elif name == 'file' -%}<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+    {#- One per kind of account (role_icon below). -#}
+    {%- elif name == 'role-lead' -%}<path d="M3 8l4 4 5-7 5 7 4-4-2 11H5z"/><line x1="5" y1="21" x2="19" y2="21"/>
+    {%- elif name == 'role-officer' -%}<rect x="5" y="4" width="14" height="18" rx="2"/><path d="M9 2h6v4H9z"/><polyline points="9 14 11 16 15 12"/>
+    {%- elif name == 'role-manager' -%}<polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/>
+    {%- elif name == 'role-ict' -%}<rect x="2" y="4" width="20" height="14" rx="2"/><polyline points="7 9 10 11.5 7 14"/><line x1="12" y1="14" x2="16" y2="14"/><line x1="8" y1="21" x2="16" y2="21"/>
+    {%- elif name == 'role-supplier' -%}<path d="M1 7h12v10H1z"/><path d="M13 10h4l4 4v3h-8z"/><circle cx="5.5" cy="18.5" r="2"/><circle cx="17.5" cy="18.5" r="2"/>
     {%- endif -%}
     </svg>
+{%- endmacro %}
+
+{#- The account icon in the sidebar: `role` is an admin role (super, applications, reports, ict) or 'supplier'. -#}
+{% macro role_icon(role) -%}
+    {%- set kind = {'super': 'lead', 'applications': 'officer', 'reports': 'manager', 'ict': 'ict', 'supplier': 'supplier'}.get(role, 'officer') -%}
+    <div class="ig-role-badge ig-role-badge--{{ kind }}" aria-hidden="true">{{ icon('role-' ~ kind) }}</div>
 {%- endmacro %}
 {#- Top-right bell on every signed-in page; it flashes while there are unread notifications. -#}
 {% macro notification_bell(url, count, active=False) -%}
@@ -35,7 +47,7 @@
     </a>
 {%- endmacro %}
 
-{#- Own line under a dated certificate (VAT, B-BBEE): issue and expiry, flagged when expired or expiring soon. -#}
+{#- Own line under a dated certificate (tax clearance, B-BBEE): issue and expiry, flagged when expired or expiring soon. -#}
 {% macro document_dates(doc) -%}
     {%- if doc.issue_date and doc.expiry_date -%}
         <span class="ig-doc-dates">Issued {{ doc.issue_date.strftime('%d %b %Y') }} · Expires {{ doc.expiry_date.strftime('%d %b %Y') }}

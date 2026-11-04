@@ -36,7 +36,7 @@
     </ol>
 {%- endmacro %}
 
-{# Issue and expiry date fields for a dated certificate (VAT, B-BBEE). Named after the upload field. #}
+{# Issue and expiry date fields for a dated certificate (tax clearance, B-BBEE). Named after the upload field. #}
 {% macro document_dates(field, doc=none, required=false, prefill=true) -%}
     {% set doc = doc if prefill else none %}
     <div class="ig-slot-dates" data-document-dates>
