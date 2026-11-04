@@ -44,25 +44,40 @@
     {% if products %}
         <section class="ig-products">
             {% for product in products %}
+                {% set supplier = product.supplier %}
+                {% set qty = product.quantity_available %}
                 <article class="ig-product{% if not product.in_stock %} is-out{% endif %}">
-                    <div class="ig-product-top">
-                        <span class="ig-product-cat">{{ product.category }}</span>
+                    <header class="ig-product-head">
+                        <a class="ig-product-cat" href="{{ url_for('admin_catalogue', category=product.category) }}" title="Show all {{ product.category }}">{{ product.category }}</a>
+                        {% if qty is none %}<span class="ig-stock ig-stock--neutral">Available</span>
+                        {% elif qty == 0 %}<span class="ig-stock ig-stock--out">Out of stock</span>
+                        {% elif qty <= 2 %}<span class="ig-stock ig-stock--low">{{ qty }} left</span>
+                        {% else %}<span class="ig-stock ig-stock--in">{{ qty }} in stock</span>{% endif %}
+                    </header>
+
+                    <div class="ig-product-body">
                         <h3>{{ product.name }}</h3>
-                        <a href="{{ url_for('admin_catalogue', supplier=product.user_id) }}" class="ig-product-supplier">{{ product.supplier.company_name }}</a>
+                        <p class="ig-product-by">
+                            <a href="{{ url_for('admin_catalogue', supplier=product.user_id) }}">{{ supplier.company_name }}</a>
+                            {% if locations.get(product.user_id) %}<span class="ig-product-loc" title="{{ locations.get(product.user_id) }}">{{ ad.icon('pin') }}{{ locations.get(product.user_id) }}</span>{% endif %}
+                        </p>
+                        {% if product.description %}<p class="ig-product-desc">{{ product.description }}</p>{% endif %}
                     </div>
-                    {% if product.description %}<p class="ig-product-desc">{{ product.description }}</p>{% endif %}
-                    <dl class="ig-product-meta">
-                        <div><dt>Price</dt><dd><strong>{{ product.price|zar }}</strong> <span class="ig-muted">{{ product.unit }}</span></dd></div>
-                        <div><dt>Available</dt><dd>{% if product.quantity_available is none %}Not tracked{% elif product.quantity_available == 0 %}<span class="ig-doc-status ig-doc-status--pending">Out of stock</span>{% else %}{{ product.quantity_available }}{% endif %}</dd></div>
-                        <div><dt>Location</dt><dd>{{ locations.get(product.user_id) or '—' }}</dd></div>
-                        <div><dt>Lead time</dt><dd>{% if product.lead_time_days is not none %}{{ product.lead_time_days }} day{{ '' if product.lead_time_days == 1 else 's' }}{% else %}—{% endif %}</dd></div>
-                    </dl>
-                    {% set supplier = product.supplier %}
-                    <div class="ig-product-contact">
-                        <span>{{ supplier.contact_name }}</span>
-                        {% if supplier.phone %}<a href="tel:{{ supplier.phone|replace(' ', '') }}">{{ supplier.phone }}</a>{% endif %}
-                        <a href="mailto:{{ supplier.email }}?subject={{ ('Order: ' ~ product.name)|urlencode }}">{{ supplier.email }}</a>
+
+                    <div class="ig-product-price">
+                        <div><strong>{{ product.price|zar }}</strong><span>{{ product.unit }}</span></div>
+                        {% if product.lead_time_days is not none %}
+                            <span class="ig-product-lead" title="Lead time">{{ ad.icon('clock') }}{% if product.lead_time_days == 0 %}Same day{% else %}{{ product.lead_time_days }} day{{ '' if product.lead_time_days == 1 else 's' }}{% endif %}</span>
+                        {% endif %}
                     </div>
+
+                    <footer class="ig-product-foot">
+                        <span class="ig-product-contact" title="Supplier contact">{{ supplier.contact_name }}</span>
+                        <div class="ig-product-actions">
+                            {% if supplier.phone %}<a class="ig-product-action" href="tel:{{ supplier.phone|replace(' ', '') }}" title="Call {{ supplier.phone }}">{{ ad.icon('phone') }}<span>Call</span></a>{% endif %}
+                            <a class="ig-product-action ig-product-action--primary" href="mailto:{{ supplier.email }}?subject={{ ('Order: ' ~ product.name)|urlencode }}" title="Email {{ supplier.email }}">{{ ad.icon('mail') }}<span>Email</span></a>
+                        </div>
+                    </footer>
                 </article>
             {% endfor %}
         </section>
