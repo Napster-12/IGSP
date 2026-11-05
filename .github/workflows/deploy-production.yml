@@ -1,0 +1,63 @@
+# Deploy to production: manual only (Actions -> "Deploy to production" -> Run workflow, on main).
+# Deploy main to staging first (that happens on every push to main) and check it there.
+#
+# The job signs in to AWS with the role igsp-github-deploy-production (GitHub OIDC, no stored keys).
+# That role can do one thing: run the SSM document IGSP-DeployProduction on the production server, which
+# runs /usr/local/bin/igsp-deploy (database dump, pull origin/main, install deps, init-db, restart,
+# health check, automatic rollback on failure).
+
+name: Deploy to production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: af-south-1
+  DEPLOY_ROLE: arn:aws:iam::202533539363:role/igsp-github-deploy-production
+  PRODUCTION_INSTANCE: i-09f7163f4168f1af1
+  PRODUCTION_URL: https://igsp.icebolethu.co.za
+
+jobs:
+  deploy:
+    name: Deploy to production
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy through AWS Systems Manager
+        run: |
+          set -euo pipefail
+          id=$(aws ssm send-command \
+                 --document-name IGSP-DeployProduction \
+                 --instance-ids "$PRODUCTION_INSTANCE" \
+                 --comment "${GITHUB_REPOSITORY} ${GITHUB_SHA::7} by ${GITHUB_ACTOR}" \
+                 --query Command.CommandId --output text)
+          echo "SSM command: $id"
+          status=Pending
+          for i in $(seq 1 150); do
+            status=$(aws ssm get-command-invocation --command-id "$id" --instance-id "$PRODUCTION_INSTANCE" \
+                       --query Status --output text 2>/dev/null || echo Pending)
+            case "$status" in Success|Failed|Cancelled|TimedOut) break ;; esac
+            sleep 5
+          done
+          echo "Deploy status: $status"
+          aws ssm get-command-invocation --command-id "$id" --instance-id "$PRODUCTION_INSTANCE" \
+            --query '[StandardOutputContent, StandardErrorContent]' --output text
+          test "$status" = Success
+
+      - name: Check the live site
+        run: curl -sf --retry 3 "$PRODUCTION_URL/health"
