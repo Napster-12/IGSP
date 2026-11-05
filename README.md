@@ -74,3 +74,11 @@ Staging runs at https://igsp.staging.icebolethu.co.za (AWS af-south-1). Every pu
 2. **Deploy:** only if the check passes, and only from `main`. The workflow signs in to AWS through GitHub OIDC (no stored keys) and runs a fixed deploy script on the server. The script pulls `main`, installs dependencies, runs `init-db`, restarts, and checks `/health`. **If anything fails, it rolls back to the previous version automatically.**
 
 To deploy, merge to `main` and watch the run in the **Actions** tab. To redeploy without a code change, use **Run workflow** on the "Deploy to staging" workflow.
+
+## Production
+
+Production runs at https://igsp.icebolethu.co.za (AWS af-south-1), on its own server and database, separate from staging.
+
+- **Deploys are manual.** Check the change on staging first, then use **Run workflow** on the "Deploy to production" workflow ([`.github/workflows/deploy-production.yml`](.github/workflows/deploy-production.yml)) with `main` selected. The server dumps the database first, then deploys the same way as staging, rolling back automatically if anything fails.
+- **Admins sign in with Microsoft only**, like the other Icebolethu production systems (`ADMIN_MICROSOFT_ONLY=1`, Cognito pool `ice-production`). There is no password form or Cognito-login link. Give someone access by adding their Microsoft user in Cognito to one of the IGSP groups above. Their Microsoft user appears in Cognito after their first sign-in attempt, unless they already use another Icebolethu production system.
+- **Backups:** the database is dumped nightly at 01:30 and before every deploy, with 14 days kept on the server. The server's disk, including uploaded documents, is snapshotted daily, with 14 snapshots kept.

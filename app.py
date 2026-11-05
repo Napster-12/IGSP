@@ -125,6 +125,9 @@ COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID", "")
 COGNITO_CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET", "")
 COGNITO_MICROSOFT_PROVIDER = os.getenv("COGNITO_MICROSOFT_PROVIDER", "AzureAD")
 COGNITO_ENABLED = bool(COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID and COGNITO_CLIENT_SECRET)
+# Production is Microsoft-only, like the other Icebolethu production systems: ADMIN_MICROSOFT_ONLY=1 hides the
+# Cognito-login link and the password form, and refuses password sign-in.
+ADMIN_MICROSOFT_ONLY = COGNITO_ENABLED and env_flag("ADMIN_MICROSOFT_ONLY")
 
 if COGNITO_ENABLED:
     oauth.register(
@@ -1475,6 +1478,7 @@ def inject_globals():
     return {
         "MICROSOFT_CLIENT_ID": MICROSOFT_CLIENT_ID,
         "COGNITO_ENABLED": COGNITO_ENABLED,
+        "ADMIN_MICROSOFT_ONLY": ADMIN_MICROSOFT_ONLY,
         "SUPPLIER_CATEGORIES": cats,
         "CATEGORY_SECTIONS": get_category_sections(),
         "PROVINCES": PROVINCES,
@@ -2816,6 +2820,8 @@ def admin_login():
         return redirect(url_for(get_current_admin().home_endpoint))
 
     if request.method == "POST":
+        if ADMIN_MICROSOFT_ONLY:
+            return render_template("admin_login.html", step="options", login_error="Please sign in with Microsoft.")
         email = normalize_email(request.form.get("email"))
         password = request.form.get("password", "")
         limiter_key = ("admin-login", client_ip(), email)
@@ -2894,7 +2900,8 @@ def admin_login_cognito():
     if not COGNITO_ENABLED:
         flash("Icebolethu sign-in is not configured.", "error")
         return redirect(url_for("admin_login_options"))
-    extra = {"identity_provider": COGNITO_MICROSOFT_PROVIDER} if request.args.get("provider") == "microsoft" else {}
+    microsoft = ADMIN_MICROSOFT_ONLY or request.args.get("provider") == "microsoft"
+    extra = {"identity_provider": COGNITO_MICROSOFT_PROVIDER} if microsoft else {}
     return oauth.cognito.authorize_redirect(url_for("admin_login_cognito_callback", _external=True), **extra)
 
 
