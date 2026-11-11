@@ -2,10 +2,10 @@
 {% import "form_macros.html" as f with context %}
 {% import "admin_macros.html" as ad with context %}
 
-{% macro field(label, value, wide=false) -%}
+{% macro field(label, value, wide=false, link=false) -%}
     <div class="rv-field{% if wide %} rv-field-wide{% endif %}">
         <dt>{{ label }}</dt>
-        <dd>{% if value %}{{ value }}{% else %}<span class="rv-empty">Not provided</span>{% endif %}</dd>
+        <dd>{% if value and link %}<a href="{{ value if value.lower().startswith(('http://', 'https://')) else 'https://' ~ value }}" target="_blank" rel="noopener noreferrer">{{ value }}</a>{% elif value %}{{ value }}{% else %}<span class="rv-empty">Not provided</span>{% endif %}</dd>
     </div>
 {%- endmacro %}
 
@@ -33,7 +33,7 @@
                     {{ field('Business Registration Number', draft.business_registration_number) }}
                     {{ field('VAT Number', draft.vat_number) }}
                     {{ field('Tax Number', draft.tax_number) }}
-                    {{ field('Website', draft.website, wide=true) }}
+                    {{ field('Website', draft.website, wide=true, link=true) }}
                 </dl>
             </section>
 
