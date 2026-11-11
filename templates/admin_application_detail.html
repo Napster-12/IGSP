@@ -2,10 +2,10 @@
 {% import "admin_macros.html" as ad with context %}
 {% import "form_macros.html" as f with context %}
 
-{% macro field(label, value, wide=false, mono=false) -%}
+{% macro field(label, value, wide=false, mono=false, link=false) -%}
     <div class="ig-field{% if wide %} ig-field--wide{% endif %}">
         <dt>{{ label }}</dt>
-        <dd{% if mono %} class="ig-mono"{% endif %}>{% if value %}{{ value }}{% else %}<span class="ig-muted">—</span>{% endif %}</dd>
+        <dd{% if mono %} class="ig-mono"{% endif %}>{% if value and link %}<a href="{{ value if value.lower().startswith(('http://', 'https://')) else 'https://' ~ value }}" target="_blank" rel="noopener noreferrer">{{ value }}</a>{% elif value %}{{ value }}{% else %}<span class="ig-muted">—</span>{% endif %}</dd>
     </div>
 {%- endmacro %}
 
@@ -38,7 +38,7 @@
                     {{ field('Registration number', application.business_registration_number, mono=true) }}
                     {{ field('VAT number', application.vat_number, mono=true) }}
                     {{ field('Tax number', application.tax_number, mono=true) }}
-                    {{ field('Website', application.website, wide=true) }}
+                    {{ field('Website', application.website, wide=true, link=true) }}
                 </dl>
             </section>
 
