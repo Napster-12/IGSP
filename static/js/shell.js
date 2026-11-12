@@ -61,4 +61,36 @@
         });
         table.classList.add('ig-table--stack');
     });
+
+    // Settings > Appearance: switch light/dark straight away and save it to the account in the background.
+    var themeForm = document.querySelector('[data-theme-form]');
+    if (themeForm) {
+        var themeStatus = themeForm.querySelector('[data-theme-status]');
+        var savedTheme = document.documentElement.getAttribute('data-theme') || 'light';
+        themeForm.addEventListener('change', function (e) {
+            if (e.target.name !== 'theme') { return; }
+            var theme = e.target.value;
+            var labelEl = e.target.closest('label');
+            var label = labelEl ? labelEl.textContent.trim() : '';
+            document.documentElement.setAttribute('data-theme', theme);
+            themeForm.querySelectorAll('.ig-theme-option').forEach(function (opt) {
+                opt.classList.toggle('is-checked', !!opt.querySelector('input:checked'));
+            });
+            themeStatus.textContent = 'Saving…';
+            fetch(themeForm.action, { method: 'POST', body: new FormData(themeForm), credentials: 'same-origin',
+                                      headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.json().then(function (data) { if (!r.ok || !data.ok) { throw data; } }); })
+                .then(function () { savedTheme = theme; themeStatus.textContent = label + ' is on.'; })
+                .catch(function () {
+                    // Put the page back the way it was saved so it doesn't look switched when it isn't.
+                    document.documentElement.setAttribute('data-theme', savedTheme);
+                    var previous = themeForm.querySelector('input[name="theme"][value="' + savedTheme + '"]');
+                    if (previous) { previous.checked = true; }
+                    themeForm.querySelectorAll('.ig-theme-option').forEach(function (opt) {
+                        opt.classList.toggle('is-checked', !!opt.querySelector('input:checked'));
+                    });
+                    themeStatus.textContent = "Couldn't save your choice. Please refresh the page and try again.";
+                });
+        });
+    }
 })();

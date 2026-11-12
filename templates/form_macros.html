@@ -66,12 +66,12 @@
                     Uploaded: {{ doc.original_filename }} ·
                     <a href="{{ url_for('serve_upload', filepath=doc.file_path|replace('\\', '/')) }}" target="_blank" rel="noopener" class="ig-link">View</a>
                 {% else %}
-                    {{ 'Not uploaded yet' }}
+                    Not uploaded yet · PDF, up to {{ MAX_FILE_MB }} MB
                 {% endif %}
             </span>
         </div>
         <label class="ig-btn ig-btn--ghost ig-btn--sm ig-slot-btn" for="{{ field }}">{{ ad.icon('upload') }} {{ 'Replace' if doc else 'Choose PDF' }}</label>
-        <input type="file" id="{{ field }}" name="{{ field }}" accept="application/pdf,.pdf" class="ig-sr" data-file-input>
+        <input type="file" id="{{ field }}" name="{{ field }}" accept="application/pdf,.pdf" class="ig-sr" data-file-input data-max-mb="{{ MAX_FILE_MB }}">
         {#- On the renewal page the dates start empty and become required once a file is chosen. -#}
         {% if title in DATED_DOCUMENTS %}{{ document_dates(field, doc, required=doc is not none and not renewal, prefill=not renewal) }}{% endif %}
     </div>

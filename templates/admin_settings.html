@@ -1,0 +1,20 @@
+{% extends "admin_base.html" %}
+
+{% block title %}Settings{% endblock %}
+{% block page_title %}Settings{% endblock %}
+{% block page_subtitle %}Manage how the portal looks for your account{% endblock %}
+
+{% block content %}
+    <div class="ig-grid ig-grid--2">
+        {% with theme_url=url_for('update_admin_theme') %}{% include "_theme_settings.html" %}{% endwith %}
+
+        <section class="ig-card">
+            <div class="ig-card-head"><h2>Your account</h2></div>
+            <dl class="ig-fields ig-fields--1">
+                <div class="ig-field"><dt>Name</dt><dd>{{ admin.name or '—' }}</dd></div>
+                <div class="ig-field"><dt>Email</dt><dd>{{ admin.email }}</dd></div>
+                <div class="ig-field"><dt>Role</dt><dd>{{ admin.role_label }}</dd></div>
+            </dl>
+        </section>
+    </div>
+{% endblock %}

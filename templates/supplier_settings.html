@@ -2,7 +2,7 @@
 
 {% block title %}Settings{% endblock %}
 {% block page_title %}Settings{% endblock %}
-{% block page_subtitle %}Manage your account details and password{% endblock %}
+{% block page_subtitle %}Manage your account details, password and appearance{% endblock %}
 
 {% block content %}
     <div class="ig-grid ig-grid--2">
@@ -43,6 +43,8 @@
         </section>
 
         <div class="ig-stack">
+            {% with theme_url=url_for('update_supplier_theme') %}{% include "_theme_settings.html" %}{% endwith %}
+
             <section class="ig-card">
                 <div class="ig-card-head">
                     <div><h2>Change password</h2><p>At least 8 characters, including a number and a special character</p></div>

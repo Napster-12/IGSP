@@ -1,0 +1,28 @@
+{#- Appearance card for the supplier and admin Settings pages. Pass `theme_url` (the POST endpoint). -#}
+<section class="ig-card">
+    <div class="ig-card-head">
+        <div><h2>Appearance</h2><p>Choose how the portal looks for your account</p></div>
+    </div>
+    <form class="ig-form" method="post" action="{{ theme_url }}" data-theme-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <fieldset class="ig-theme-options">
+            <legend class="visually-hidden">Colour mode</legend>
+            {% for value, label in THEMES.items() %}
+                <label class="ig-theme-option{% if ui_theme == value %} is-checked{% endif %}">
+                    <input type="radio" name="theme" value="{{ value }}" {% if ui_theme == value %}checked{% endif %}>
+                    <span class="ig-theme-preview ig-theme-preview--{{ value }}" aria-hidden="true">
+                        <span class="ig-theme-preview-side"></span>
+                        <span class="ig-theme-preview-main">
+                            <span class="ig-theme-preview-bar"></span>
+                            <span class="ig-theme-preview-card"></span>
+                            <span class="ig-theme-preview-card ig-theme-preview-card--short"></span>
+                        </span>
+                    </span>
+                    <span class="ig-theme-label">{{ label }} mode</span>
+                </label>
+            {% endfor %}
+        </fieldset>
+        <p class="ig-theme-status" role="status" data-theme-status></p>
+        <noscript><div class="ig-form-actions"><button type="submit" class="ig-btn ig-btn--primary">Save appearance</button></div></noscript>
+    </form>
+</section>
