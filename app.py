@@ -156,7 +156,7 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 
 # Supplier registration certificate, issued on approval. A signature image, if wanted, goes in
 # static/images/certificate_signature.png (transparent PNG).
-CERTIFICATE_SIGNATORY_NAME = os.getenv("CERTIFICATE_SIGNATORY_NAME", "")
+CERTIFICATE_SIGNATORY_NAME = os.getenv("CERTIFICATE_SIGNATORY_NAME", "Nqobile Khumalo")
 CERTIFICATE_SIGNATORY_TITLE = os.getenv("CERTIFICATE_SIGNATORY_TITLE", "Chief Financial Officer")
 CERTIFICATE_FOOTER = os.getenv(
     "CERTIFICATE_FOOTER", "Icebolethu Group · Call Centre 031 208 9102 · supplier_onboarding@icebolethu.co.za")
