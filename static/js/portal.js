@@ -30,7 +30,19 @@
         var slot = input.closest('.ig-slot');
         var label = slot && slot.querySelector('[data-file-name]');
         if (!label || !input.files || !input.files[0]) { return; }
-        label.textContent = 'Selected: ' + input.files[0].name + ' (uploads when you continue)';
+        var file = input.files[0];
+        var maxMb = parseFloat(input.getAttribute('data-max-mb'));
+        if (maxMb && file.size > maxMb * 1024 * 1024) {
+            // Too big: clear the choice now rather than failing after the whole form uploads.
+            input.value = '';
+            label.textContent = file.name + ' is ' + (file.size / (1024 * 1024)).toFixed(1) + ' MB. '
+                + 'Each file can be up to ' + maxMb + ' MB. Please choose a smaller PDF.';
+            slot.classList.remove('is-selected');
+            slot.classList.add('is-too-large');
+            return;
+        }
+        slot.classList.remove('is-too-large');
+        label.textContent = 'Selected: ' + file.name + ' (uploads when you continue)';
         slot.classList.add('is-selected');
         // A certificate that has been chosen needs its issue and expiry dates.
         slot.querySelectorAll('[data-document-dates] input').forEach(function (date) { date.required = true; });

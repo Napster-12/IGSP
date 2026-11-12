@@ -90,6 +90,7 @@ app.config.update(
     SQLALCHEMY_DATABASE_URI=DATABASE_URL,
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
     SQLALCHEMY_ENGINE_OPTIONS={"pool_pre_ping": True, "pool_recycle": 280},
+    # Whole request (a form can carry several PDFs); each file is also capped at MAX_FILE_MB, see validate_pdf.
     MAX_CONTENT_LENGTH=int(os.getenv("MAX_UPLOAD_MB", "25")) * 1024 * 1024,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
@@ -638,6 +639,8 @@ class User(DB.Model):
     terms_accepted_at = DB.Column(DB.DateTime, nullable=True)
     # Matches the session of the one browser signed in to this account (see start_session).
     session_token = DB.Column(DB.String(64), nullable=True)
+    # Colour scheme picked in Settings: "light" or "dark" (see THEMES).
+    theme = DB.Column(DB.String(10), nullable=False, default="light")
     created_at = DB.Column(DB.DateTime, default=utcnow)
 
     def set_password(self, password):
@@ -685,6 +688,8 @@ ROLE_SECTIONS = {
     # Everything except the dashboard, plus the ICT tools (user audit, email templates, deleting records).
     "ict": {"applications", "suppliers", "catalogue", "reports", "ict"},
 }
+# Colour schemes a signed-in supplier or admin can pick in Settings.
+THEMES = {"light": "Light", "dark": "Dark"}
 # Roles that can do what a Procurement Team Lead can (assign applications to others).
 FULL_ACCESS_ROLES = {"super", "ict"}
 # Roles that receive application notifications (ICT can open applications but isn't part of the review workflow).
@@ -725,6 +730,8 @@ class Admin(DB.Model):
     role = DB.Column(DB.String(20), nullable=False, default="super")
     # Matches the session of the one browser signed in to this account (see start_session).
     session_token = DB.Column(DB.String(64), nullable=True)
+    # Colour scheme picked in Settings: "light" or "dark" (see THEMES).
+    theme = DB.Column(DB.String(10), nullable=False, default="light")
     created_at = DB.Column(DB.DateTime, default=utcnow)
 
     @property
@@ -1466,11 +1473,14 @@ def inject_globals():
 
     unread = 0
     supplier_application = None
+    ui_theme = "light"
     if g.get("is_admin_view") and g.get("admin"):
         unread = Notification.query.filter_by(admin_id=g.admin.id, is_read=False).count()
+        ui_theme = g.admin.theme
     elif g.get("user"):
         unread = Notification.query.filter_by(user_id=g.user.id, is_read=False).count()
         supplier_application = get_user_application(g.user)
+        ui_theme = g.user.theme
 
     return {
         "MICROSOFT_CLIENT_ID": MICROSOFT_CLIENT_ID,
@@ -1485,6 +1495,9 @@ def inject_globals():
         "csrf_token": csrf_token,
         "status_label": status_label,
         "unread_notifications": unread,
+        "ui_theme": ui_theme if ui_theme in THEMES else "light",
+        "MAX_FILE_MB": MAX_FILE_MB,
+        "THEMES": THEMES,
         "supplier_application": supplier_application,
         "PRODUCT_UNITS": PRODUCT_UNITS,
         "EDITABLE_STATUSES": EDITABLE_STATUSES,
@@ -1504,14 +1517,25 @@ class UploadError(ValueError):
     pass
 
 
+# Largest single PDF a supplier or admin can upload.
+MAX_FILE_MB = int(os.getenv("MAX_FILE_MB", "5"))
+MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
+
+
 def validate_pdf(file_storage):
-    """Raise UploadError unless the upload is a non-empty PDF (by extension and content)."""
+    """Raise UploadError unless the upload is a non-empty PDF (by extension and content) of at most MAX_FILE_MB."""
     if not file_storage.filename.lower().endswith(".pdf"):
         raise UploadError(f"'{file_storage.filename}' is not a PDF. Only PDF files are allowed.")
     head = file_storage.stream.read(5)
     file_storage.stream.seek(0)
     if head != b"%PDF-":
         raise UploadError(f"'{file_storage.filename}' does not appear to be a valid PDF file.")
+    file_storage.stream.seek(0, os.SEEK_END)
+    size = file_storage.stream.tell()
+    file_storage.stream.seek(0)
+    if size > MAX_FILE_BYTES:
+        raise UploadError(f"'{file_storage.filename}' is {size / (1024 * 1024):.1f} MB. "
+                          f"Each file can be up to {MAX_FILE_MB} MB.")
 
 
 def collect_uploads(files, slots=None):
@@ -2551,6 +2575,28 @@ def change_password():
     return redirect(url_for("supplier_settings"))
 
 
+def save_theme(account):
+    """Store the colour scheme posted from a Settings page. JSON for the instant toggle, a redirect otherwise."""
+    theme = request.form.get("theme", "")
+    if theme not in THEMES:
+        if request.accept_mimetypes.best == "application/json":
+            return jsonify(ok=False, error="Unknown theme."), 400
+        flash("Please choose light or dark mode.", "error")
+        return None
+    account.theme = theme
+    DB.session.commit()
+    if request.accept_mimetypes.best == "application/json":
+        return jsonify(ok=True, theme=theme)
+    flash(f"{THEMES[theme]} mode is on.", "success")
+    return None
+
+
+@app.route("/settings/theme", methods=["POST"])
+@login_required
+def update_supplier_theme():
+    return save_theme(get_current_user()) or redirect(url_for("supplier_settings"))
+
+
 @app.route("/settings/contact", methods=["POST"])
 @login_required
 def update_contact_details():
@@ -2943,6 +2989,18 @@ def admin_login_cognito_callback():
     DB.session.commit()
     flash(f"Welcome, {admin.name or admin.email}", "success")
     return redirect(url_for(admin.home_endpoint))
+
+
+@app.route("/admin/settings")
+@admin_required
+def admin_settings():
+    return render_template("admin_settings.html", admin=get_current_admin())
+
+
+@app.route("/admin/settings/theme", methods=["POST"])
+@admin_required
+def update_admin_theme():
+    return save_theme(get_current_admin()) or redirect(url_for("admin_settings"))
 
 
 @app.route("/admin/logout")
@@ -5116,7 +5174,8 @@ def supplier_certificates():
 
 @app.errorhandler(413)
 def file_too_large(_error):
-    flash(f"That upload is too large. The maximum size is {app.config['MAX_CONTENT_LENGTH'] // (1024 * 1024)} MB.", "error")
+    flash(f"That upload is too large. Each file can be up to {MAX_FILE_MB} MB, and everything sent at once "
+          f"up to {app.config['MAX_CONTENT_LENGTH'] // (1024 * 1024)} MB. Try uploading fewer files at a time.", "error")
     return redirect(safe_next_url(urlparse(request.referrer or "").path, url_for("home")))
 
 
@@ -5186,12 +5245,14 @@ def migrate_mysql_schema():
         "terms_version": "VARCHAR(20) NULL",
         "terms_accepted_at": "DATETIME NULL",
         "session_token": "VARCHAR(64) NULL",
+        "theme": "VARCHAR(10) NOT NULL DEFAULT 'light'",
     })
     name_col = _columns("users").get("name")
     if name_col is not None and name_col[4] is None:
         DB.session.execute(text("ALTER TABLE users MODIFY COLUMN name VARCHAR(100) NOT NULL DEFAULT ''"))
 
-    _add_missing_columns("admins", {"role": "VARCHAR(20) NOT NULL DEFAULT 'super'", "session_token": "VARCHAR(64) NULL"})
+    _add_missing_columns("admins", {"role": "VARCHAR(20) NOT NULL DEFAULT 'super'", "session_token": "VARCHAR(64) NULL",
+                                    "theme": "VARCHAR(10) NOT NULL DEFAULT 'light'"})
 
     _add_missing_columns("supplier_applications", {
         "assigned_admin_id": "INT NULL",

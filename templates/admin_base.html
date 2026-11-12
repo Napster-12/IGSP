@@ -10,7 +10,7 @@
     ('ict', 'admin_email_templates', 'Email templates', 'mail', ['admin_email_templates', 'admin_email_template_edit']),
 ] %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="{{ ui_theme }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -49,6 +49,11 @@
                             <span>{{ label }}</span>
                         </a>
                     {% endfor %}
+                    <a href="{{ url_for('admin_settings') }}" class="ig-nav-link{% if request.endpoint == 'admin_settings' %} is-active{% endif %}"
+                       {% if request.endpoint == 'admin_settings' %}aria-current="page"{% endif %}>
+                        {{ ad.icon('settings') }}
+                        <span>Settings</span>
+                    </a>
                 </nav>
 
                 <div class="ig-account">
