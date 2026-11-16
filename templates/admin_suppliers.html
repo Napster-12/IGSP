@@ -17,6 +17,7 @@
         'submitted': 'M22 2 11 13M22 2l-7 20-4-9-9-4z',
         'pending_review': 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',
         'under_review': 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35',
+        'pending_approval': 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4',
         'approved': 'M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4 12 14.01l-3-3',
         'on_file': 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2zM9 14l2 2 4-4',
         'declined': 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM15 9l-6 6M9 9l6 6',
@@ -69,7 +70,7 @@
                                 </td>
                                 <td>
                                     {{ supplier.contact_name }}
-                                    <span class="ig-cell-sub">{{ supplier.email }}</span>
+                                    <span class="ig-cell-sub"><a href="mailto:{{ supplier.email }}">{{ supplier.email }}</a></span>
                                 </td>
                                 <td class="ig-nowrap">{{ supplier.phone }}</td>
                                 <td>

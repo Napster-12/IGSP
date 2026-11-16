@@ -173,6 +173,7 @@ SUPPLIER_CATEGORIES = [
     {"value": "Catering", "label": "Catering", "specify": False, "group": "SERVICES"},
     {"value": "Body Storage, Cold-Room and other Burial Services", "label": "Body Storage, Cold-Room and other Burial Services", "specify": False, "group": "SERVICES"},
     {"value": "Consulting", "label": "Consulting", "specify": False, "group": "SERVICES"},
+    {"value": "Facilities", "label": "Facilities, please specify:", "specify": True, "group": "SERVICES"},
     {"value": "Other", "label": "Other, please specify:", "specify": True, "group": "SERVICES"},
     {"value": "Caskets and Tombstones", "label": "Caskets and Tombstones", "specify": False, "group": "GOODS"},
     {"value": "Livestock", "label": "Livestock", "specify": False, "group": "GOODS"},
@@ -236,7 +237,7 @@ UPLOAD_SLOTS = {f"document_file_{i}": doc for i, doc in enumerate(REQUIRED_DOCUM
 UPLOAD_SLOTS["document_file_other"] = OTHER_DOCS
 UPLOAD_SLOTS["document_file_company_profile"] = COMPANY_PROFILE_DOC
 
-STATUSES = ["draft", "submitted", "pending_review", "under_review", "approved", "on_file", "declined", "returned_for_update"]
+STATUSES = ["draft", "submitted", "pending_review", "under_review", "pending_approval", "approved", "on_file", "declined", "returned_for_update"]
 DOCUMENT_STATUSES = ["pending", "complete"]
 EDITABLE_STATUSES = {"draft", "submitted", "pending_review", "under_review", "returned_for_update", "declined"}
 
@@ -695,6 +696,8 @@ ROLE_SECTIONS = {
 THEMES = {"light": "Light", "dark": "Dark"}
 # Roles that can do what a Procurement Team Lead can (assign applications to others).
 FULL_ACCESS_ROLES = {"super", "ict"}
+# Only a Procurement Team Lead gives the final approval (and enters the vendor code); officers recommend.
+FINAL_APPROVER_ROLES = {"super"}
 # Roles that receive application notifications (ICT can open applications but isn't part of the review workflow).
 NOTIFIED_ROLES = ["super", "applications"]
 # The Cognito group that grants each role, highest first: someone in more than one group gets the first match.
@@ -744,6 +747,10 @@ class Admin(DB.Model):
     @property
     def has_full_access(self):
         return self.role in FULL_ACCESS_ROLES
+
+    @property
+    def can_final_approve(self):
+        return self.role in FINAL_APPROVER_ROLES
 
     def can(self, section):
         return section in ROLE_SECTIONS.get(self.role, set())
@@ -1070,6 +1077,20 @@ def notify_admins(title, message, application=None):
             action_url=action_url,
             action_label="Open application" if action_url else None,
         )
+
+
+def notify_final_approvers(application, recommended_by):
+    """Tell the Procurement Team Leads an application is waiting for their final approval."""
+    title = "Application waiting for final approval"
+    message = (f"{recommended_by.name or recommended_by.email} submitted {application.company_name} for final approval. "
+               "Open the application to approve it and enter the vendor code.")
+    for admin in Admin.query.filter(Admin.role.in_(FINAL_APPROVER_ROLES)):
+        DB.session.add(Notification(admin_id=admin.id, title=title, message=message,
+                                    related_application_id=application.id))
+        send_notification_email(admin.email, title, message, recipient_name=admin.name or "Admin",
+                                application=application,
+                                action_url=url_for("admin_application_detail", application_id=application.id, _external=True),
+                                action_label="Open application")
 
 
 # ---------------------------------------------------------------------------
@@ -3220,9 +3241,17 @@ def is_assigned_to_me(application):
     return bool(admin and application.assigned_admin_id == admin.id)
 
 
-def assigned_application_or_redirect(application_id):
+def can_give_final_approval(application, admin=None):
+    """A Procurement Team Lead can decide an application waiting for final approval, whoever it's assigned to."""
+    admin = admin or get_current_admin()
+    return bool(admin and admin.can_final_approve and application.status == "pending_approval")
+
+
+def assigned_application_or_redirect(application_id, allow_final_approver=False):
     """Load an application for an action that only its assigned admin may take."""
     application = DB.get_or_404(SupplierApplication, application_id)
+    if allow_final_approver and can_give_final_approval(application):
+        return application, None
     if not is_assigned_to_me(application):
         owner = application.assigned_admin
         if owner:
@@ -3333,6 +3362,7 @@ def admin_application_detail(application_id):
         missing_documents=missing_required_documents(documents),
         statuses=STATUSES,
         is_mine=is_assigned_to_me(application),
+        can_decide=is_assigned_to_me(application) or can_give_final_approval(application),
         director_flags=director_matches([application]).get(application.id, []),
         history_count=len(application_history(application)),
         assignable_admins=application_admins() if get_current_admin().has_full_access else [],
@@ -3400,9 +3430,10 @@ def admin_application_history_export(application_id):
 @admin_required
 @admin_section("applications")
 def update_application(application_id):
-    application, blocked = assigned_application_or_redirect(application_id)
+    application, blocked = assigned_application_or_redirect(application_id, allow_final_approver=True)
     if blocked:
         return blocked
+    me = get_current_admin()
     old_status = application.status
     old_comments = (application.review_comments or "").strip()
 
@@ -3417,6 +3448,11 @@ def update_application(application_id):
     if new_status in {"declined", "returned_for_update"} and not request.form.get("review_comments", "").strip():
         flash("Please add a comment explaining to the supplier why the application is "
               f"{'declined' if new_status == 'declined' else 'being returned'}.", "error")
+        return redirect(url_for("admin_application_detail", application_id=application.id))
+
+    # Officers recommend; only a Procurement Team Lead gives the final approval.
+    if new_status == "approved" and old_status != "approved" and not me.can_final_approve:
+        flash("Only a Procurement Team Lead can give the final approval. Submit it for final approval instead.", "error")
         return redirect(url_for("admin_application_detail", application_id=application.id))
 
     supplier = get_application_supplier(application)
@@ -3457,9 +3493,22 @@ def update_application(application_id):
         log_event(application, "review_updated", summary=", ".join(c["field"] for c in changes) + " updated",
                   changes=changes)
 
+    if new_status == "pending_approval" and old_status != "pending_approval":
+        notify_final_approvers(application, me)
+    owner = application.assigned_admin
+    if old_status == "pending_approval" and old_status != new_status and owner and owner.id != me.id:
+        title = f"Final approval: {status_label(new_status)}"
+        message = f"{me.name or me.email} changed {application.company_name} from Pending Approval to {status_label(new_status)}."
+        DB.session.add(Notification(admin_id=owner.id, title=title, message=message, related_application_id=application.id))
+        send_notification_email(owner.email, title, message, recipient_name=owner.name or "Admin", application=application,
+                                action_url=url_for("admin_application_detail", application_id=application.id, _external=True),
+                                action_label="Open application")
+
     if supplier:
         if old_status != application.status:
-            if application.status == "on_file":
+            if application.status == "pending_approval":
+                pass  # an internal step: the supplier hears about the final decision
+            elif application.status == "on_file":
                 notify_supplier(supplier, *email_text("application_on_file", company_name=application.company_name),
                                 application)
             elif application.status != "approved":  # approval sends the welcome email below instead
@@ -4021,7 +4070,7 @@ def day_buckets(days_list, edges=((0, 2, "0–2 days"), (3, 7, "3–7 days"), (8
     return list(counts), [float(v) for v in counts.values()]
 
 
-OPEN_STATUSES = ["submitted", "pending_review", "under_review", "returned_for_update"]
+OPEN_STATUSES = ["submitted", "pending_review", "under_review", "pending_approval", "returned_for_update"]
 DECISION_STATUSES = {"approved", "declined", "on_file", "returned_for_update"}
 
 
@@ -4919,7 +4968,7 @@ def admin_delete_director(application_id, director_id):
 # ---------------------------------------------------------------------------
 
 # Applications whose certificates we watch (not drafts, and not declined ones).
-EXPIRY_WATCHED_STATUSES = {"submitted", "pending_review", "under_review", "returned_for_update", "approved", "on_file"}
+EXPIRY_WATCHED_STATUSES = {"submitted", "pending_review", "under_review", "pending_approval", "returned_for_update", "approved", "on_file"}
 _NOTICE_RANK = {"": 0, **{str(days): i for i, days in enumerate(EXPIRY_REMINDER_DAYS, start=1)},
                 "expired": len(EXPIRY_REMINDER_DAYS) + 1}
 
@@ -5404,6 +5453,7 @@ def _answer_my_status(user):
         "submitted": "It's waiting for the procurement team to review it. You'll be notified when the status changes.",
         "pending_review": "It's waiting for the procurement team to review it. You'll be notified when the status changes.",
         "under_review": "The procurement team is reviewing it now. You'll be notified when there's a decision.",
+        "pending_approval": "The procurement team has reviewed it and it's waiting for final approval. You'll be notified when there's a decision.",
         "returned_for_update": f"Please fix what the comments ask for, then save and resubmit at /applications/{application.id}/edit.",
         "approved": "Congratulations, you're an approved supplier. Keep your certificates up to date and list your products at /inventory.",
         "on_file": "Your documents and information are in order. We'll keep your details on file and contact you when your services are needed.",
@@ -5450,7 +5500,7 @@ def _answer_my_account(user):
     if application and application.expiry_suspended:
         return ("Your account is **inactive** because a certificate expired. Upload the renewed certificate at "
                 "/certificates and your account will be reactivated automatically.")
-    if application and application.status in {"submitted", "pending_review", "under_review", "returned_for_update"}:
+    if application and application.status in {"submitted", "pending_review", "under_review", "pending_approval", "returned_for_update"}:
         return "Your account becomes active once your application is approved. " + _answer_my_status(user)
     if not application:
         return "Your account becomes active once your application is approved. Start your application at /onboarding/profile."
@@ -5537,6 +5587,7 @@ CATEGORY_WORDS = {
     "Catering": ["catering", "caterer", "caterers", "food", "meals"],
     "Body Storage, Cold-Room and other Burial Services": ["body storage", "cold room", "coldroom", "mortuary", "burial services"],
     "Consulting": ["consulting", "consultant", "consultants", "consultancy"],
+    "Facilities": ["facilities", "facility", "facilities management", "venue", "venues"],
     "Caskets and Tombstones": ["casket", "caskets", "coffin", "coffins", "tombstone", "tombstones"],
     "Livestock": ["livestock", "cattle", "cows", "goats", "sheep"],
     "Flowers, crosses and plaques": ["flowers", "florist", "crosses", "plaques", "wreath", "wreaths"],
@@ -5738,6 +5789,7 @@ SUPPLIER_INTENTS = [
            "What the statuses mean:\n"
            "- **Pending review**: waiting for the procurement team.\n"
            "- **Under review**: being reviewed now.\n"
+           "- **Pending approval**: reviewed and waiting for final approval.\n"
            "- **Returned for update**: fix what the comments ask for and resubmit.\n"
            "- **Approved**: you're a registered supplier, your account is active.\n"
            "- **On file**: everything is in order; we'll contact you when your services are needed.\n"
@@ -6020,7 +6072,9 @@ ADMIN_INTENTS = [
     Intent("decide", ["approve", "decline", "return", "on file", "decision", "review an application", "reject",
                       "comment", "comments", "under review"],
            "On an application assigned to you, use the **Review decision** panel:\n"
-           "- **Approve**: activates the supplier account and issues their registration certificate.\n"
+           "- **Submit for final approval** (Procurement Officers): sends it to the Procurement Team Lead.\n"
+           "- **Approve** (Procurement Team Lead only): asks for the vendor code, activates the supplier account and "
+           "issues their registration certificate. A Team Lead can approve any application that's Pending approval.\n"
            "- **Accept & keep on file**: everything is in order but the services aren't needed yet.\n"
            "- **Mark under review**, **Return to supplier** (needs a comment) or **Decline** (needs a comment).\n"
            "The supplier is emailed about every change, and it's all recorded in the History.", section="applications"),
@@ -6064,7 +6118,7 @@ ADMIN_INTENTS = [
            "application removes its documents and history and can't be undone.", section="ict"),
     Intent("roles", ["roles", "role", "permissions", "access", "what can i do", "team lead", "officer", "manager", "ict"],
            "Admin roles:\n"
-           "- **Procurement Team Lead**: everything, and assigns applications to officers.\n"
+           "- **Procurement Team Lead**: everything, assigns applications to officers and gives the final approval.\n"
            "- **Procurement Officer**: applications and suppliers.\n"
            "- **Procurement Manager**: reports only.\n"
            "- **ICT Admin**: everything except the dashboard, plus user audit, email templates and deleting records."),
@@ -6161,7 +6215,8 @@ ADMIN_INTENTS = [
                            "why cant i", "not allowed", "no decision panel"],
            "You can only record a decision on an application assigned to you. If it's assigned to you and only "
            "**Decline** works, the application has a director match. If the page isn't open to you at all, your role "
-           "doesn't include applications.", section="applications"),
+           "doesn't include applications. Only a Procurement Team Lead can give the final approval: officers "
+           "use **Submit for final approval**.", section="applications"),
     Intent("save_comments", ["save comments", "comment only", "add a comment", "without changing status", "note"],
            "Type in **Comments to supplier** and click **Save comments only** to keep the status as it is. The "
            "supplier is notified of new comments, so only write what they should see.", section="applications"),
@@ -6172,7 +6227,8 @@ ADMIN_INTENTS = [
                                "what does pending review", "pending review", "under review", "submitted status", "what does pending mean",
                                "status meaning", "statuses"],
            "Statuses:\n- **Pending review**: submitted and waiting for an admin\n- **Under review**: an admin is "
-           "working on it\n- **Returned for update**: sent back to the supplier with comments\n- **Approved**: "
+           "working on it\n- **Pending approval**: reviewed by an officer, waiting for the Procurement Team Lead's "
+           "final approval\n- **Returned for update**: sent back to the supplier with comments\n- **Approved**: "
            "registered supplier, account active\n- **On file**: in order but not needed yet\n- **Declined**: not "
            "successful; the supplier may edit and resubmit"),
     Intent("someone_elses", ["assigned to someone else", "someone else has it", "colleague is away", "on leave",

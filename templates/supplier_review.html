@@ -2,10 +2,10 @@
 {% import "form_macros.html" as f with context %}
 {% import "admin_macros.html" as ad with context %}
 
-{% macro field(label, value, wide=false, link=false) -%}
+{% macro field(label, value, wide=false, link=false, email=false) -%}
     <div class="rv-field{% if wide %} rv-field-wide{% endif %}">
         <dt>{{ label }}</dt>
-        <dd>{% if value and link %}<a href="{{ value if value.lower().startswith(('http://', 'https://')) else 'https://' ~ value }}" target="_blank" rel="noopener noreferrer">{{ value }}</a>{% elif value %}{{ value }}{% else %}<span class="rv-empty">Not provided</span>{% endif %}</dd>
+        <dd>{% if value and email %}<a href="mailto:{{ value }}">{{ value }}</a>{% elif value and link %}<a href="{{ value if value.lower().startswith(('http://', 'https://')) else 'https://' ~ value }}" target="_blank" rel="noopener noreferrer">{{ value }}</a>{% elif value %}{{ value }}{% else %}<span class="rv-empty">Not provided</span>{% endif %}</dd>
     </div>
 {%- endmacro %}
 
@@ -53,9 +53,9 @@
                     {{ field('Primary Contact Person', draft.primary_contact_person) }}
                     {{ field("Contact Person's Role", draft.contact_person_role) }}
                     {{ field('Contact Number(s)', draft.contact_number) }}
-                    {{ field('E-Mail Address', draft.email_address) }}
+                    {{ field('E-Mail Address', draft.email_address, email=true) }}
                 </dl>
-                <p class="rv-note">Account: <strong>{{ user.company_name }}</strong> · {{ user.contact_name }} · {{ user.email }} · {{ user.phone }}</p>
+                <p class="rv-note">Account: <strong>{{ user.company_name }}</strong> · {{ user.contact_name }} · <a href="mailto:{{ user.email }}">{{ user.email }}</a> · {{ user.phone }}</p>
             </section>
 
             <section class="rv-section">

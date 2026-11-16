@@ -1,10 +1,10 @@
 {% extends "supplier_base.html" %}
 {% import "admin_macros.html" as ad with context %}
 
-{% macro field(label, value, wide=false, mono=false, link=false) -%}
+{% macro field(label, value, wide=false, mono=false, link=false, email=false) -%}
     <div class="ig-field{% if wide %} ig-field--wide{% endif %}">
         <dt>{{ label }}</dt>
-        <dd{% if mono %} class="ig-mono"{% endif %}>{% if value and link %}<a href="{{ value if value.lower().startswith(('http://', 'https://')) else 'https://' ~ value }}" target="_blank" rel="noopener noreferrer">{{ value }}</a>{% elif value %}{{ value }}{% else %}<span class="ig-muted">—</span>{% endif %}</dd>
+        <dd{% if mono %} class="ig-mono"{% endif %}>{% if value and email %}<a href="mailto:{{ value }}">{{ value }}</a>{% elif value and link %}<a href="{{ value if value.lower().startswith(('http://', 'https://')) else 'https://' ~ value }}" target="_blank" rel="noopener noreferrer">{{ value }}</a>{% elif value %}{{ value }}{% else %}<span class="ig-muted">—</span>{% endif %}</dd>
     </div>
 {%- endmacro %}
 
@@ -52,7 +52,7 @@
             <dl class="ig-fields ig-fields--1">
                 {{ field('Primary contact', [application.primary_contact_person, application.contact_person_role]|select|join(' · ')) }}
                 {{ field('Phone', application.contact_number) }}
-                {{ field('E-mail', application.email_address) }}
+                {{ field('E-mail', application.email_address, email=true) }}
             </dl>
         </section>
     </div>
