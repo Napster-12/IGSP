@@ -65,7 +65,7 @@
         </section>
     {% else %}
         {% set flow = ['submitted', 'under_review', 'decision'] %}
-        {% set stage = 2 if application.status in ['approved', 'on_file', 'declined'] else (1 if application.status in ['under_review', 'returned_for_update'] else 0) %}
+        {% set stage = 2 if application.status in ['approved', 'on_file', 'declined'] else (1 if application.status in ['under_review', 'pending_approval', 'returned_for_update'] else 0) %}
         <div class="ig-grid ig-grid--2-1">
             <section class="ig-card">
                 <div class="ig-card-head">

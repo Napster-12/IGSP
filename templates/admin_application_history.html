@@ -30,7 +30,7 @@
                             {% if event.summary and event.summary != event_labels.get(event.action) and event.action != 'status_changed' %}<p class="ig-event-summary">{{ event.summary }}</p>{% endif %}
                             <p class="ig-event-meta">
                                 <span class="ig-actor ig-actor--{{ event.actor_type }}">{{ event.actor_type|capitalize }}</span>
-                                {{ event.actor_name or '—' }}{% if event.actor_email %} · {{ event.actor_email }}{% endif %}
+                                {{ event.actor_name or '—' }}{% if event.actor_email %} · <a href="mailto:{{ event.actor_email }}">{{ event.actor_email }}</a>{% endif %}
                                 · <time datetime="{{ event.created_at.isoformat() if event.created_at else '' }}">{{ event.created_at.strftime('%d %b %Y, %H:%M') if event.created_at else '' }}</time>
                                 {% if event.ip_address %} · IP {{ event.ip_address }}{% endif %}
                             </p>

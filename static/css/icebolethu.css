@@ -4523,6 +4523,7 @@ a.ig-stat:hover{
 .ig-badge--submitted{ background:var(--surface-2); color:var(--text); }
 .ig-badge--pending_review{ background:var(--accent-light); color:var(--text); }
 .ig-badge--under_review{ background:var(--primary-light); color:var(--primary-text); }
+.ig-badge--pending_approval{ background:var(--success-light); color:var(--success-text); }
 .ig-badge--approved, .ig-badge--active{ background:var(--success-light); color:var(--success-text); }
 .ig-badge--declined{ background:var(--danger-light); color:var(--danger-text); }
 .ig-badge--returned_for_update{ background:var(--primary-tint-2); color:var(--primary-text-2); }
@@ -5076,6 +5077,8 @@ a.ig-stat:hover{
 .ig-badge--pending_review{ background:var(--accent-light); color:var(--brand-black); }
 .ig-badge--pending_review::before{ background:#E0B030; }
 .ig-badge--under_review{ background:var(--primary-light); color:var(--primary-text); }
+.ig-badge--pending_approval{ background:var(--success-light); color:var(--success-text); }
+.ig-badge--pending_approval::before{ background:#E0B030; }
 .ig-badge--returned_for_update{ background:var(--primary-tint-2); color:var(--primary-text-2); }
 .ig-badge--inactive{ background:var(--surface-2); color:var(--text-light); }
 .ig-doc-status--pending{ color:var(--primary-text); }
@@ -5093,6 +5096,7 @@ a.ig-stat:hover{
 .status.submitted, .status-pill.submitted, .application-table .status-pill.submitted, .applications-table .submitted, .admin-badge-submitted{ background:var(--surface-2); color:var(--text); }
 .status.pending_review, .status-pill.pending_review, .application-table .status-pill.pending_review, .applications-table .pending_review, .admin-badge-pending_review{ background:var(--accent-light); color:var(--text); }
 .status.under_review, .status-pill.under_review, .application-table .status-pill.under_review, .applications-table .under_review, .admin-badge-under_review{ background:var(--primary-light); color:var(--primary-text); }
+.status.pending_approval, .status-pill.pending_approval, .application-table .status-pill.pending_approval, .applications-table .pending_approval, .admin-badge-pending_approval{ background:var(--success-light); color:var(--success-text); }
 .status.returned_for_update, .status-pill.returned_for_update, .application-table .status-pill.returned_for_update, .applications-table .returned_for_update, .admin-badge-returned_for_update{ background:var(--primary-tint-2); color:var(--primary-text-2); }
 .status.approved, .status-pill.approved, .application-table .status-pill.approved, .applications-table .approved, .admin-badge-approved{ background:var(--success-light); color:var(--success-text); }
 .status.declined, .status-pill.declined, .application-table .status-pill.declined, .applications-table .declined, .admin-badge-declined{ background:var(--danger-light); color:var(--danger-text); }
@@ -5727,6 +5731,8 @@ a.ig-stat:hover{
 }
 .adm-login-foot p{ margin:0; }
 .adm-login-foot strong{ color:#EF4444; }
+.adm-login-foot a{ color:inherit; text-decoration:underline; text-underline-offset:2px; }
+.adm-login-foot a:hover{ color:#EF4444; }
 @media(max-width:900px){
     .adm-login{ grid-template-columns:1fr; grid-template-rows:1fr auto; min-height:100vh; min-height:100dvh; }
     .adm-login-photo{ display:none; }
@@ -6090,6 +6096,7 @@ body.pdfv-open{ overflow:hidden; }
 .sl-card--submitted{ --sl-accent:var(--text-2); --sl-tint:var(--surface-2); }
 .sl-card--pending_review{ --sl-accent:var(--warning-text-3); --sl-tint:var(--accent-light); }
 .sl-card--under_review{ --sl-accent:var(--primary-text); --sl-tint:var(--primary-light); }
+.sl-card--pending_approval{ --sl-accent:var(--success-text); --sl-tint:var(--success-light); }
 .sl-card--approved{ --sl-accent:var(--success-text); --sl-tint:var(--success-light); }
 .sl-card--on_file{ --sl-accent:var(--teal-text); --sl-tint:var(--teal-light); }
 .sl-card--declined{ --sl-accent:var(--danger-text); --sl-tint:var(--danger-light); }

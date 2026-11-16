@@ -2,10 +2,10 @@
 {% import "admin_macros.html" as ad with context %}
 {% import "form_macros.html" as f with context %}
 
-{% macro field(label, value, wide=false, mono=false, link=false) -%}
+{% macro field(label, value, wide=false, mono=false, link=false, email=false) -%}
     <div class="ig-field{% if wide %} ig-field--wide{% endif %}">
         <dt>{{ label }}</dt>
-        <dd{% if mono %} class="ig-mono"{% endif %}>{% if value and link %}<a href="{{ value if value.lower().startswith(('http://', 'https://')) else 'https://' ~ value }}" target="_blank" rel="noopener noreferrer">{{ value }}</a>{% elif value %}{{ value }}{% else %}<span class="ig-muted">—</span>{% endif %}</dd>
+        <dd{% if mono %} class="ig-mono"{% endif %}>{% if value and email %}<a href="mailto:{{ value }}">{{ value }}</a>{% elif value and link %}<a href="{{ value if value.lower().startswith(('http://', 'https://')) else 'https://' ~ value }}" target="_blank" rel="noopener noreferrer">{{ value }}</a>{% elif value %}{{ value }}{% else %}<span class="ig-muted">—</span>{% endif %}</dd>
     </div>
 {%- endmacro %}
 
@@ -56,8 +56,8 @@
                     <dl class="ig-fields ig-fields--1">
                         {{ field('Primary contact', [application.primary_contact_person, application.contact_person_role]|select|join(' · ')) }}
                         {{ field('Phone', application.contact_number or application.phone) }}
-                        {{ field('E-mail', application.email_address) }}
-                        {{ field('Account login', application.email) }}
+                        {{ field('E-mail', application.email_address, email=true) }}
+                        {{ field('Account login', application.email, email=true) }}
                     </dl>
                 </section>
             </div>
@@ -225,10 +225,11 @@
                     </form>
                 {% endif %}
             </section>
-{% if is_mine %}
+{% if can_decide %}
+            {% set final_approver = admin.can_final_approve %}
             <section class="ig-card ig-decision">
                 <div class="ig-card-head">
-                    <h2>Review decision</h2>
+                    <h2>{{ 'Final approval' if application.status == 'pending_approval' and final_approver else 'Review decision' }}</h2>
                     {{ ad.status_badge(application.status) }}
                 </div>
 
@@ -250,6 +251,9 @@
                     </div>
                 {% endif %}
 
+                {% if application.status == 'pending_approval' %}
+                    <p class="ig-hint">{{ 'Reviewed by ' ~ ((owner.name or owner.email) if owner else 'a Procurement Officer') ~ '. Approve to enter the vendor code and issue the certificate.' if final_approver else 'Submitted for final approval. A Procurement Team Lead will approve it and enter the vendor code.' }}</p>
+                {% endif %}
                 <form method="post" action="{{ url_for('update_application', application_id=application.id) }}" id="reviewForm" class="ig-form{% if decline_only %} is-decline-only{% endif %}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
@@ -262,8 +266,13 @@
 
                     <div class="ig-decision-actions">
                         {% set off = ' disabled aria-disabled="true" title="Not available: a director/shareholder is already linked to another supplier"'|safe if decline_only else '' %}
+                        {% if final_approver %}
                         <button type="submit" name="status" value="approved" class="ig-btn ig-btn--success ig-btn--block"
                                 {% if supplier and application.status != 'approved' %}data-needs-vendor-code{% endif %}{{ off }}>Approve</button>
+                        {% elif application.status not in ['pending_approval', 'approved'] %}
+                        <button type="submit" name="status" value="pending_approval" class="ig-btn ig-btn--success ig-btn--block" data-comment-step
+                                data-comment-hint="The Procurement Team Lead is asked to give the final approval and enter the vendor code. The supplier isn't notified until they decide."{{ off }}>Submit for final approval</button>
+                        {% endif %}
                         <button type="submit" name="status" value="on_file" class="ig-btn ig-btn--onfile ig-btn--block" data-comment-step
                                 data-comment-hint="Everything is in order. The supplier is told their details are kept on file and that we'll contact them when needed."
                                 {% if not decline_only %}title="Everything is in order. The supplier is told their details are kept on file and that we'll contact them when needed."{% endif %}{{ off }}>Accept &amp; keep on file</button>
@@ -292,7 +301,7 @@ Your application cannot be accepted because {{ flagged_names|join(', ') }} {{ 'i
                         </div>
                     </dialog>
 
-                    {% if supplier and application.status != 'approved' %}
+                    {% if final_approver and supplier and application.status != 'approved' %}
                         {#- Opened by the Approve button: the vendor code is printed on the supplier's certificate. -#}
                         <dialog class="ig-dialog" id="vendorDialog" aria-labelledby="vendorDialogTitle">
                             <h2 id="vendorDialogTitle">Approve {{ application.company_name }}</h2>
